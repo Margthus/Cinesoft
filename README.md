@@ -1,5 +1,3 @@
-<img width="1919" height="999" alt="sf" src="https://github.com/user-attachments/assets/ae89d5bc-21d0-43dc-add4-4fc912f597c8" />
-
 # CineSoft
 
 CineSoft is a desktop application developed for searching sources and downloading torrents for movies, TV shows, and anime.
@@ -22,6 +20,28 @@ For now, CineSoft is focused only on torrent downloading. Media player and strea
 - Prowlarr-based source search support
 
 ---
+## Screenshots
+
+### Home & Movies
+
+<p align="center">
+  <img src="screenshots/home.png" width="49%" />
+  <img src="screenshots/movies.png" width="49%" />
+</p>
+
+### Detail Page
+
+<p align="center">
+  <img src="screenshots/detail-overview.png" width="49%" />
+  <img src="screenshots/detail-media.png" width="49%" />
+</p>
+
+### Settings
+
+<p align="center">
+  <img src="screenshots/settings-general.png" width="49%" />
+  <img src="screenshots/settings-prowlarr.png" width="49%" />
+</p>
 
 ## Requirements
 
@@ -127,6 +147,28 @@ Uygulama; içerik arama, detay görüntüleme, kaynak bulma ve torrent indirme a
 - Prowlarr tabanlı kaynak arama desteği
 
 ---
+## Screenshots
+
+### Home & Movies
+
+<p align="center">
+  <img src="screenshots/home.png" width="49%" />
+  <img src="screenshots/movies.png" width="49%" />
+</p>
+
+### Detail Page
+
+<p align="center">
+  <img src="screenshots/detail-overview.png" width="49%" />
+  <img src="screenshots/detail-media.png" width="49%" />
+</p>
+
+### Settings
+
+<p align="center">
+  <img src="screenshots/settings-general.png" width="49%" />
+  <img src="screenshots/settings-prowlarr.png" width="49%" />
+</p>
 
 ## Gereksinimler
 
