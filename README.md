@@ -37,7 +37,7 @@ To run CineSoft, the following must be installed on your computer:
 Clone the project to your computer:
 
 ```bash
-git clone https://github.com/Margthus/Cinesoft.git
+git clone https://github.com/Margthus/Cinesoft
 cd Cinesoft
 ```
 
@@ -126,7 +126,7 @@ CineSoft’u çalıştırmak için bilgisayarınızda şunlar kurulu olmalıdır
 Projeyi bilgisayarınıza klonlayın:
 
 ```powershell
-git clone https://github.com/Margthus/Cinesoft.git
+git clone https://github.com/Margthus/Cinesoft
 cd Cinesoft
 ```
 
