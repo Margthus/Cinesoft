@@ -1,3 +1,7 @@
+## Download
+
+👉 https://github.com/Margthus/Cinesoft/releases/latest
+
 # CineSoft
 
 CineSoft is a desktop application developed for searching sources and downloading torrents for movies, TV shows, and anime.
