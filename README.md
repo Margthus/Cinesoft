@@ -1,11 +1,11 @@
 <img width="1919" height="999" alt="sf" src="https://github.com/user-attachments/assets/ae89d5bc-21d0-43dc-add4-4fc912f597c8" />
 
-# 🎬 CineSoft
+# CineSoft
 
-**CineSoft** is a desktop application developed for searching sources and downloading torrents for movies, TV shows, and anime.
+CineSoft is a desktop application developed for searching sources and downloading torrents for movies, TV shows, and anime.
 
-The application brings together content search, detail viewing, source discovery, and torrent downloading in a single interface.  
-CineSoft for now focused solely on **torrent downloading**.
+The application brings content search, detail viewing, source discovery, and torrent downloading together in a single interface.  
+For now, CineSoft is focused only on torrent downloading. Media player and streaming features are not included.
 
 ---
 
@@ -23,41 +23,49 @@ CineSoft for now focused solely on **torrent downloading**.
 
 ---
 
-## 📦 Requirements
+## Requirements
 
 To run CineSoft, the following must be installed on your computer:
 
 - [Node.js](https://nodejs.org/)
 - [Git](https://git-scm.com/)
 - Windows operating system
-- Prowlarr files
+- Prowlarr files, optional for source search
 
 ---
 
-## 🚀 Installation
+## Installation
 
 Clone the project to your computer:
 
-```bash
+```powershell
 git clone https://github.com/Margthus/Cinesoft
 cd Cinesoft
 ```
 
 Install the dependencies:
 
-```bash
+```powershell
 npm install
 ```
 
-## 1. Prowlarr Setup (Optional)
+---
 
-Go to the Prowlarr GitHub page: https://github.com/Prowlarr/Prowlarr
+## 1. Prowlarr Setup Optional
 
-Then, open the **Releases** section and download the appropriate `.zip` file for Windows.
+Go to the Prowlarr GitHub page:
+
+https://github.com/Prowlarr/Prowlarr
+
+Then open the Releases section and download the appropriate `.zip` file for Windows.
+
+---
 
 ## 2. Extract the ZIP File
 
 Extract the downloaded Prowlarr ZIP file.
+
+---
 
 ## 3. Place the Files Inside the Resources Folder
 
@@ -79,22 +87,30 @@ Cinesoft/
 The `resources/prowlarr/` folder is not included in the repository.  
 This folder must be created manually by the user.
 
-## ▶️ Starting the Application
+---
 
-After placing the Prowlarr files, start the application with:
+## Starting the Application
 
-```bash
+After installing the dependencies, start the application with:
+
+```powershell
 npm start
 ```
 
-<TÜRKÇE>
+If you want to use Prowlarr-based source search, make sure the Prowlarr files are placed inside:
 
-# 🎬 CineSoft
+```text
+resources/prowlarr/
+```
 
-**CineSoft**, film, dizi ve anime içerikleri için geliştirilmiş masaüstü kaynak arama ve torrent indirme uygulamasıdır.
+---
+
+# Türkçe
+
+CineSoft, film, dizi ve anime içerikleri için geliştirilmiş masaüstü kaynak arama ve torrent indirme uygulamasıdır.
 
 Uygulama; içerik arama, detay görüntüleme, kaynak bulma ve torrent indirme akışını tek bir arayüzde toplar.  
-Şuanlık izleme/player tarafı yoktur; CineSoft sadece **torrent indirme** odaklı çalışır.
+Şimdilik CineSoft yalnızca torrent indirme odaklı çalışır. Medya oynatıcı ve izleme özellikleri dahil değildir.
 
 ---
 
@@ -112,18 +128,18 @@ Uygulama; içerik arama, detay görüntüleme, kaynak bulma ve torrent indirme a
 
 ---
 
-## 📦 Gereksinimler
+## Gereksinimler
 
 CineSoft’u çalıştırmak için bilgisayarınızda şunlar kurulu olmalıdır:
 
 - [Node.js](https://nodejs.org/)
 - [Git](https://git-scm.com/)
 - Windows işletim sistemi
-- Prowlarr dosyaları
+- Kaynak arama için isteğe bağlı Prowlarr dosyaları
 
 ---
 
-## 🚀 Kurulum
+## Kurulum
 
 Projeyi bilgisayarınıza klonlayın:
 
@@ -138,15 +154,23 @@ Bağımlılıkları kurun:
 npm install
 ```
 
-## 1. Prowlarr Kurulumu (İsteğe Bağlı)
+---
 
-Prowlarr GitHub sayfasına gidin: https://github.com/Prowlarr/Prowlarr
+## 1. Prowlarr Kurulumu İsteğe Bağlı
 
-Ardından **Releases** bölümünden Windows için uygun `.zip` dosyasını indirin.
+Prowlarr GitHub sayfasına gidin:
+
+https://github.com/Prowlarr/Prowlarr
+
+Ardından Releases bölümünden Windows için uygun `.zip` dosyasını indirin.
+
+---
 
 ## 2. ZIP Dosyasını Çıkartın
 
 İndirdiğiniz Prowlarr ZIP dosyasını çıkartın.
+
+---
 
 ## 3. Dosyaları Resources Klasörüne Yerleştirin
 
@@ -168,10 +192,18 @@ Cinesoft/
 `resources/prowlarr/` klasörü repoya dahil edilmez.  
 Bu klasör kullanıcı tarafından manuel olarak oluşturulmalıdır.
 
-## ▶️ Uygulamayı Başlatma
+---
 
-Prowlarr dosyalarını yerleştirdikten sonra uygulamayı şu komutla başlatın:
+## Uygulamayı Başlatma
+
+Bağımlılıkları kurduktan sonra uygulamayı şu komutla başlatın:
 
 ```powershell
 npm start
+```
+
+Prowlarr tabanlı kaynak aramayı kullanmak istiyorsanız Prowlarr dosyalarının şu klasöre yerleştirildiğinden emin olun:
+
+```text
+resources/prowlarr/
 ```
