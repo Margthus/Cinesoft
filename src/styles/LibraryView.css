@@ -1,0 +1,103 @@
+.library-view {
+  padding: 2.5rem;
+}
+
+.library-header h1 {
+  margin: 0;
+  font-size: 2.3rem;
+}
+
+.library-header p {
+  margin: 0.4rem 0 1.5rem;
+  color: var(--text-muted);
+}
+
+.library-root {
+  display: inline-block;
+  margin-top: -0.8rem;
+  margin-bottom: 1rem;
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 1.15rem;
+}
+
+.library-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+
+.library-poster {
+  position: relative;
+  aspect-ratio: 2/3;
+  background: #121418;
+}
+
+.library-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-poster-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.library-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.45);
+  transition: opacity 0.18s ease;
+}
+
+.library-card:hover .library-play-overlay {
+  opacity: 1;
+}
+
+.library-meta {
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.library-meta strong,
+.library-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-meta span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.library-empty {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  color: var(--text-muted);
+}
