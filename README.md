@@ -1,3 +1,5 @@
+<img width="1919" height="999" alt="sf" src="https://github.com/user-attachments/assets/ae89d5bc-21d0-43dc-add4-4fc912f597c8" />
+
 # 🎬 CineSoft
 
 **CineSoft** is a desktop application developed for searching sources and downloading torrents for movies, TV shows, and anime.
