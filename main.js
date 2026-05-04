@@ -1156,9 +1156,8 @@ ipcMain.handle('torrent-validate-candidate', async (event, payload = {}) => {
     result.checks.size = passSize ? 'pass' : 'fail';
     if (passSize) result.score += 10; else result.reasons.push('size_too_small');
   }
-  if (result.reasons.includes('episode_mismatch') || result.reasons.includes('year_mismatch')) {
-    result.ok = false;
-  }
+  if (result.reasons.includes('episode_mismatch'))
+{
   return result;
 });
 
