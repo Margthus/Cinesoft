@@ -1149,15 +1149,18 @@ ipcMain.handle('torrent-validate-candidate', async (event, payload = {}) => {
     result.checks.episode = passEp ? 'pass' : 'fail';
     if (passEp) result.score += 30; else result.reasons.push('episode_mismatch');
   }
-  const size = Number(payload.size) || 0;
+    const size = Number(payload.size) || 0;
   if (size > 0) {
     const gib = size / (1024 ** 3);
     const passSize = gib > 0.2;
     result.checks.size = passSize ? 'pass' : 'fail';
     if (passSize) result.score += 10; else result.reasons.push('size_too_small');
   }
-  if (result.reasons.includes('episode_mismatch'))
-{
+
+  if (result.reasons.includes('episode_mismatch')) {
+    result.ok = false;
+  }
+
   return result;
 });
 
