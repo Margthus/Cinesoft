@@ -195,6 +195,7 @@
 .source-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   background-color: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -286,6 +287,7 @@
 
 .source-main {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -306,10 +308,12 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.source-badges span {
+.source-badges .source-badge {
   background: rgba(0, 255, 204, 0.08);
   border: 1px solid rgba(0, 255, 204, 0.2);
   color: var(--accent);
@@ -317,6 +321,16 @@
   padding: 0.35rem 0.55rem;
   font-size: 0.82rem;
   font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.source-badges .source-badge-seeders {
+  min-width: 110px;
+}
+
+.source-badges span:not(.source-badge) {
+  display: none;
 }
 
 .section-header {
@@ -534,9 +548,11 @@
 @media (max-width: 760px) {
   .source-row {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .source-badges {
+    margin-left: 0;
     justify-content: flex-start;
   }
 }
