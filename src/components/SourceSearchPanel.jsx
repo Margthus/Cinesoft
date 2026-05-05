@@ -743,9 +743,9 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                   <span className="source-subtitle">{source.provider} / {source.sourceType}</span>
                 </div>
                 <div className="source-badges">
-                  <span>{source.quality}</span>
-                  <span>{formatSize(source.size)}</span>
-                  <span>{source.seeders} seed</span>
+                  <span className="source-badge">{source.quality || '-'}</span>
+                  <span className="source-badge">{formatSize(source.size)}</span>
+                  <span className="source-badge source-badge-seeders">{source.seeders ?? 0} seed</span>
                   {source.languages.map((language) => <span key={language}>{language}</span>)}
                 </div>
                 {hasTorrentData && (

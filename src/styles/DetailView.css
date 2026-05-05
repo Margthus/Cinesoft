@@ -314,19 +314,20 @@
 }
 
 .source-badges .source-badge {
-  background: rgba(0, 255, 204, 0.08);
-  border: 1px solid rgba(0, 255, 204, 0.2);
-  color: var(--accent);
-  border-radius: 6px;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.82rem;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel) 88%);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text) 20%);
+  border-radius: 8px;
+  padding: 0.34rem 0.58rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-align: center;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .source-badges .source-badge-seeders {
-  min-width: 110px;
+  min-width: 96px;
 }
 
 .source-badges span:not(.source-badge) {
