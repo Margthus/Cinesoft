@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchTVShows, fetchGenres, fetchByGenre, fetchByKeyword } from '../utils/tmdb';
-import { Plus, Star, Check, ChevronDown, Filter } from 'lucide-react';
+import { Plus, Star, ChevronDown, Filter } from 'lucide-react';
 import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
@@ -128,11 +128,12 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
   };
 
   const openStatusMenu = (event, item) => {
-    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     setStatusMenu({
       open: true,
-      x: event.clientX,
-      y: event.clientY,
+      x: rect.right - 220,
+      y: rect.bottom + 8,
       item,
       status: getItemStatus(item),
     });
@@ -215,7 +216,6 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
               key={`${show.id}-${index}`} 
               className="movie-item" 
               onClick={() => handleInspect(show)}
-              onContextMenu={(event) => openStatusMenu(event, show)}
               ref={isLast ? lastShowRef : null}
             >
               <div className="movie-card">
@@ -225,9 +225,9 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
                 </div>
                 <div 
                   className={`card-add ${myList.some(i => i.id === show.id) ? 'active' : ''}`} 
-                  onClick={(e) => { e.stopPropagation(); onToggleMyList(show); }}
+                  onClick={(e) => openStatusMenu(e, show)}
                 >
-                  {myList.some(i => i.id === show.id) ? <Check size={18} /> : <Plus size={18} />}
+                  <Plus size={18} />
                 </div>
                 <img 
                   src={posterUrl} 

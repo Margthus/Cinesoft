@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { searchContent, fetchPersonCredits } from '../utils/tmdb';
-import { Star, Plus, Check, Search, X } from 'lucide-react';
+import { Star, Plus, Search, X } from 'lucide-react';
 import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
@@ -88,12 +88,13 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
   };
 
   const openStatusMenu = (event, item) => {
-    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     const fallbackType = item.media_type || (item.title ? 'movie' : 'tv');
     setStatusMenu({
       open: true,
-      x: event.clientX,
-      y: event.clientY,
+      x: rect.right - 220,
+      y: rect.bottom + 8,
       item,
       fallbackType,
       status: getItemStatus(item, fallbackType),
@@ -139,7 +140,7 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
       ) : searchState.results.length > 0 ? (
         <div className="list-grid">
           {searchState.results.map(item => (
-            <div key={item.id} className="movie-item" onClick={() => handleInspect(item)} onContextMenu={(event) => openStatusMenu(event, item)}>
+            <div key={item.id} className="movie-item" onClick={() => handleInspect(item)}>
               <div className="movie-card">
                 <div className="card-rating">
                   <Star size={12} fill="var(--accent)" />
@@ -147,9 +148,9 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
                 </div>
                 <div 
                   className={`card-add ${myList.some(i => i.id === item.id) ? 'active' : ''}`} 
-                  onClick={(e) => { e.stopPropagation(); onToggleMyList(item); }}
+                  onClick={(e) => openStatusMenu(e, item)}
                 >
-                  {myList.some(i => i.id === item.id) ? <Check size={18} /> : <Plus size={18} />}
+                  <Plus size={18} />
                 </div>
                 <img 
                   src={`https://image.tmdb.org/t/p/w500${item.poster_path}`} 

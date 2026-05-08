@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
 const STATUS_OPTIONS = [
+  { key: 'later', tr: 'Izlemek istiyorum', en: 'Want to Watch' },
   { key: 'watched', tr: 'Izledim', en: 'Watched' },
-  { key: 'later', tr: 'Sonra izleyecegim', en: 'Watch Later' },
   { key: 'dropped', tr: 'Biraktim', en: 'Dropped' },
 ];
 

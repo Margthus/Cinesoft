@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, ChevronDown, Filter, Plus, Star } from 'lucide-react';
+import { ChevronDown, Filter, Plus, Star } from 'lucide-react';
 import { fetchAnime, getAniListApiUrl } from '../utils/anilist';
 import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
@@ -117,11 +117,12 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
   };
 
   const openStatusMenu = (event, item) => {
-    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     setStatusMenu({
       open: true,
-      x: event.clientX,
-      y: event.clientY,
+      x: rect.right - 220,
+      y: rect.bottom + 8,
       item,
       status: getItemStatus(item),
     });
@@ -180,7 +181,6 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
               key={`${item.id}-${index}`}
               className="movie-item"
               onClick={() => navigate(`/detail/anime/${encodeURIComponent(item.id)}`, { state: { fallbackItem: item } })}
-              onContextMenu={(event) => openStatusMenu(event, item)}
               ref={isLast ? lastAnimeRef : null}
             >
               <div className="movie-card">
@@ -190,9 +190,9 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
                 </div>
                 <div
                   className={`card-add ${myList.some((listItem) => listItem.id === item.id) ? 'active' : ''}`}
-                  onClick={(event) => { event.stopPropagation(); onToggleMyList(item); }}
+                  onClick={(event) => openStatusMenu(event, item)}
                 >
-                  {myList.some((listItem) => listItem.id === item.id) ? <Check size={18} /> : <Plus size={18} />}
+                  <Plus size={18} />
                 </div>
                 <img
                   src={posterUrl}

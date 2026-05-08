@@ -100,6 +100,12 @@ const App = () => {
   const setWatchStatus = (item, status, fallbackType = '') => {
     const key = buildWatchStatusKey(item, fallbackType);
     if (!key) return;
+    if (status) {
+      setMyList((prev) => {
+        const exists = prev.some((listItem) => listItem.id === item.id);
+        return exists ? prev : [...prev, item];
+      });
+    }
     setWatchStatusMap((prev) => {
       const next = { ...prev };
       if (!status) {
@@ -152,7 +158,7 @@ const WelcomeOverlay = ({ language = 'tr', onClose }) => {
         <p>{isTr ? 'Kisa bir baslangic rehberi:' : 'Quick start guide:'}</p>
         <ul className="welcome-list">
           <li>{isTr ? 'Filmler, Diziler ve Anime sayfalarindan hizli kesif yap.' : 'Discover content from Movies, TV Shows, and Anime pages.'}</li>
-          <li>{isTr ? 'Poster uzerinde sag tik ile durum etiketi sec: Izledim / Sonra izleyecegim.' : 'Right-click a poster to set status labels: Watched / Watch Later.'}</li>
+          <li>{isTr ? 'Poster sag ustundeki arti ile durum sec: Izlemek Istiyorum / Izledim / Biraktim.' : 'Use the top-right plus on posters to set status: Want to Watch / Watched / Dropped.'}</li>
           <li>{isTr ? 'Detay sayfasinda Kaynak Ara ile Torrentio veya Prowlarr kaynaklarini listele.' : 'Use Find Sources on detail pages to list Torrentio or Prowlarr sources.'}</li>
           <li>{isTr ? 'Ayarlar ekranindan indirme motoru ve kaynak seceneklerini yonet.' : 'Manage download engine and source options from Settings.'}</li>
         </ul>

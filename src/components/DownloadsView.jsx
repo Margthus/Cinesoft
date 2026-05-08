@@ -7,6 +7,7 @@ import '../styles/Downloads.css';
 
 const DEFAULT_TORRENT_SETTINGS = {
   seedAfterDownload: true,
+  shutdownOnComplete: false,
   maxActiveDownloads: 3,
   dhtEnabled: true,
   lsdEnabled: true,
@@ -356,6 +357,10 @@ const DownloadsView = ({ settings }) => {
               <SettingsRow title={t.announceAllTrackers} description={t.announceAllTrackersDesc}>
                 <Toggle checked={torrentSettings.announceToAllTrackers} onChange={(checked) => updateTorrentSetting({ announceToAllTrackers: checked })} />
               </SettingsRow>
+              <div className="modal-section-title">{t.automation}</div>
+              <SettingsRow title={t.shutdownOnComplete} description={t.shutdownOnCompleteDesc}>
+                <Toggle checked={torrentSettings.shutdownOnComplete} onChange={(checked) => updateTorrentSetting({ shutdownOnComplete: checked })} />
+              </SettingsRow>
             </div>
 
             <div className="torrent-settings-footer">
@@ -530,9 +535,12 @@ const getCopy = (isTr) => isTr ? {
   torrentSettingsHint: 'Kuyruk, seed ve baglanti ayarlarini yonet.',
   seedAfterDownload: 'Indirme bitince seed et',
   seedAfterDownloadDesc: 'Kapaliysa tamamlanan torrent otomatik duraklatilir.',
+  shutdownOnComplete: 'Tum torrentler bitince bilgisayari kapat',
+  shutdownOnCompleteDesc: 'Tumu tamamlandiginda sistem kapanisi planlanir.',
   maxActiveDownloads: 'Aktif indirme sayisi',
   maxActiveDownloadsDesc: 'Limit asilinca sonraki torrentler siraya alinir.',
   network: 'Baglanti',
+  automation: 'Otomasyon',
   dhtDesc: 'Tracker disi es kesfi icin DHT kullan.',
   lsdDesc: 'Yerel agdaki esleri bul.',
   portMapDesc: 'Router port yonlendirmesini otomatik dene.',
@@ -567,9 +575,12 @@ const getCopy = (isTr) => isTr ? {
   torrentSettingsHint: 'Manage queueing, seeding, and network behavior.',
   seedAfterDownload: 'Seed after download completes',
   seedAfterDownloadDesc: 'When disabled, completed torrents are paused automatically.',
+  shutdownOnComplete: 'Shut down computer when all torrents complete',
+  shutdownOnCompleteDesc: 'Schedules a system shutdown once every torrent is completed.',
   maxActiveDownloads: 'Active download limit',
   maxActiveDownloadsDesc: 'Extra torrents are queued when the limit is reached.',
   network: 'Network',
+  automation: 'Automation',
   dhtDesc: 'Use DHT for peer discovery without trackers.',
   lsdDesc: 'Find peers on the local network.',
   portMapDesc: 'Try automatic router port mapping.',

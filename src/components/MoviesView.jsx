@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchMovies, fetchGenres, fetchByGenre, fetchByKeyword } from '../utils/tmdb';
-import { Plus, Star, Check, ChevronDown, Filter } from 'lucide-react';
+import { Plus, Star, ChevronDown, Filter } from 'lucide-react';
 import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
@@ -128,11 +128,12 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
   };
 
   const openStatusMenu = (event, item) => {
-    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     setStatusMenu({
       open: true,
-      x: event.clientX,
-      y: event.clientY,
+      x: rect.right - 220,
+      y: rect.bottom + 8,
       item,
       status: getItemStatus(item),
     });
@@ -215,7 +216,6 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
               key={`${movie.id}-${index}`} 
               className="movie-item" 
               onClick={() => handleInspect(movie)}
-              onContextMenu={(event) => openStatusMenu(event, movie)}
               ref={isLast ? lastMovieRef : null}
             >
               <div className="movie-card">
@@ -225,9 +225,9 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
                 </div>
                 <div 
                   className={`card-add ${myList.some(i => i.id === movie.id) ? 'active' : ''}`} 
-                  onClick={(e) => { e.stopPropagation(); onToggleMyList(movie); }}
+                  onClick={(e) => openStatusMenu(e, movie)}
                 >
-                  {myList.some(i => i.id === movie.id) ? <Check size={18} /> : <Plus size={18} />}
+                  <Plus size={18} />
                 </div>
                 <img 
                   src={posterUrl} 

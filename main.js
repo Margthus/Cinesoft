@@ -30,6 +30,7 @@ const TORRENT_SPEED_LIMIT_KEY = 'torrentDownloadSpeedLimitKbps';
 const TORRENT_SETTINGS_KEY = 'torrentSettings';
 const DEFAULT_TORRENT_SETTINGS = {
   seedAfterDownload: true,
+  shutdownOnComplete: false,
   maxActiveDownloads: 3,
   dhtEnabled: true,
   lsdEnabled: true,
@@ -213,6 +214,25 @@ const saveTorrentSettings = (nextSettings = {}) => {
 };
 
 let torrentRulesInterval = null;
+let shutdownTriggeredForCompletion = false;
+
+const scheduleSystemShutdown = () => {
+  try {
+    if (process.platform === 'win32') {
+      execSync('shutdown /s /t 30', { stdio: 'ignore' });
+      return true;
+    }
+    if (process.platform === 'darwin') {
+      execSync(`osascript -e 'tell app "System Events" to shut down'`, { stdio: 'ignore' });
+      return true;
+    }
+    execSync('shutdown -h +1', { stdio: 'ignore' });
+    return true;
+  } catch (err) {
+    console.error('[Main] Failed to schedule system shutdown:', err.message);
+    return false;
+  }
+};
 
 const enforceTorrentRules = async () => {
   if (!torrentManager) return;
@@ -258,6 +278,15 @@ const enforceTorrentRules = async () => {
       if (desiredActiveIds.has(String(t.id)) && t.paused) {
         await torrentManager.resume(t.id);
       }
+    }
+
+    const hasAnyTorrent = torrents.length > 0;
+    const allComplete = hasAnyTorrent && torrents.every((t) => t.done);
+    if (!settings.shutdownOnComplete || !allComplete) {
+      shutdownTriggeredForCompletion = false;
+    } else if (!shutdownTriggeredForCompletion) {
+      shutdownTriggeredForCompletion = true;
+      scheduleSystemShutdown();
     }
   } catch (err) {
     console.error('[Main] Failed to enforce torrent rules:', err.message);

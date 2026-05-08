@@ -132,11 +132,12 @@ const HomeView = ({ settings, myList, onToggleMyList, watchStatusMap, onSetWatch
   };
 
   const openStatusMenu = (event, item, fallbackType = '') => {
-    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
     setStatusMenu({
       open: true,
-      x: event.clientX,
-      y: event.clientY,
+      x: rect.right - 220,
+      y: rect.bottom + 8,
       item,
       fallbackType,
       status: getItemStatus(item, fallbackType),
@@ -253,7 +254,6 @@ const MovieRow = ({ title, movies, onSelect, myList, onToggleMyList, isAnime, la
             key={movie.id}
             className="movie-item"
             onClick={() => onSelect(movie)}
-            onContextMenu={(event) => onOpenStatusMenu(event, movie, isAnime ? 'anime' : (movie.title ? 'movie' : 'tv'))}
           >
             <div className="movie-card">
               <div className="card-rating">
@@ -262,9 +262,9 @@ const MovieRow = ({ title, movies, onSelect, myList, onToggleMyList, isAnime, la
               </div>
               <div 
                 className={`card-add ${myList.some(i => i.id === movie.id) ? 'active' : ''}`} 
-                onClick={(e) => { e.stopPropagation(); onToggleMyList(movie); }}
+                onClick={(e) => onOpenStatusMenu(e, movie, isAnime ? 'anime' : (movie.title ? 'movie' : 'tv'))}
               >
-                {myList.some(i => i.id === movie.id) ? <Check size={18} /> : <Plus size={18} />}
+                <Plus size={18} />
               </div>
               {isAnime && movie.poster_url ? (
                 <img src={movie.poster_url} alt={movie.name} loading="lazy" />
