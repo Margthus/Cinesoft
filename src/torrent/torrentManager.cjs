@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { app } = require('electron');
 
 class TorrentManager {
   constructor(downloadDir) {
@@ -25,7 +26,9 @@ class TorrentManager {
   }
 
   async _spawn() {
-    const scriptPath = path.join(__dirname, 'torrent_service.py');
+    const scriptPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'torrent', 'torrent_service.py')
+      : path.join(__dirname, 'torrent_service.py');
 
     if (!fs.existsSync(scriptPath)) {
       throw new Error(`Torrent service script not found: ${scriptPath}`);

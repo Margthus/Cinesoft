@@ -105,6 +105,15 @@ const removePersistedDownload = (key) => {
   savePersistedDownloads(current.filter((item) => item.key !== key));
 };
 
+const getManuallyPausedIds = () => {
+  const entries = getPersistedDownloads();
+  return new Set(
+    entries
+      .filter((item) => item?.paused === true && item?.key)
+      .map((item) => String(item.key))
+  );
+};
+
 const getStoredTorrentSpeedLimit = () => {
   const value = Number(store.get(TORRENT_SPEED_LIMIT_KEY));
   return Number.isFinite(value) && value > 0 ? value : 0;
@@ -137,6 +146,7 @@ const enforceTorrentRules = async () => {
     const settings = getTorrentSettings();
     const all = await torrentManager.getAll();
     const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
+    const manuallyPausedIds = getManuallyPausedIds();
     const sorted = [...torrents].sort((a, b) => {
       const aTime = Number(a.addedAt || 0);
       const bTime = Number(b.addedAt || 0);
@@ -159,7 +169,7 @@ const enforceTorrentRules = async () => {
 
     const currentActive = sorted.filter((t) => !t.done && !t.paused).length;
     if (currentActive < settings.maxActiveDownloads) {
-      const pausedQueue = sorted.filter((t) => !t.done && t.paused);
+      const pausedQueue = sorted.filter((t) => !t.done && t.paused && !manuallyPausedIds.has(String(t.id)));
       const toResumeCount = settings.maxActiveDownloads - currentActive;
       for (const t of pausedQueue.slice(0, toResumeCount)) {
         await torrentManager.resume(t.id);
