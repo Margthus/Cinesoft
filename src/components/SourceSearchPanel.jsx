@@ -17,6 +17,22 @@ const formatSize = (bytes) => {
   return `${Math.round(value)} B`;
 };
 
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const hasBlockedKeyword = (text = '', blocked = []) => {
+  const hay = String(text || '').toLowerCase();
+  return blocked.some((token) => {
+    const normalized = String(token || '').trim().toLowerCase();
+    if (!normalized) return false;
+    // Short tokens like "ts" should match as standalone terms, not inside "yts".
+    if (normalized.length <= 2) {
+      const re = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalized)}([^a-z0-9]|$)`, 'i');
+      return re.test(hay);
+    }
+    return hay.includes(normalized);
+  });
+};
+
 const SourceSearchPanel = ({ item, type, settings }) => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
@@ -270,7 +286,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
         if (stream.siteKey !== 'unknown' && enabledSites[stream.siteKey] === false) return false;
         if (!blocked.length) return true;
         const hay = `${stream.title || ''} ${stream.provider || ''}`.toLowerCase();
-        return !blocked.some((token) => hay.includes(token));
+        return !hasBlockedKeyword(hay, blocked);
       }).slice(0, maxResults);
     } catch (e) {
       console.error('Torrentio error', e);

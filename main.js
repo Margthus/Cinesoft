@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -14,11 +14,14 @@ const Store = require('electron-store');
 const store = new Store();
 const { TorrentManager } = require('./src/torrent/torrentManager.cjs');
 const FORCE_SOFTWARE_RENDERING_KEY = 'forceSoftwareRendering';
+const WINDOWS_APP_ID = 'com.margthus.cinesoft';
 
 // Torrent manager - lazy init
 let torrentManager = null;
 let torrentRestorePromise = null;
 let metadataDb = null;
+let completionNotificationBootstrapped = false;
+const completedTorrentNotified = new Set();
 const appLogs = [];
 const MAX_APP_LOGS = 500;
 
@@ -105,6 +108,49 @@ const removePersistedDownload = (key) => {
   savePersistedDownloads(current.filter((item) => item.key !== key));
 };
 
+const notifyTorrentCompleted = (torrent) => {
+  try {
+    if (!Notification.isSupported()) return;
+    const language = store.get('language') || 'tr';
+    const title = language === 'en' ? 'Download Completed' : 'Indirme Tamamlandi';
+    const body = language === 'en'
+      ? `${torrent?.title || torrent?.name || 'Torrent'} is ready.`
+      : `${torrent?.title || torrent?.name || 'Torrent'} hazir.`;
+
+    new Notification({
+      title,
+      body,
+      silent: false,
+    }).show();
+  } catch (err) {
+    console.error('[Main] Failed to show completion notification:', err.message);
+  }
+};
+
+const updateCompletionNotifications = (torrents = []) => {
+  const seenIds = new Set((torrents || []).map((torrent) => String(torrent.id)));
+
+  if (!completionNotificationBootstrapped) {
+    for (const torrent of torrents) {
+      if (torrent?.done) completedTorrentNotified.add(String(torrent.id));
+    }
+    completionNotificationBootstrapped = true;
+    return;
+  }
+
+  for (const torrent of torrents) {
+    const id = String(torrent.id);
+    if (torrent?.done && !completedTorrentNotified.has(id)) {
+      completedTorrentNotified.add(id);
+      notifyTorrentCompleted(torrent);
+    }
+  }
+
+  for (const id of Array.from(completedTorrentNotified)) {
+    if (!seenIds.has(id)) completedTorrentNotified.delete(id);
+  }
+};
+
 const getQueueOrderForKey = (key) => {
   const current = getPersistedDownloads();
   const entry = current.find((item) => String(item.key) === String(key));
@@ -174,6 +220,7 @@ const enforceTorrentRules = async () => {
     const settings = getTorrentSettings();
     const all = await torrentManager.getAll();
     const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
+    updateCompletionNotifications(torrents);
     const manuallyPausedIds = getManuallyPausedIds();
     const sorted = [...torrents].sort((a, b) => {
       const orderA = getQueueOrderForKey(a.id);
@@ -342,6 +389,9 @@ if (!store.has('authSession')) {
 // - Default: keep hardware acceleration for smoother UI.
 // - Fallback: if GPU process crashes, switch to software rendering on next launch.
 const shouldForceSoftwareRendering = store.get(FORCE_SOFTWARE_RENDERING_KEY) === true;
+if (process.platform === 'win32') {
+  app.setAppUserModelId(WINDOWS_APP_ID);
+}
 if (shouldForceSoftwareRendering) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('disable-gpu');
