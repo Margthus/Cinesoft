@@ -13,6 +13,7 @@ try {
 const Store = require('electron-store');
 const store = new Store();
 const { TorrentManager } = require('./src/torrent/torrentManager.cjs');
+const FORCE_SOFTWARE_RENDERING_KEY = 'forceSoftwareRendering';
 
 // Torrent manager - lazy init
 let torrentManager = null;
@@ -290,9 +291,14 @@ if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
 }
 
-// Packaged builds can show a black window on some systems with GPU compositing.
-// Disabling hardware acceleration is a pragmatic stability fix for desktop delivery.
-app.disableHardwareAcceleration();
+// Balanced GPU strategy:
+// - Default: keep hardware acceleration for smoother UI.
+// - Fallback: if GPU process crashes, switch to software rendering on next launch.
+const shouldForceSoftwareRendering = store.get(FORCE_SOFTWARE_RENDERING_KEY) === true;
+if (shouldForceSoftwareRendering) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+}
 
 function createWindow() {
   const windowIconPath = path.join(__dirname, 'build', 'icon.png');
@@ -307,7 +313,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
-      webSecurity: isDevMode,
+      webSecurity: true,
     },
     title: 'Cinesoft',
     autoHideMenuBar: true,
@@ -340,6 +346,13 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('child-process-gone', (_event, details) => {
+  if (details?.type === 'GPU' && details?.reason === 'crashed') {
+    store.set(FORCE_SOFTWARE_RENDERING_KEY, true);
+    console.warn('[Main] GPU process crashed; software rendering will be enabled on next launch.');
+  }
 });
 
 app.on('window-all-closed', async () => {
