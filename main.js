@@ -128,12 +128,24 @@ const notifyTorrentCompleted = (torrent) => {
   }
 };
 
+const isTorrentDownloadCompleted = (torrent) => {
+  if (!torrent || torrent.pendingSelection) return false;
+  const progress = Number(torrent.progress || 0);
+  const totalSize = Number(torrent.totalSize || 0);
+  const downloaded = Number(torrent.downloaded || 0);
+  if (totalSize <= 0) return false;
+  // Require actual payload completion, not just session state.
+  if (progress < 99.9) return false;
+  if (downloaded < totalSize * 0.98) return false;
+  return Boolean(torrent.done);
+};
+
 const updateCompletionNotifications = (torrents = []) => {
   const seenIds = new Set((torrents || []).map((torrent) => String(torrent.id)));
 
   if (!completionNotificationBootstrapped) {
     for (const torrent of torrents) {
-      if (torrent?.done) completedTorrentNotified.add(String(torrent.id));
+      if (isTorrentDownloadCompleted(torrent)) completedTorrentNotified.add(String(torrent.id));
     }
     completionNotificationBootstrapped = true;
     return;
@@ -141,7 +153,7 @@ const updateCompletionNotifications = (torrents = []) => {
 
   for (const torrent of torrents) {
     const id = String(torrent.id);
-    if (torrent?.done && !completedTorrentNotified.has(id)) {
+    if (isTorrentDownloadCompleted(torrent) && !completedTorrentNotified.has(id)) {
       completedTorrentNotified.add(id);
       notifyTorrentCompleted(torrent);
     }
