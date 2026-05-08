@@ -16,6 +16,8 @@ import { normalizeTorrentioConfig } from './utils/torrentio';
 import { WATCH_STATUS_STORAGE_KEY, buildWatchStatusKey } from './utils/watchStatus';
 import './styles/App.css';
 
+const WELCOME_OVERLAY_SEEN_KEY = 'cinesoftWelcomeSeenV1';
+
 const App = () => {
   const [settings, setSettings] = useState({
     apiKey: '',
@@ -36,6 +38,8 @@ const App = () => {
   const [movieState, setMovieState] = useState({ movies: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [tvState, setTvState] = useState({ shows: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [animeState, setAnimeState] = useState({ anime: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
+  const [showWelcome, setShowWelcome] = useState(false);
+
   useEffect(() => {
     const loadSettings = async () => {
       if (window.electronAPI) {
@@ -70,6 +74,8 @@ const App = () => {
       } catch {
         setWatchStatusMap({});
       }
+      const welcomeSeen = localStorage.getItem(WELCOME_OVERLAY_SEEN_KEY) === '1';
+      setShowWelcome(!welcomeSeen);
       setLoading(false);
     };
     loadSettings();
@@ -105,6 +111,11 @@ const App = () => {
     });
   };
 
+  const dismissWelcome = () => {
+    localStorage.setItem(WELCOME_OVERLAY_SEEN_KEY, '1');
+    setShowWelcome(false);
+  };
+
   if (loading) return <div className="loading">Loading...</div>;
 
   return (
@@ -125,8 +136,31 @@ const App = () => {
             <Route path="/settings" element={<SettingsView settings={settings} setSettings={setSettings} />} />
           </Routes>
         </main>
+        {showWelcome && <WelcomeOverlay language={settings.language} onClose={dismissWelcome} />}
       </div>
     </Router>
+  );
+};
+
+const WelcomeOverlay = ({ language = 'tr', onClose }) => {
+  const isTr = language === 'tr';
+
+  return (
+    <div className="welcome-overlay" role="dialog" aria-modal="true">
+      <div className="welcome-card">
+        <h2>{isTr ? 'CineSofta Hos Geldin' : 'Welcome to CineSoft'}</h2>
+        <p>{isTr ? 'Kisa bir baslangic rehberi:' : 'Quick start guide:'}</p>
+        <ul className="welcome-list">
+          <li>{isTr ? 'Filmler, Diziler ve Anime sayfalarindan hizli kesif yap.' : 'Discover content from Movies, TV Shows, and Anime pages.'}</li>
+          <li>{isTr ? 'Poster uzerinde sag tik ile durum etiketi sec: Izledim / Sonra izleyecegim.' : 'Right-click a poster to set status labels: Watched / Watch Later.'}</li>
+          <li>{isTr ? 'Detay sayfasinda Kaynak Ara ile Torrentio veya Prowlarr kaynaklarini listele.' : 'Use Find Sources on detail pages to list Torrentio or Prowlarr sources.'}</li>
+          <li>{isTr ? 'Ayarlar ekranindan indirme motoru ve kaynak seceneklerini yonet.' : 'Manage download engine and source options from Settings.'}</li>
+        </ul>
+        <button className="welcome-btn" onClick={onClose}>
+          {isTr ? 'Baslayalim' : "Let's Start"}
+        </button>
+      </div>
+    </div>
   );
 };
 

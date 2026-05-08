@@ -401,3 +401,59 @@
   justify-content: center;
   color: var(--accent);
 }
+
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.welcome-card {
+  width: min(620px, calc(100vw - 2rem));
+  border-radius: 16px;
+  border: 1px solid var(--border-medium);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--panel) 84%, var(--background) 16%);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+  padding: 1.4rem 1.4rem 1.2rem;
+}
+
+.welcome-card h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  color: var(--text);
+}
+
+.welcome-card p {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+}
+
+.welcome-list {
+  margin: 0.9rem 0 1.1rem;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.45rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.welcome-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.72rem 1rem;
+  font-weight: 800;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+
+.welcome-btn:hover {
+  filter: brightness(1.04);
+}
