@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library, ScrollText } from 'lucide-react';
+import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library } from 'lucide-react';
 import HomeView from './components/HomeView';
 import MoviesView from './components/MoviesView';
 import TVShowsView from './components/TVShowsView';
@@ -11,8 +11,9 @@ import MyListView from './components/MyListView';
 import DownloadsView from './components/DownloadsView';
 import SearchView from './components/SearchView';
 import LibraryView from './components/LibraryView';
-import LogsView from './components/LogsView';
 import { DEFAULT_PROWLARR_CONFIG } from './sources/index.mjs';
+import { normalizeTorrentioConfig } from './utils/torrentio';
+import { WATCH_STATUS_STORAGE_KEY, buildWatchStatusKey } from './utils/watchStatus';
 import './styles/App.css';
 
 const App = () => {
@@ -26,14 +27,11 @@ const App = () => {
       username: 'admin',
       password: 'adminadmin',
     },
-    torrentio: {
-      baseUrl: 'https://torrentio.strem.fun',
-      maxResults: 80,
-      excludeKeywords: 'cam,ts,tc',
-    },
+    torrentio: normalizeTorrentioConfig({}),
   });
   const [loading, setLoading] = useState(true);
   const [myList, setMyList] = useState([]);
+  const [watchStatusMap, setWatchStatusMap] = useState({});
   const [searchState, setSearchState] = useState({ query: '', results: [], inputValue: '' });
   const [movieState, setMovieState] = useState({ movies: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [tvState, setTvState] = useState({ shows: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
@@ -54,11 +52,7 @@ const App = () => {
               username: 'admin',
               password: 'adminadmin',
             },
-            torrentio: savedSettings.torrentio || {
-              baseUrl: 'https://torrentio.strem.fun',
-              maxResults: 80,
-              excludeKeywords: 'cam,ts,tc',
-            },
+            torrentio: normalizeTorrentioConfig(savedSettings.torrentio || {}),
           });
 
           if (savedSettings.prowlarr?.managed && !savedSettings.torrentioEnabled) {
@@ -69,6 +63,13 @@ const App = () => {
 
       const savedList = localStorage.getItem('myList');
       if (savedList) setMyList(JSON.parse(savedList));
+      try {
+        const raw = localStorage.getItem(WATCH_STATUS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        setWatchStatusMap(parsed && typeof parsed === 'object' ? parsed : {});
+      } catch {
+        setWatchStatusMap({});
+      }
       setLoading(false);
     };
     loadSettings();
@@ -78,11 +79,29 @@ const App = () => {
     localStorage.setItem('myList', JSON.stringify(myList));
   }, [myList]);
 
+  useEffect(() => {
+    localStorage.setItem(WATCH_STATUS_STORAGE_KEY, JSON.stringify(watchStatusMap));
+  }, [watchStatusMap]);
+
   const toggleMyList = (item) => {
     setMyList((prev) => {
       const exists = prev.find((i) => i.id === item.id);
       if (exists) return prev.filter((i) => i.id !== item.id);
       return [...prev, item];
+    });
+  };
+
+  const setWatchStatus = (item, status, fallbackType = '') => {
+    const key = buildWatchStatusKey(item, fallbackType);
+    if (!key) return;
+    setWatchStatusMap((prev) => {
+      const next = { ...prev };
+      if (!status) {
+        delete next[key];
+      } else {
+        next[key] = status;
+      }
+      return next;
     });
   };
 
@@ -94,15 +113,14 @@ const App = () => {
         <Sidebar settings={settings} />
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} />} />
-            <Route path="/movies" element={<MoviesView settings={settings} myList={myList} onToggleMyList={toggleMyList} movieState={movieState} setMovieState={setMovieState} />} />
-            <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} />} />
-            <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} />} />
+            <Route path="/" element={<HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+            <Route path="/movies" element={<MoviesView settings={settings} myList={myList} onToggleMyList={toggleMyList} movieState={movieState} setMovieState={setMovieState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+            <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+            <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/downloads" element={<DownloadsView settings={settings} />} />
             <Route path="/library" element={<LibraryView settings={settings} />} />
-            <Route path="/logs" element={<LogsView settings={settings} />} />
-            <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} />} />
-            <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} />} />
+            <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+            <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/detail/:type/:id" element={<DetailView settings={settings} myList={myList} onToggleMyList={toggleMyList} setSearchState={setSearchState} />} />
             <Route path="/settings" element={<SettingsView settings={settings} setSettings={setSettings} />} />
           </Routes>
@@ -117,8 +135,8 @@ const Sidebar = ({ settings }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const t = {
-    tr: { home: 'Ana Sayfa', movies: 'Filmler', tv: 'Diziler', anime: 'Anime', settings: 'Ayarlar', library: 'Kutuphanem', logs: 'Sistem Loglari', myList: 'Listem', downloads: 'Indirilenler' },
-    en: { home: 'Home', movies: 'Movies', tv: 'TV Shows', anime: 'Anime', settings: 'Settings', library: 'Library', logs: 'System Logs', myList: 'My List', downloads: 'Downloads' },
+    tr: { home: 'Ana Sayfa', movies: 'Filmler', tv: 'Diziler', anime: 'Anime', settings: 'Ayarlar', library: 'Kutuphanem', myList: 'Listem', downloads: 'Indirilenler' },
+    en: { home: 'Home', movies: 'Movies', tv: 'TV Shows', anime: 'Anime', settings: 'Settings', library: 'Library', myList: 'My List', downloads: 'Downloads' },
   }[settings.language];
 
   const handleSearch = (e) => {
@@ -167,10 +185,6 @@ const Sidebar = ({ settings }) => {
           <NavLink to="/downloads" className="nav-item">
             <Download size={20} />
             <span>{t.downloads}</span>
-          </NavLink>
-          <NavLink to="/logs" className="nav-item">
-            <ScrollText size={20} />
-            <span>{t.logs}</span>
           </NavLink>
         </div>
       </div>

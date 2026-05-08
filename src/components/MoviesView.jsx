@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchMovies, fetchGenres, fetchByGenre, fetchByKeyword } from '../utils/tmdb';
 import { Plus, Star, Check, ChevronDown, Filter } from 'lucide-react';
+import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
+import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
-const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieState }) => {
+const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [movies, setMovies] = useState(movieState.movies);
   const [category, setCategory] = useState(movieState.category);
@@ -13,6 +15,7 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [page, setPage] = useState(movieState.page);
   const [hasMore, setHasMore] = useState(movieState.hasMore);
+  const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, status: '' });
 
   useEffect(() => {
     const loadGenres = async () => {
@@ -119,6 +122,30 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
     navigate(`/detail/movie/${movie.id}`);
   };
 
+  const getItemStatus = (item) => {
+    const key = buildWatchStatusKey(item, 'movie');
+    return key ? (watchStatusMap?.[key] || '') : '';
+  };
+
+  const openStatusMenu = (event, item) => {
+    event.preventDefault();
+    setStatusMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      item,
+      status: getItemStatus(item),
+    });
+  };
+
+  const closeStatusMenu = () => setStatusMenu({ open: false, x: 0, y: 0, item: null, status: '' });
+
+  const applyStatus = (status) => {
+    if (!statusMenu.item) return;
+    onSetWatchStatus(statusMenu.item, status, 'movie');
+    closeStatusMenu();
+  };
+
   const categories = [
     { id: 'popular', name: settings.language === 'tr' ? 'Popüler' : 'Popular' },
     { id: 'top_rated', name: settings.language === 'tr' ? 'En Çok Oy Alanlar' : 'Top Rated' },
@@ -188,6 +215,7 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
               key={`${movie.id}-${index}`} 
               className="movie-item" 
               onClick={() => handleInspect(movie)}
+              onContextMenu={(event) => openStatusMenu(event, movie)}
               ref={isLast ? lastMovieRef : null}
             >
               <div className="movie-card">
@@ -209,6 +237,7 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
                     e.target.src = placeholder;
                   }}
                 />
+                <PosterStatusBadge status={getItemStatus(movie)} language={settings.language} />
                 <div className="card-overlay">
                 </div>
               </div>
@@ -229,6 +258,7 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
           {emptyMessage}
         </div>
       )}
+      <PosterStatusMenu state={statusMenu} language={settings.language} onClose={closeStatusMenu} onSelect={applyStatus} />
     </div>
   );
 };

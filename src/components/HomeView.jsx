@@ -3,15 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { fetchTrending, fetchMovies, fetchTVShows } from '../utils/tmdb';
 import { getAniListApiUrl } from '../utils/anilist';
 import { Search, Plus, Info, Star, Check } from 'lucide-react';
+import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
+import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/HomeView.css';
 
-const HomeView = ({ settings, myList, onToggleMyList }) => {
+const HomeView = ({ settings, myList, onToggleMyList, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [trending, setTrending] = useState([]);
   const [popularMovies, setPopularMovies] = useState([]);
   const [popularTV, setPopularTV] = useState([]);
   const [popularAnime, setPopularAnime] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, fallbackType: '', status: '' });
 
   useEffect(() => {
     const loadData = async () => {
@@ -123,6 +126,31 @@ const HomeView = ({ settings, myList, onToggleMyList }) => {
     navigate(`/detail/${type}/${item.id}`);
   };
 
+  const getItemStatus = (item, fallbackType = '') => {
+    const key = buildWatchStatusKey(item, fallbackType);
+    return key ? (watchStatusMap?.[key] || '') : '';
+  };
+
+  const openStatusMenu = (event, item, fallbackType = '') => {
+    event.preventDefault();
+    setStatusMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      item,
+      fallbackType,
+      status: getItemStatus(item, fallbackType),
+    });
+  };
+
+  const closeStatusMenu = () => setStatusMenu({ open: false, x: 0, y: 0, item: null, fallbackType: '', status: '' });
+
+  const applyStatus = (status) => {
+    if (!statusMenu.item) return;
+    onSetWatchStatus(statusMenu.item, status, statusMenu.fallbackType);
+    closeStatusMenu();
+  };
+
   const t = {
     tr: {
       popularMovies: 'Popüler Filmler',
@@ -184,6 +212,9 @@ const HomeView = ({ settings, myList, onToggleMyList }) => {
           onSelect={handleInspect}
           myList={myList}
           onToggleMyList={onToggleMyList}
+          language={settings.language}
+          onOpenStatusMenu={openStatusMenu}
+          getItemStatus={getItemStatus}
         />
         <MovieRow 
           title={t.popularTV} 
@@ -191,6 +222,9 @@ const HomeView = ({ settings, myList, onToggleMyList }) => {
           onSelect={handleInspect}
           myList={myList}
           onToggleMyList={onToggleMyList}
+          language={settings.language}
+          onOpenStatusMenu={openStatusMenu}
+          getItemStatus={getItemStatus}
         />
         <MovieRow 
           title={t.popularAnime} 
@@ -199,19 +233,28 @@ const HomeView = ({ settings, myList, onToggleMyList }) => {
           myList={myList}
           onToggleMyList={onToggleMyList}
           isAnime
+          language={settings.language}
+          onOpenStatusMenu={openStatusMenu}
+          getItemStatus={getItemStatus}
         />
       </div>
+      <PosterStatusMenu state={statusMenu} language={settings.language} onClose={closeStatusMenu} onSelect={applyStatus} />
     </div>
   );
 };
 
-const MovieRow = ({ title, movies, onSelect, myList, onToggleMyList, isAnime }) => {
+const MovieRow = ({ title, movies, onSelect, myList, onToggleMyList, isAnime, language, onOpenStatusMenu, getItemStatus }) => {
   return (
     <div className="movie-row">
       <h2 className="row-title">{title}</h2>
       <div className="movies-scroll">
         {movies.map(movie => (
-          <div key={movie.id} className="movie-item" onClick={() => onSelect(movie)}>
+          <div
+            key={movie.id}
+            className="movie-item"
+            onClick={() => onSelect(movie)}
+            onContextMenu={(event) => onOpenStatusMenu(event, movie, isAnime ? 'anime' : (movie.title ? 'movie' : 'tv'))}
+          >
             <div className="movie-card">
               <div className="card-rating">
                 <Star size={12} fill="var(--accent)" />
@@ -232,6 +275,7 @@ const MovieRow = ({ title, movies, onSelect, myList, onToggleMyList, isAnime }) 
                   loading="lazy"
                 />
               )}
+              <PosterStatusBadge status={getItemStatus(movie, isAnime ? 'anime' : (movie.title ? 'movie' : 'tv'))} language={language} />
               <div className="card-overlay">
               </div>
             </div>

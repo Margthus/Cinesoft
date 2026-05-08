@@ -34,6 +34,13 @@
   "build": {
     "extraResources": [
       {
+        "from": "resources/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "resources/prowlarr",
         "to": "resources/prowlarr",
         "filter": [

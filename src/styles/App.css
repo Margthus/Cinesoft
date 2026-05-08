@@ -7,12 +7,12 @@
 
 .sidebar {
   width: 260px;
-  background-color: rgba(10, 10, 10, 0.8);
+  background-color: color-mix(in srgb, var(--background) 75%, var(--panel) 25%);
   backdrop-filter: blur(20px);
   display: flex;
   flex-direction: column;
   padding: 2.5rem 1.2rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  border-right: 1px solid var(--border-soft);
   position: relative;
   z-index: 100;
 }
@@ -26,7 +26,7 @@
   font-size: 1.8rem;
   font-weight: 900;
   letter-spacing: -1px;
-  color: #ffffff;
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 0.2rem;
@@ -34,7 +34,7 @@
 
 .logo-text span {
   color: var(--accent);
-  text-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+  text-shadow: 0 0 20px rgba(var(--accent-rgb), 0.5);
 }
 
 .nav-links {
@@ -49,17 +49,17 @@
   position: relative;
   display: flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border-radius: 12px;
   padding: 0 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-medium);
   transition: all 0.3s ease;
 }
 
 .sidebar-search:focus-within {
   border-color: var(--accent);
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+  background: var(--surface-3);
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.24);
 }
 
 .sidebar-search input {
@@ -67,7 +67,7 @@
   padding: 0.9rem 0.5rem;
   background: none;
   border: none;
-  color: white;
+  color: var(--text);
   font-size: 0.9rem;
   outline: none;
 }
@@ -105,13 +105,13 @@
 }
 
 .nav-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--surface-2);
   color: var(--text);
   padding-left: 1.5rem;
 }
 
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(0, 255, 204, 0.15) 0%, transparent 100%);
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.15) 0%, transparent 100%);
   color: var(--accent);
   font-weight: 700;
 }
@@ -125,7 +125,7 @@
   width: 4px;
   background-color: var(--accent);
   border-radius: 0 4px 4px 0;
-  box-shadow: 0 0 15px var(--accent);
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.55);
 }
 
 .nav-item svg {
@@ -138,7 +138,7 @@
 
 .nav-footer {
   margin-top: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--border-soft);
   padding-top: 1.5rem;
 }
 
@@ -146,8 +146,8 @@
   margin-bottom: 1rem;
   padding: 0.9rem 1rem;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
 }
 
 .sidebar-account-label {
@@ -159,9 +159,9 @@
 
 .sidebar-logout {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-medium);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-1);
   color: var(--text-muted);
   padding: 0.7rem 0.8rem;
   font-weight: 700;
@@ -170,7 +170,7 @@
 
 .sidebar-logout:hover {
   color: var(--accent);
-  border-color: rgba(0, 255, 204, 0.24);
+  border-color: var(--accent-soft-3);
 }
 
 .main-content {
@@ -209,12 +209,12 @@
 
 .btn-primary {
   background-color: var(--accent);
-  color: black;
+  color: var(--text-on-accent);
 }
 
 .btn-secondary {
-  background-color: rgba(255, 255, 255, 0.2);
-  color: white;
+  background-color: var(--surface-4);
+  color: var(--text);
   backdrop-filter: blur(10px);
 }
 
@@ -240,8 +240,8 @@
 }
 
 .movie-item:hover .movie-card {
-  box-shadow: 0 0 30px rgba(0, 255, 204, 0.4);
-  border: 1px solid rgba(0, 255, 204, 0.3);
+  box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.42);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 
 .movie-card img {
@@ -297,7 +297,7 @@
   font-weight: 800;
   color: var(--accent);
   z-index: 5;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-medium);
 }
 
 .card-add {
@@ -312,17 +312,88 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--text);
   z-index: 5;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-medium);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .card-add:hover {
   background-color: var(--accent);
-  color: black;
+  color: var(--text-on-accent);
   transform: scale(1.1);
+}
+
+.poster-status-badge {
+  position: absolute;
+  right: 0.7rem;
+  bottom: 0.7rem;
+  z-index: 6;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border-strong);
+}
+
+.poster-status-badge--watched {
+  background: rgba(20, 167, 80, 0.78);
+}
+
+.poster-status-badge--later {
+  background: rgba(44, 122, 255, 0.78);
+}
+
+.poster-status-badge--dropped {
+  background: rgba(180, 63, 63, 0.82);
+}
+
+.poster-status-menu {
+  position: fixed;
+  z-index: 5000;
+  min-width: 220px;
+  padding: 0.4rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--menu-bg);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+
+.poster-status-menu-title {
+  padding: 0.45rem 0.55rem 0.35rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.poster-status-menu-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.poster-status-menu-item:hover {
+  background: var(--surface-3);
+}
+
+.poster-status-menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.poster-status-menu-item.clear {
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--border-medium);
+  color: var(--danger);
 }
 
 .card-actions {

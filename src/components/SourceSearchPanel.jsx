@@ -5,12 +5,16 @@ import {
   searchStreamSourcesForEpisode,
   searchStreamSourcesForMovie,
 } from '../sources/index.mjs';
+import { detectTorrentioSite, normalizeTorrentioConfig } from '../utils/torrentio';
 import { fetchSeasonDetails, searchContent, fetchDetails } from '../utils/tmdb';
 
 const formatSize = (bytes) => {
-  if (!bytes) return '-';
-  const gib = bytes / (1024 ** 3);
-  return `${gib.toFixed(gib >= 10 ? 0 : 1)} GB`;
+  const value = Number(bytes) || 0;
+  if (value <= 0) return '0 B';
+  if (value >= 1024 ** 3) return `${(value / (1024 ** 3)).toFixed(2)} GB`;
+  if (value >= 1024 ** 2) return `${(value / (1024 ** 2)).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${Math.round(value)} B`;
 };
 
 const SourceSearchPanel = ({ item, type, settings }) => {
@@ -27,7 +31,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   const [searched, setSearched] = useState(false);
   const [qualityFilter, setQualityFilter] = useState('all');
   const [indexerFilter, setIndexerFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('seeders');
+  const [sortBy, setSortBy] = useState(normalizeTorrentioConfig(settings?.torrentio || {}).sortBy || 'seeders');
   const [sourceSearchQuery, setSourceSearchQuery] = useState('');
   const [actionLoading, setActionLoading] = useState({});
   const [filePickerOpen, setFilePickerOpen] = useState(false);
@@ -41,6 +45,11 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   const activeCount = prowlarrConfig.enabled ? 1 : 0;
   const isEpisodic = type === 'tv' || type === 'anime';
 
+  useEffect(() => {
+    if (!settings?.torrentioEnabled) return;
+    const nextSort = normalizeTorrentioConfig(settings?.torrentio || {}).sortBy || 'seeders';
+    setSortBy(nextSort);
+  }, [settings?.torrentioEnabled, settings?.torrentio?.sortBy]);
   useEffect(() => {
     if (isEpisodic && item?.id) {
       const loadSeason = async () => {
@@ -161,13 +170,38 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   };
 
   const parseTorrentioSize = (title) => {
-    const match = title.match(/([0-9.]+)\s*(GB|MB)/i);
+    const match = String(title || '').match(/([0-9.]+)\s*(GB|MB|KB)/i);
     if (!match) return 0;
     const value = parseFloat(match[1]);
     const unit = match[2].toUpperCase();
     if (unit === 'GB') return value * 1024 * 1024 * 1024;
     if (unit === 'MB') return value * 1024 * 1024;
+    if (unit === 'KB') return value * 1024;
     return 0;
+  };
+
+  const parseTorrentioProvider = (titleLines = [], name = '') => {
+    const cogLine = titleLines.find((line) => line.includes('⚙️'));
+    if (cogLine) {
+      const cogMatch = cogLine.match(/⚙️\s*([^\n|]+)/);
+      if (cogMatch?.[1]) return cogMatch[1].trim();
+    }
+
+    const nameLines = String(name || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => line.toLowerCase() !== 'torrentio');
+    if (nameLines.length) return nameLines[0];
+
+    return 'Torrentio';
+  };
+
+  const parseTorrentioSeeders = (titleLines = []) => {
+    const joined = titleLines.join(' ');
+    const seedMatch = joined.match(/👤\s*([0-9]+)/);
+    if (!seedMatch) return 0;
+    return Number(seedMatch[1]) || 0;
   };
 
   const getSearchEpisodeTitle = (episodeNumber, fallbackName = '') => {
@@ -177,12 +211,14 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
   const searchTorrentioSources = async (imdbId, targetSeason, targetEpisode, isMovie) => {
     if (!imdbId) return [];
-    const baseUrl = String(settings?.torrentio?.baseUrl || 'https://torrentio.strem.fun').replace(/\/+$/, '');
-    const maxResults = Math.max(10, Number(settings?.torrentio?.maxResults) || 80);
-    const blocked = String(settings?.torrentio?.excludeKeywords || '')
+    const torrentioConfig = normalizeTorrentioConfig(settings?.torrentio || {});
+    const baseUrl = String(torrentioConfig.baseUrl || 'https://torrentio.strem.fun').replace(/\/+$/, '');
+    const maxResults = Math.max(10, Number(torrentioConfig.maxResults) || 80);
+    const blocked = String(torrentioConfig.excludeKeywords || '')
       .split(',')
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
+    const enabledSites = torrentioConfig.enabledSites || {};
     const url = isMovie
       ? `${baseUrl}/stream/movie/${imdbId}.json`
       : `${baseUrl}/stream/series/${imdbId}:${targetSeason}:${targetEpisode}.json`;
@@ -191,23 +227,19 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       const response = await fetch(url);
       const data = await response.json();
       return (data.streams || []).map((stream, index) => {
-        const titleParts = stream.title ? stream.title.split('\n') : ['Unknown Title'];
-        const qMatch = stream.name ? stream.name.toLowerCase() : '';
+        const titleParts = String(stream.title || '')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        const qMatch = `${stream.name || ''} ${titleParts[0] || ''}`.toLowerCase();
         let quality = 'unknown';
         if (qMatch.includes('2160p') || qMatch.includes('4k')) quality = '2160p';
         else if (qMatch.includes('1080p')) quality = '1080p';
         else if (qMatch.includes('720p')) quality = '720p';
         else if (qMatch.includes('480p')) quality = '480p';
 
-        const providerMatch = titleParts.find(p => p.includes('⚙️'));
-        const provider = providerMatch ? providerMatch.split('⚙️')[1].trim() : (titleParts[0] || 'Torrentio');
-
-        const seedersMatch = titleParts.find(p => p.includes('👤'));
-        let seeders = 0;
-        if (seedersMatch) {
-          const s = seedersMatch.match(/👤\s*(\d+)/);
-          if (s) seeders = parseInt(s[1]);
-        }
+        const provider = parseTorrentioProvider(titleParts, stream.name || '');
+        const seeders = parseTorrentioSeeders(titleParts);
 
         const fallbackTrackers = [
           'udp://tracker.opentrackr.org:1337/announce',
@@ -225,6 +257,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
           id: stream.infoHash || stream.url || `torrentio-${index}`,
           title: titleParts[0] || 'Unknown Release',
           provider,
+          siteKey: detectTorrentioSite(provider, titleParts[0] || ''),
           quality,
           size: parseTorrentioSize(stream.title || ''),
           seeders,
@@ -234,7 +267,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
           magnet: magnetFromUrl || magnetWithTrackers,
         };
       }).filter((stream) => {
-        if (stream.provider.toLowerCase().includes('rutor')) return false;
+        if (stream.siteKey !== 'unknown' && enabledSites[stream.siteKey] === false) return false;
         if (!blocked.length) return true;
         const hay = `${stream.title || ''} ${stream.provider || ''}`.toLowerCase();
         return !blocked.some((token) => hay.includes(token));
@@ -589,7 +622,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
               >
                 <Search size={14} />
-                {settings.language === 'tr' ? 'Sezon Paket İndir' : 'Season Pack'}
+                {settings.language === 'tr' ? 'Sezon Paketini İndir' : 'Season Pack'}
               </button>
             )}
           </div>
@@ -734,7 +767,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
         <div className="source-results">
           {filteredAndSortedResults.map((source) => {
             const isLoadingAction = actionLoading[source.id];
-            const hasTorrentData = source.magnet || source.infoHash || source.torrentUrl;
+            const hasTorrentData = source.magnet || source.infoHash || source.torrentUrl || source.downloadUrl;
 
             return (
               <div className="source-row" key={source.id}>
@@ -743,9 +776,9 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                   <span className="source-subtitle">{source.provider} / {source.sourceType}</span>
                 </div>
                 <div className="source-badges">
-                  <span>{source.quality}</span>
-                  <span>{formatSize(source.size)}</span>
-                  <span>{source.seeders} seed</span>
+                  <span className="source-badge">{source.quality || '-'}</span>
+                  <span className="source-badge">{formatSize(source.size)}</span>
+                  <span className="source-badge source-badge-seeders">{source.seeders ?? 0} seed</span>
                   {source.languages.map((language) => <span key={language}>{language}</span>)}
                 </div>
                 {hasTorrentData && (
@@ -829,3 +862,4 @@ const searchEpisodeSources = (prowlarrConfig, payload) => {
 };
 
 export default SourceSearchPanel;
+

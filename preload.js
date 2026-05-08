@@ -46,4 +46,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   qbittorrentAdd: (opts, qbConfig) => ipcRenderer.invoke('qbittorrent-add', opts, qbConfig),
   selectDownloadDir: () => ipcRenderer.invoke('select-download-dir'),
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
+  isDev: process.env.NODE_ENV === 'development',
 });

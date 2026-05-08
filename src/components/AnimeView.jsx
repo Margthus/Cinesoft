@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronDown, Filter, Plus, Star } from 'lucide-react';
 import { fetchAnime, getAniListApiUrl } from '../utils/anilist';
+import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
+import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
-const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState }) => {
+const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [anime, setAnime] = useState(animeState.anime);
   const [category, setCategory] = useState(animeState.category);
@@ -12,6 +14,7 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [page, setPage] = useState(animeState.page);
   const [hasMore, setHasMore] = useState(animeState.hasMore);
+  const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, status: '' });
 
   useEffect(() => {
     if (anime.length > 0 && animeState.scrollY > 0) {
@@ -108,6 +111,30 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
     ? 'Bu kategori icin anime bulunamadi.'
     : 'No anime titles were found for this category.';
 
+  const getItemStatus = (item) => {
+    const key = buildWatchStatusKey(item, 'anime');
+    return key ? (watchStatusMap?.[key] || '') : '';
+  };
+
+  const openStatusMenu = (event, item) => {
+    event.preventDefault();
+    setStatusMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      item,
+      status: getItemStatus(item),
+    });
+  };
+
+  const closeStatusMenu = () => setStatusMenu({ open: false, x: 0, y: 0, item: null, status: '' });
+
+  const applyStatus = (status) => {
+    if (!statusMenu.item) return;
+    onSetWatchStatus(statusMenu.item, status, 'anime');
+    closeStatusMenu();
+  };
+
   return (
     <div className="list-view">
       <div className="list-header">
@@ -153,6 +180,7 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
               key={`${item.id}-${index}`}
               className="movie-item"
               onClick={() => navigate(`/detail/anime/${encodeURIComponent(item.id)}`, { state: { fallbackItem: item } })}
+              onContextMenu={(event) => openStatusMenu(event, item)}
               ref={isLast ? lastAnimeRef : null}
             >
               <div className="movie-card">
@@ -174,6 +202,7 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
                     event.target.src = placeholder;
                   }}
                 />
+                <PosterStatusBadge status={getItemStatus(item)} language={settings.language} />
                 <div className="card-overlay" />
               </div>
               <span className="movie-title-below">
@@ -192,6 +221,7 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
       {!loading && anime.length === 0 && (
         <div className="no-results">{emptyMessage}</div>
       )}
+      <PosterStatusMenu state={statusMenu} language={settings.language} onClose={closeStatusMenu} onSelect={applyStatus} />
     </div>
   );
 };

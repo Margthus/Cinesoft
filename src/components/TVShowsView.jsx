@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchTVShows, fetchGenres, fetchByGenre, fetchByKeyword } from '../utils/tmdb';
 import { Plus, Star, Check, ChevronDown, Filter } from 'lucide-react';
+import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
+import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
-const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) => {
+const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [shows, setShows] = useState(tvState.shows);
   const [category, setCategory] = useState(tvState.category);
@@ -13,6 +15,7 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [page, setPage] = useState(tvState.page);
   const [hasMore, setHasMore] = useState(tvState.hasMore);
+  const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, status: '' });
 
   useEffect(() => {
     const loadGenres = async () => {
@@ -119,6 +122,30 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) 
     navigate(`/detail/tv/${show.id}`);
   };
 
+  const getItemStatus = (item) => {
+    const key = buildWatchStatusKey(item, 'tv');
+    return key ? (watchStatusMap?.[key] || '') : '';
+  };
+
+  const openStatusMenu = (event, item) => {
+    event.preventDefault();
+    setStatusMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      item,
+      status: getItemStatus(item),
+    });
+  };
+
+  const closeStatusMenu = () => setStatusMenu({ open: false, x: 0, y: 0, item: null, status: '' });
+
+  const applyStatus = (status) => {
+    if (!statusMenu.item) return;
+    onSetWatchStatus(statusMenu.item, status, 'tv');
+    closeStatusMenu();
+  };
+
   const categories = [
     { id: 'popular', name: settings.language === 'tr' ? 'Popüler' : 'Popular' },
     { id: 'top_rated', name: settings.language === 'tr' ? 'En Çok Oy Alanlar' : 'Top Rated' },
@@ -188,6 +215,7 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) 
               key={`${show.id}-${index}`} 
               className="movie-item" 
               onClick={() => handleInspect(show)}
+              onContextMenu={(event) => openStatusMenu(event, show)}
               ref={isLast ? lastShowRef : null}
             >
               <div className="movie-card">
@@ -209,6 +237,7 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) 
                     e.target.src = placeholder;
                   }}
                 />
+                <PosterStatusBadge status={getItemStatus(show)} language={settings.language} />
                 <div className="card-overlay">
                 </div>
               </div>
@@ -229,6 +258,7 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState }) 
           {emptyMessage}
         </div>
       )}
+      <PosterStatusMenu state={statusMenu} language={settings.language} onClose={closeStatusMenu} onSelect={applyStatus} />
     </div>
   );
 };

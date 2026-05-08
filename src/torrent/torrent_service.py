@@ -27,14 +27,7 @@ session = None
 torrents = {}       # info_hash_hex -> { handle, mode, title, media_info, added_at }
 download_dir = ""
 server_port = 0
-file_server_port = 0
-file_server = None
 download_rate_limit = 0
-STREAM_WAIT_TIMEOUT_SECONDS = 180
-STREAM_LOOKAHEAD_PIECES = 32
-STREAM_START_BUFFER_BYTES = 15 * 1024 * 1024
-piece_events = {}   # info_hash_hex -> { piece_index -> Event }
-piece_events_lock = threading.Lock()
 alert_pump_stop = threading.Event()
 DEFAULT_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
@@ -43,8 +36,6 @@ DEFAULT_TRACKERS = [
     "udp://tracker.moeking.me:6969/announce",
     "udp://explodie.org:6969/announce",
 ]
-
-
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -71,144 +62,6 @@ def safe_handle_id(handle):
         return normalize_info_hash(handle.info_hash())
     except Exception:
         return "unknown"
-
-
-def get_piece_event(info_hash_hex, piece_index):
-    with piece_events_lock:
-        torrent_events = piece_events.setdefault(info_hash_hex, {})
-        event = torrent_events.get(piece_index)
-        if event is None:
-            event = threading.Event()
-            torrent_events[piece_index] = event
-        return event
-
-
-def clear_piece_event(info_hash_hex, piece_index):
-    with piece_events_lock:
-        torrent_events = piece_events.get(info_hash_hex)
-        if not torrent_events:
-            return
-        torrent_events.pop(piece_index, None)
-        if not torrent_events:
-            piece_events.pop(info_hash_hex, None)
-
-
-def clear_torrent_piece_events(info_hash_hex):
-    with piece_events_lock:
-        piece_events.pop(info_hash_hex, None)
-
-
-def get_stream_file_context(info_hash_hex):
-    entry = torrents.get(info_hash_hex)
-    if not entry:
-        return None
-
-    handle = entry.get("handle")
-    if not is_handle_valid(handle):
-        return None
-
-    try:
-        ti = handle.torrent_file()
-    except RuntimeError as exc:
-        log_warning("stream_context_torrent_file_failed", torrent=info_hash_hex, error=str(exc))
-        return None
-    if not ti:
-        return None
-
-    files = ti.files()
-    selected_idx = entry.get("selected_file_idx")
-    if selected_idx is not None and 0 <= selected_idx < files.num_files():
-        file_idx = selected_idx
-        file_path = files.file_path(file_idx)
-    else:
-        file_idx, file_path = find_video_file(handle)
-    if file_idx is None:
-        return None
-
-    piece_length = ti.piece_length()
-    file_offset = files.file_offset(file_idx)
-    file_size = files.file_size(file_idx)
-    first_piece = file_offset // piece_length
-    last_piece = min((file_offset + file_size - 1) // piece_length, ti.num_pieces() - 1)
-
-    return {
-        "entry": entry,
-        "handle": handle,
-        "torrent_info": ti,
-        "files": files,
-        "file_idx": file_idx,
-        "file_path": file_path,
-        "file_size": file_size,
-        "file_offset": file_offset,
-        "piece_length": piece_length,
-        "first_piece": first_piece,
-        "last_piece": last_piece,
-    }
-
-
-def count_ready_bytes_from_start(handle, first_piece, last_piece, piece_length, file_size):
-    ready_pieces = 0
-    for piece in range(first_piece, last_piece + 1):
-        try:
-            if not handle.have_piece(piece):
-                break
-        except RuntimeError:
-            break
-        ready_pieces += 1
-    return min(file_size, ready_pieces * piece_length)
-
-
-def pieces_ready(handle, start_piece, end_piece):
-    for piece in range(start_piece, end_piece + 1):
-        try:
-            if not handle.have_piece(piece):
-                return False
-        except RuntimeError:
-            return False
-    return True
-
-
-def stream_ready_state(info_hash_hex):
-    ctx = get_stream_file_context(info_hash_hex)
-    if not ctx:
-        return {"ok": False, "ready": False, "error": "Stream file not ready"}
-
-    handle = ctx["handle"]
-    ti = ctx["torrent_info"]
-    first_piece = ctx["first_piece"]
-    last_piece = ctx["last_piece"]
-    piece_length = ctx["piece_length"]
-    file_size = ctx["file_size"]
-
-    prioritize_for_streaming(handle)
-    sequential_ready_bytes = count_ready_bytes_from_start(handle, first_piece, last_piece, piece_length, file_size)
-    needed_start_bytes = min(STREAM_START_BUFFER_BYTES, file_size)
-    edge_piece_count = max(5, int(((last_piece - first_piece + 1) * 0.02) + 0.999))
-    edge_piece_count = min(edge_piece_count, last_piece - first_piece + 1)
-
-    first_ready = pieces_ready(handle, first_piece, min(first_piece + edge_piece_count - 1, last_piece))
-    last_ready = pieces_ready(handle, max(first_piece, last_piece - edge_piece_count + 1), last_piece)
-    buffer_ready = sequential_ready_bytes >= needed_start_bytes
-    ready = bool(buffer_ready and first_ready and last_ready)
-
-    update_streaming_focus(info_hash_hex, handle, ti, first_piece)
-    for offset, piece in enumerate(range(max(first_piece, last_piece - edge_piece_count + 1), last_piece + 1)):
-        try:
-            handle.piece_priority(piece, 7)
-            handle.set_piece_deadline(piece, offset * 150)
-        except Exception as exc:
-            log_warning("set_tail_piece_deadline_failed", piece=piece, error=str(exc))
-
-    return {
-        "ok": True,
-        "ready": ready,
-        "bufferReady": buffer_ready,
-        "firstReady": first_ready,
-        "lastReady": last_ready,
-        "sequentialReadyBytes": sequential_ready_bytes,
-        "neededStartBytes": needed_start_bytes,
-        "edgePieceCount": edge_piece_count,
-    }
 
 
 def delete_torrent_content(entry):
@@ -263,7 +116,6 @@ def delete_torrent_content(entry):
 def cleanup_torrent_entry(info_hash_hex, remove_from_session=False, delete_files=False):
     entry = torrents.get(info_hash_hex)
     if not entry:
-        clear_torrent_piece_events(info_hash_hex)
         return False
 
     handle = entry.get("handle")
@@ -283,7 +135,6 @@ def cleanup_torrent_entry(info_hash_hex, remove_from_session=False, delete_files
                 error=str(exc),
             )
 
-    clear_torrent_piece_events(info_hash_hex)
     torrents.pop(info_hash_hex, None)
     return True
 
@@ -314,80 +165,6 @@ def shutdown_session_cleanup():
             log_warning("session_pause_failed", error=str(exc))
 
 
-def signal_piece_finished(info_hash_hex, piece_index):
-    with piece_events_lock:
-        torrent_events = piece_events.get(info_hash_hex)
-        if not torrent_events:
-            return
-        event = torrent_events.get(piece_index)
-        if event:
-            event.set()
-
-
-def wait_for_piece(info_hash_hex, handle, piece_index, timeout_seconds=30):
-    try:
-        if handle.have_piece(piece_index):
-            return True
-    except RuntimeError as exc:
-        log_warning("piece_ready_check_failed", torrent=info_hash_hex, piece=piece_index, error=str(exc))
-        return False
-
-    event = get_piece_event(info_hash_hex, piece_index)
-    if event.wait(timeout_seconds):
-        clear_piece_event(info_hash_hex, piece_index)
-        return True
-
-    try:
-        ready = handle.have_piece(piece_index)
-    except RuntimeError as exc:
-        log_warning("piece_ready_recheck_failed", torrent=info_hash_hex, piece=piece_index, error=str(exc))
-        ready = False
-    if ready:
-        clear_piece_event(info_hash_hex, piece_index)
-        return True
-    log_warning("piece_ready_timeout", torrent=info_hash_hex, piece=piece_index, timeoutSeconds=timeout_seconds)
-    return False
-
-
-def set_sequential_mode(handle, enabled):
-    try:
-        handle.set_sequential_download(bool(enabled))
-    except Exception as exc:
-        log_warning("set_sequential_download_failed", enabled=bool(enabled), error=str(exc))
-    try:
-        if enabled:
-            handle.set_flags(lt.torrent_flags.sequential_download)
-        else:
-            handle.unset_flags(lt.torrent_flags.sequential_download)
-    except Exception as exc:
-        log_warning("set_sequential_flag_failed", enabled=bool(enabled), error=str(exc))
-
-
-def update_streaming_focus(info_hash_hex, handle, ti, current_piece, sequential=True):
-    entry = torrents.get(info_hash_hex)
-    if not entry:
-        return
-
-    entry["last_stream_piece"] = current_piece
-
-    try:
-        num_pieces = ti.num_pieces()
-        set_sequential_mode(handle, sequential)
-        handle.piece_priority(current_piece, 7)
-        lookahead_end = min(current_piece + STREAM_LOOKAHEAD_PIECES, num_pieces)
-        for piece in range(current_piece + 1, lookahead_end):
-            handle.piece_priority(piece, 7)
-        for piece in range(max(0, current_piece - 2), current_piece):
-            handle.piece_priority(piece, 7)
-        for offset, piece in enumerate(range(current_piece, min(current_piece + STREAM_LOOKAHEAD_PIECES, num_pieces))):
-            try:
-                handle.set_piece_deadline(piece, offset * 150)
-            except Exception as exc:
-                log_warning("set_piece_deadline_failed", piece=piece, error=str(exc))
-    except RuntimeError as exc:
-        log_warning("update_streaming_focus_failed", torrent=info_hash_hex, piece=current_piece, error=str(exc))
-
-
 def alert_pump():
     while not alert_pump_stop.is_set():
         try:
@@ -410,12 +187,6 @@ def alert_pump():
         for item in alerts:
             try:
                 category_name = item.what()
-                if category_name == "piece finished":
-                    info_hash_hex = normalize_info_hash(item.handle.info_hash())
-                    signal_piece_finished(info_hash_hex, item.piece_index)
-                elif category_name == "torrent removed":
-                    info_hash_hex = normalize_info_hash(item.info_hash)
-                    clear_torrent_piece_events(info_hash_hex)
             except Exception as exc:
                 log_warning("alert_processing_failed", error=str(exc))
 
@@ -443,7 +214,6 @@ def init_session():
         lt.alert.category_t.error_notification |
         lt.alert.category_t.storage_notification
     ))
-    # Streaming optimizations
     safe_set('strict_end_game_mode', False)
     safe_set('request_timeout', 5)
     safe_set('peer_timeout', 30)
@@ -595,29 +365,39 @@ def find_video_file(handle):
     if not ti:
         return None, None
     files = ti.files()
-    best_idx = -1
-    best_size = -1
-    best_rank = 999
-    for i in range(files.num_files()):
-        name = files.file_path(i)
-        lower = name.lower()
-        ext = next((e for e in video_exts if lower.endswith(e)), None)
-        if not ext:
-            continue
-        size = files.file_size(i)
-        rank = ext_rank.get(ext, 999)
-        codec_penalty = 0
-        if any(x in lower for x in ('x265', 'hevc', 'h.265', 'h265', '10bit', 'dolby vision', 'dv')):
-            codec_penalty = 4
-        if any(x in lower for x in ('x264', 'h264', 'avc')):
-            codec_penalty = -1
-        effective_rank = rank + codec_penalty
-        if effective_rank < best_rank or (effective_rank == best_rank and size > best_size):
-            best_rank = effective_rank
-            best_size = size
-            best_idx = i
-    if best_idx >= 0:
-        return best_idx, files.file_path(best_idx)
+    exclude_re = re.compile(r"(sample|trailer|extras?|featurette|behind[\s._-]?the[\s._-]?scenes|clip)")
+
+    def choose(skip_extras):
+        best_idx = -1
+        best_size = -1
+        best_rank = 999
+        for i in range(files.num_files()):
+            name = files.file_path(i)
+            lower = name.lower()
+            if skip_extras and exclude_re.search(lower):
+                continue
+            ext = next((e for e in video_exts if lower.endswith(e)), None)
+            if not ext:
+                continue
+            size = files.file_size(i)
+            rank = ext_rank.get(ext, 999)
+            codec_penalty = 0
+            if any(x in lower for x in ('x265', 'hevc', 'h.265', 'h265', '10bit', 'dolby vision', 'dv')):
+                codec_penalty = 4
+            if any(x in lower for x in ('x264', 'h264', 'avc')):
+                codec_penalty = -1
+            effective_rank = rank + codec_penalty
+            if effective_rank < best_rank or (effective_rank == best_rank and size > best_size):
+                best_rank = effective_rank
+                best_size = size
+                best_idx = i
+        return best_idx
+
+    selected_idx = choose(skip_extras=True)
+    if selected_idx < 0:
+        selected_idx = choose(skip_extras=False)
+    if selected_idx >= 0:
+        return selected_idx, files.file_path(selected_idx)
     return None, None
 
 
@@ -662,64 +442,6 @@ def list_video_files(handle):
     for item in out:
         item.pop("nameLower", None)
     return out
-
-
-def prioritize_for_streaming(handle):
-    """Set piece priorities for streaming — prioritize beginning and end of video file."""
-    if not is_handle_valid(handle):
-        return
-    try:
-        ti = handle.torrent_file()
-    except RuntimeError as exc:
-        log_warning("prioritize_torrent_file_failed", torrent=safe_handle_id(handle), error=str(exc))
-        return
-    if not ti:
-        return
-    entry = None
-    for item in torrents.values():
-        if item.get("handle") == handle:
-            entry = item
-            break
-
-    selected_idx = entry.get("selected_file_idx") if entry else None
-    if selected_idx is not None and 0 <= selected_idx < ti.files().num_files():
-        file_idx = selected_idx
-    else:
-        file_idx, _ = find_video_file(handle)
-    if file_idx is None:
-        return
-
-    num_pieces = ti.num_pieces()
-    piece_length = ti.piece_length()
-    files = ti.files()
-
-    # Set all file priorities: deselect non-video, select video
-    file_priorities = [0] * files.num_files()
-    file_priorities[file_idx] = 7
-    handle.prioritize_files(file_priorities)
-
-    # Get file's piece range
-    file_offset = files.file_offset(file_idx)
-    file_size = files.file_size(file_idx)
-    first_piece = file_offset // piece_length
-    last_piece = min((file_offset + file_size - 1) // piece_length, num_pieces - 1)
-
-    edge_piece_count = max(5, int(((last_piece - first_piece + 1) * 0.02) + 0.999))
-    edge_piece_count = min(edge_piece_count, last_piece - first_piece + 1)
-
-    # Keep unrelated pieces off. Download the video sequentially, with first/last
-    # 2% at top priority for container metadata.
-    piece_priorities = [0] * num_pieces
-    for i in range(first_piece, last_piece + 1):
-        piece_priorities[i] = 6
-    for i in range(first_piece, min(first_piece + edge_piece_count, last_piece + 1)):
-        piece_priorities[i] = 7
-    for i in range(max(first_piece, last_piece - edge_piece_count + 1), last_piece + 1):
-        piece_priorities[i] = 7
-
-    handle.prioritize_pieces(piece_priorities)
-    set_sequential_mode(handle, True)
-    update_streaming_focus(normalize_info_hash(handle.info_hash()), handle, ti, first_piece)
 
 
 def build_status(info_hash_hex):
@@ -786,257 +508,7 @@ def build_status(info_hash_hex):
     }
 
 
-# ─── HTTP File Server (for streaming video to HTML5 <video>) ───
-
-class FileStreamHandler(BaseHTTPRequestHandler):
-    """Serves torrent video files with Range request support for HTML5 video streaming."""
-
-    def log_message(self, format, *args):
-        pass  # Suppress logs
-
-    def handle(self):
-        try:
-            super().handle()
-        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
-            pass
-
-    def _prepare_stream_response(self):
-        parsed = urlparse(self.path)
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) < 1:
-            self.send_error(400)
-            return None
-
-        info_hash = parts[0]
-        entry = torrents.get(info_hash)
-        if not entry:
-            self.send_error(404, "Torrent not found")
-            return None
-
-        h = entry["handle"]
-        if not is_handle_valid(h):
-            self.send_error(410, "Torrent removed")
-            return None
-        try:
-            ti = h.torrent_file()
-        except RuntimeError as exc:
-            log_warning("stream_torrent_file_failed", torrent=info_hash, error=str(exc))
-            self.send_error(410, "Torrent removed")
-            return None
-        if not ti:
-            self.send_error(503, "Torrent metadata not ready")
-            return None
-
-        selected_idx = entry.get("selected_file_idx")
-        if selected_idx is not None and ti and 0 <= selected_idx < ti.files().num_files():
-            file_idx = selected_idx
-            file_path = ti.files().file_path(file_idx)
-        else:
-            file_idx, file_path = find_video_file(h)
-        if file_idx is None:
-            self.send_error(404, "No video file found")
-            return None
-
-        try:
-            save_path = h.status().save_path
-        except RuntimeError as exc:
-            log_warning("stream_status_failed", torrent=info_hash, error=str(exc))
-            self.send_error(410, "Torrent removed")
-            return None
-        abs_path = os.path.join(save_path, file_path)
-
-        if not os.path.exists(abs_path):
-            for _ in range(40):
-                if os.path.exists(abs_path):
-                    break
-                time.sleep(0.5)
-            if not os.path.exists(abs_path):
-                self.send_error(503, "File not available yet")
-                return None
-
-        file_size = os.path.getsize(abs_path)
-        if file_size == 0:
-            for _ in range(40):
-                file_size = os.path.getsize(abs_path)
-                if file_size > 0:
-                    break
-                time.sleep(0.5)
-
-        range_header = self.headers.get("Range")
-        start = 0
-        end = file_size - 1
-        if range_header:
-            range_str = range_header.replace("bytes=", "")
-            range_parts = range_str.split("-")
-            start = int(range_parts[0]) if range_parts[0] else 0
-            end = int(range_parts[1]) if len(range_parts) > 1 and range_parts[1] else file_size - 1
-        seek_request = bool(range_header and start > 0)
-        if seek_request:
-            set_sequential_mode(h, False)
-
-        ext = os.path.splitext(abs_path)[1].lower()
-        content_type = {
-            '.mp4': 'video/mp4',
-            '.mkv': 'video/x-matroska',
-            '.webm': 'video/webm',
-            '.avi': 'video/mp4',
-            '.mov': 'video/mp4',
-            '.m4v': 'video/mp4',
-            '.ts': 'video/mp2t',
-        }.get(ext, 'video/mp4')
-
-        if range_header:
-            self.send_response(206)
-            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
-        else:
-            self.send_response(200)
-
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(file_size if not range_header else (end - start + 1)))
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Connection", "keep-alive")
-        self.end_headers()
-
-        return {
-            "info_hash": info_hash,
-            "handle": h,
-            "torrent_info": ti,
-            "file_idx": file_idx,
-            "abs_path": abs_path,
-            "start": start,
-            "end": end,
-            "seek_request": seek_request,
-        }
-
-    def do_GET(self):
-        stream_ctx = self._prepare_stream_response()
-        if not stream_ctx:
-            return
-
-        try:
-            info_hash = stream_ctx["info_hash"]
-            h = stream_ctx["handle"]
-            ti = stream_ctx["torrent_info"]
-            file_idx = stream_ctx["file_idx"]
-            abs_path = stream_ctx["abs_path"]
-            start = stream_ctx["start"]
-            end = stream_ctx["end"]
-            seek_request = stream_ctx["seek_request"]
-            piece_length = ti.piece_length()
-            files_storage = ti.files()
-            file_offset = files_storage.file_offset(file_idx)
-            file_total_size = files_storage.file_size(file_idx)
-            
-            with open(abs_path, "rb") as f:
-                f.seek(start)
-                remaining = end - start + 1
-                current_pos = start
-                status_error_logged = False
-                
-                while remaining > 0:
-                    if info_hash not in torrents or not is_handle_valid(h):
-                        break
-
-                    # Fast-path: if target file is fully downloaded, stream directly from disk
-                    # without per-piece checks to avoid late buffering stalls.
-                    try:
-                        st = h.status()
-                        fp = h.file_progress()
-                        file_done = bool(
-                            st.is_finished
-                            or st.is_seeding
-                            or (file_idx < len(fp) and fp[file_idx] >= file_total_size)
-                        )
-                    except RuntimeError as exc:
-                        if not status_error_logged:
-                            log_warning("stream_status_failed", torrent=info_hash, error=str(exc))
-                            status_error_logged = True
-                        file_done = False
-
-                    if file_done:
-                        read_size = min(65536, remaining)
-                        try:
-                            data = f.read(read_size)
-                        except OSError as exc:
-                            log_warning("stream_file_read_failed", torrent=info_hash, position=current_pos, size=read_size, error=str(exc))
-                            break
-                        if not data:
-                            break
-                        try:
-                            self.wfile.write(data)
-                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
-                            log_warning("stream_client_disconnected", torrent=info_hash, position=current_pos, error=str(exc))
-                            break
-                        except OSError as exc:
-                            log_warning("stream_file_write_failed", torrent=info_hash, position=current_pos, size=len(data), error=str(exc))
-                            break
-                        remaining -= len(data)
-                        current_pos += len(data)
-                        continue
-
-                    current_piece = (file_offset + current_pos) // piece_length
-                    update_streaming_focus(info_hash, h, ti, current_piece, sequential=not seek_request)
-                    
-                    try:
-                        has_piece = h.have_piece(current_piece)
-                    except RuntimeError:
-                        log_warning("have_piece_failed", torrent=info_hash, piece=current_piece, error="runtime")
-                        break
-
-                    if not has_piece:
-                        try:
-                            update_streaming_focus(info_hash, h, ti, current_piece, sequential=not seek_request)
-                            try:
-                                h.set_piece_deadline(current_piece, 0)
-                            except Exception as exc:
-                                log_warning("set_piece_deadline_failed", piece=current_piece, error=str(exc))
-                        except RuntimeError as exc:
-                            log_warning("stream_piece_deadline_context_failed", torrent=info_hash, piece=current_piece, error=str(exc))
-                            break
-                        piece_ready = wait_for_piece(info_hash, h, current_piece, timeout_seconds=STREAM_WAIT_TIMEOUT_SECONDS)
-                        if not piece_ready:
-                            break # Connection will close, browser will retry
-
-                    bytes_left_in_piece = (current_piece + 1) * piece_length - (file_offset + current_pos)
-                    read_size = min(65536, remaining, bytes_left_in_piece)
-                    
-                    try:
-                        data = f.read(read_size)
-                    except OSError as exc:
-                        log_warning("stream_file_read_failed", torrent=info_hash, position=current_pos, size=read_size, error=str(exc))
-                        break
-                    if not data:
-                        break
-                    try:
-                        self.wfile.write(data)
-                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
-                        log_warning("stream_client_disconnected", torrent=info_hash, position=current_pos, error=str(exc))
-                        break
-                    except OSError as exc:
-                        log_warning("stream_file_write_failed", torrent=info_hash, position=current_pos, size=len(data), error=str(exc))
-                        break
-                    remaining -= len(data)
-                    current_pos += len(data)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
-            log_warning("stream_client_disconnected", torrent=info_hash, error=str(exc))
-        except RuntimeError as exc:
-            log_warning("stream_runtime_error", torrent=info_hash, error=str(exc))
-
-    def do_HEAD(self):
-        self._prepare_stream_response()
-
-
-def start_file_server():
-    global file_server, file_server_port
-    file_server = ThreadingHTTPServer(("127.0.0.1", 0), FileStreamHandler)
-    file_server_port = file_server.server_address[1]
-    thread = threading.Thread(target=file_server.serve_forever, daemon=True)
-    thread.start()
-    return file_server_port
-
-
-# ─── API HTTP Handler ───
+# API HTTP Handler ───
 
 class APIHandler(BaseHTTPRequestHandler):
 
@@ -1255,7 +727,6 @@ class APIHandler(BaseHTTPRequestHandler):
                 "media_info": media_info,
                 "added_at": int(time.time() * 1000),
                 "selected_file_idx": None,
-                "last_stream_piece": None,
                 "sequential_mode": False,
             }
 
@@ -1299,7 +770,6 @@ class APIHandler(BaseHTTPRequestHandler):
                 "media_info": media_info,
                 "added_at": int(time.time() * 1000),
                 "selected_file_idx": None,
-                "last_stream_piece": None,
                 "sequential_mode": False,
                 "pending_selection": True,
             }
@@ -1480,8 +950,6 @@ def main():
     finally:
         alert_pump_stop.set()
         api_server.server_close()
-        if file_server:
-            file_server.shutdown()
         shutdown_session_cleanup()
 
 

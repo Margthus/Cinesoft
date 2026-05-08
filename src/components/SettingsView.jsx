@@ -1,17 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
+import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
 
 const SettingsView = ({ settings, setSettings }) => {
   const [formData, setFormData] = useState({
     ...settings,
     prowlarr: normalizeProwlarrConfig(settings.prowlarr || DEFAULT_PROWLARR_CONFIG),
-    torrentio: settings.torrentio || {
-      baseUrl: 'https://torrentio.strem.fun',
-      maxResults: 80,
-      excludeKeywords: 'cam,ts,tc',
-    },
+    torrentio: normalizeTorrentioConfig(settings.torrentio || {}),
   });
   const [saveState, setSaveState] = useState('');
   const [prowlarrStatus, setProwlarrStatus] = useState('');
@@ -249,6 +246,40 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const visibleSchemas = filteredSchemas.slice(0, schemaVisibleCount);
 
+  const toggleTorrentioSite = (siteKey) => {
+    const normalized = normalizeTorrentioConfig(formData.torrentio || {});
+    const current = { ...(normalized.enabledSites || {}) };
+    const allSiteKeys = TORRENTIO_SITE_OPTIONS.map((site) => site.key).filter((key) => key !== 'all');
+
+    if (siteKey === 'all') {
+      const allSelected = allSiteKeys.every((key) => current[key] !== false);
+      const nextValue = !allSelected;
+      const nextEnabledSites = { ...current, all: nextValue };
+      allSiteKeys.forEach((key) => {
+        nextEnabledSites[key] = nextValue;
+      });
+      updateRoot({
+        torrentio: normalizeTorrentioConfig({
+          ...(formData.torrentio || {}),
+          enabledSites: nextEnabledSites,
+        }),
+      });
+      return;
+    }
+
+    const nextEnabledSites = {
+      ...current,
+      [siteKey]: !(current[siteKey] !== false),
+    };
+    nextEnabledSites.all = allSiteKeys.every((key) => nextEnabledSites[key] !== false);
+    updateRoot({
+      torrentio: normalizeTorrentioConfig({
+        ...(formData.torrentio || {}),
+        enabledSites: nextEnabledSites,
+      }),
+    });
+  };
+
   return (
     <div className="settings-view">
       <div className="settings-topbar">
@@ -263,7 +294,7 @@ const SettingsView = ({ settings, setSettings }) => {
       </div>
 
       <div className="settings-grid">
-        <section className="settings-card settings-card-wide content-card">
+        <section className="settings-card language-card">
           <header className="settings-card-header">
             <Globe size={18} />
             <div>
@@ -276,6 +307,7 @@ const SettingsView = ({ settings, setSettings }) => {
             <button className={formData.language === 'en' ? 'active' : ''} onClick={() => updateRoot({ language: 'en' })}>English</button>
           </div>
         </section>
+
 
         <section className="settings-card">
           <header className="settings-card-header">
@@ -428,6 +460,48 @@ const SettingsView = ({ settings, setSettings }) => {
                 })}
               />
             </label>
+            <label className="stacked-field">
+              <span>{t.torrentioSortBy}</span>
+              <select
+                className="settings-input"
+                value={formData.torrentio?.sortBy || 'seeders'}
+                onChange={(event) => updateRoot({
+                  torrentio: normalizeTorrentioConfig({
+                    ...(formData.torrentio || {}),
+                    sortBy: event.target.value,
+                  }),
+                })}
+              >
+                <option value="seeders">{t.seeders}</option>
+                <option value="size">{t.size}</option>
+                <option value="name">{t.name}</option>
+              </select>
+            </label>
+          </div>
+          <div className="stacked-field" style={{ marginTop: '0.9rem' }}>
+            <span>{t.torrentioSites}</span>
+            <div className="torrentio-site-grid">
+              {TORRENTIO_SITE_OPTIONS.map((site) => {
+                const enabled = site.key === 'all'
+                  ? TORRENTIO_SITE_OPTIONS
+                    .filter((option) => option.key !== 'all')
+                    .every((option) => formData.torrentio?.enabledSites?.[option.key] !== false)
+                  : formData.torrentio?.enabledSites?.[site.key] !== false;
+                const siteLabel = site.key === 'all'
+                  ? (formData.language === 'tr' ? 'Hepsi' : 'All')
+                  : site.label;
+                return (
+                  <button
+                    key={site.key}
+                    type="button"
+                    className={`torrentio-site-btn ${enabled ? 'active' : ''}`}
+                    onClick={() => toggleTorrentioSite(site.key)}
+                  >
+                    {siteLabel}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.torrentioHint}</p>
         </section>
@@ -438,9 +512,6 @@ const SettingsView = ({ settings, setSettings }) => {
             <div>
               <h2>{t.prowlarr}</h2>
               <p>{t.prowlarrHint}</p>
-              <p style={{ color: 'var(--accent)', marginTop: '0.4rem', fontSize: '0.85rem', fontWeight: 500 }}>
-                {t.prowlarrAnimeHint}
-              </p>
             </div>
           </header>
 
@@ -769,9 +840,13 @@ const getCopy = (language) => ({
     torrentioBaseUrl: 'Torrentio URL',
     torrentioMaxResults: 'Maksimum sonuc',
     torrentioExcludeKeywords: 'Engellenecek kelimeler',
+    torrentioSortBy: 'Siralama',
+    torrentioSites: 'Torrent siteleri',
     torrentioHint: 'Virgulle ayrilan kelimeleri iceren sonuclar gizlenir. Ornek: cam,ts,tc',
+    seeders: 'Seedera gore',
+    size: 'Boyuta gore',
+    name: 'Isme gore',
     prowlarrHint: 'Motor baslatma, baglanti ve indexer yonetimi.',
-    prowlarrAnimeHint: 'Animelerde ve Dizilerde daha iyi sonuçlar almak için Prowlarr kullanın.',
     engine: 'Motor Kontrolu',
     connection: 'Baglanti',
     filters: 'Arama Filtreleri',
@@ -838,9 +913,13 @@ const getCopy = (language) => ({
     torrentioBaseUrl: 'Torrentio URL',
     torrentioMaxResults: 'Maximum results',
     torrentioExcludeKeywords: 'Blocked keywords',
+    torrentioSortBy: 'Sorting',
+    torrentioSites: 'Torrent sites',
     torrentioHint: 'Hide results that include comma-separated keywords. Example: cam,ts,tc',
+    seeders: 'By seeders',
+    size: 'By size',
+    name: 'By name',
     prowlarrHint: 'Engine start, connection, and indexer management.',
-    prowlarrAnimeHint: 'Use Prowlarr for better results in anime and TV shows.',
     engine: 'Engine Control',
     connection: 'Connection',
     filters: 'Search Filters',

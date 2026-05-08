@@ -34,6 +34,48 @@ const DEFAULT_TORRENT_SETTINGS = {
   natPmpEnabled: true,
   announceToAllTrackers: true,
 };
+const DEFAULT_TORRENTIO_SETTINGS = {
+  baseUrl: 'https://torrentio.strem.fun',
+  maxResults: 80,
+  excludeKeywords: 'cam,ts,tc',
+  sortBy: 'seeders',
+  enabledSites: {
+    yts: true,
+    thepiratebay: true,
+    '1337x': true,
+    nyaa: true,
+    eztv: true,
+    torrentgalaxy: true,
+    kickass: true,
+    rarbg: true,
+    horriblesubs: true,
+    tokyotosho: true,
+    anidex: true,
+    nekobt: true,
+    rutor: true,
+    comando: true,
+    bludv: true,
+    micoleaodublado: true,
+    torrent9: true,
+    ilcorsaronero: true,
+    mejortorrent: true,
+    wolfmax4k: true,
+    cinecalidad: true,
+    besttorrents: true,
+    zooqle: true,
+    rutracker: true,
+    magnetdl: true,
+    torrentdownloads: true,
+    glodls: true,
+    limetorrents: true,
+    solidtorrents: true,
+    torlock: true,
+    bitsearch: true,
+    btdigg: true,
+    ibit: true,
+    all: true,
+  },
+};
 
 const getPersistedDownloads = () => {
   const entries = store.get(PERSISTED_DOWNLOADS_KEY);
@@ -248,7 +290,6 @@ if (!store.has('language')) {
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
 }
-
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -285,7 +326,7 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
   stopManagedProwlarr();
   if (torrentRulesInterval) {
     clearInterval(torrentRulesInterval);
@@ -490,6 +531,7 @@ const buildManagedProwlarrConfig = (config = {}) => {
 
 // IPC Handlers
 ipcMain.handle('get-settings', () => {
+  const torrentio = store.get('torrentio') || {};
   return {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
@@ -501,10 +543,16 @@ ipcMain.handle('get-settings', () => {
       username: 'admin',
       password: 'adminadmin',
     },
-    torrentio: store.get('torrentio') || {
-      baseUrl: 'https://torrentio.strem.fun',
-      maxResults: 80,
-      excludeKeywords: 'cam,ts,tc',
+    torrentio: {
+      ...DEFAULT_TORRENTIO_SETTINGS,
+      ...torrentio,
+      enabledSites: {
+        ...DEFAULT_TORRENTIO_SETTINGS.enabledSites,
+        ...(torrentio.enabledSites?.unknown !== undefined && torrentio.enabledSites?.all === undefined
+          ? { all: torrentio.enabledSites.unknown }
+          : {}),
+        ...(torrentio.enabledSites || {}),
+      },
     },
   };
 });
@@ -612,10 +660,17 @@ ipcMain.handle('save-settings', (event, settings) => {
     username: 'admin',
     password: 'adminadmin',
   });
-  store.set('torrentio', settings.torrentio || {
-    baseUrl: 'https://torrentio.strem.fun',
-    maxResults: 80,
-    excludeKeywords: 'cam,ts,tc',
+  const nextTorrentio = settings.torrentio || {};
+  store.set('torrentio', {
+    ...DEFAULT_TORRENTIO_SETTINGS,
+    ...nextTorrentio,
+    enabledSites: {
+      ...DEFAULT_TORRENTIO_SETTINGS.enabledSites,
+      ...(nextTorrentio.enabledSites?.unknown !== undefined && nextTorrentio.enabledSites?.all === undefined
+        ? { all: nextTorrentio.enabledSites.unknown }
+        : {}),
+      ...(nextTorrentio.enabledSites || {}),
+    },
   });
   return true;
 });
@@ -1149,16 +1204,18 @@ ipcMain.handle('torrent-validate-candidate', async (event, payload = {}) => {
     result.checks.episode = passEp ? 'pass' : 'fail';
     if (passEp) result.score += 30; else result.reasons.push('episode_mismatch');
   }
-  const size = Number(payload.size) || 0;
+    const size = Number(payload.size) || 0;
   if (size > 0) {
     const gib = size / (1024 ** 3);
     const passSize = gib > 0.2;
     result.checks.size = passSize ? 'pass' : 'fail';
     if (passSize) result.score += 10; else result.reasons.push('size_too_small');
   }
-  if (result.reasons.includes('episode_mismatch') || result.reasons.includes('year_mismatch')) {
+
+  if (result.reasons.includes('episode_mismatch')) {
     result.ok = false;
   }
+
   return result;
 });
 
@@ -1181,3 +1238,4 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     return { ok: false, error: err.message };
   }
 });
+

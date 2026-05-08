@@ -48,6 +48,16 @@ config.json
 
 # Electron Resources - Prowlarr Binaries and Data
 resources/prowlarr/
+resources/Prowlarr/
+resources/**/prowlarr/
+resources/**/Prowlarr/
+resources/ffmpeg/
+resources/**/ffmpeg/
+
+# Local runtime/download data
+downloads/
+tmp/
+temp/
 
 # MemPalace per-project files (issue #185)
 mempalace.yaml

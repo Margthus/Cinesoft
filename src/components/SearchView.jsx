@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { searchContent, fetchPersonCredits } from '../utils/tmdb';
 import { Star, Plus, Check, Search, X } from 'lucide-react';
+import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
+import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
-const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchState }) => {
+const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, fallbackType: '', status: '' });
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -79,6 +82,32 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
     navigate(`/detail/${type}/${item.id}`);
   };
 
+  const getItemStatus = (item, fallbackType = '') => {
+    const key = buildWatchStatusKey(item, fallbackType);
+    return key ? (watchStatusMap?.[key] || '') : '';
+  };
+
+  const openStatusMenu = (event, item) => {
+    event.preventDefault();
+    const fallbackType = item.media_type || (item.title ? 'movie' : 'tv');
+    setStatusMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      item,
+      fallbackType,
+      status: getItemStatus(item, fallbackType),
+    });
+  };
+
+  const closeStatusMenu = () => setStatusMenu({ open: false, x: 0, y: 0, item: null, fallbackType: '', status: '' });
+
+  const applyStatus = (status) => {
+    if (!statusMenu.item) return;
+    onSetWatchStatus(statusMenu.item, status, statusMenu.fallbackType);
+    closeStatusMenu();
+  };
+
   const t = {
     tr: { title: 'Arama', placeholder: 'Film veya dizi ara...', noResults: 'Sonuç bulunamadı.', loading: 'Aranıyor...' },
     en: { title: 'Search', placeholder: 'Search for movies or tv shows...', noResults: 'No results found.', loading: 'Searching...' }
@@ -110,7 +139,7 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
       ) : searchState.results.length > 0 ? (
         <div className="list-grid">
           {searchState.results.map(item => (
-            <div key={item.id} className="movie-item" onClick={() => handleInspect(item)}>
+            <div key={item.id} className="movie-item" onClick={() => handleInspect(item)} onContextMenu={(event) => openStatusMenu(event, item)}>
               <div className="movie-card">
                 <div className="card-rating">
                   <Star size={12} fill="var(--accent)" />
@@ -126,6 +155,7 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
                   src={`https://image.tmdb.org/t/p/w500${item.poster_path}`} 
                   alt={item.title || item.name} 
                 />
+                <PosterStatusBadge status={getItemStatus(item, item.media_type || (item.title ? 'movie' : 'tv'))} language={settings.language} />
                 <div className="card-overlay">
                 </div>
               </div>
@@ -140,6 +170,7 @@ const SearchView = ({ settings, myList, onToggleMyList, searchState, setSearchSt
           {searchState.query ? t.noResults : ''}
         </div>
       )}
+      <PosterStatusMenu state={statusMenu} language={settings.language} onClose={closeStatusMenu} onSelect={applyStatus} />
     </div>
   );
 };

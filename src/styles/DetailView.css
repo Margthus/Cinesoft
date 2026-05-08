@@ -84,8 +84,8 @@
 
 .genre-badge {
   padding: 0.4rem 1rem;
-  background: rgba(0, 255, 204, 0.05);
-  border: 1px solid rgba(0, 255, 204, 0.3);
+  background: rgba(var(--accent-rgb), 0.05);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   color: var(--accent);
   border-radius: 6px;
   font-size: 0.85rem;
@@ -195,6 +195,7 @@
 .source-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   background-color: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -246,10 +247,10 @@
 }
 
 .filter-btn.active {
-  background: rgba(0, 255, 204, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 15px rgba(0, 255, 204, 0.15);
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.15);
 }
 
 .source-sort-select {
@@ -271,7 +272,7 @@
 
 .source-sort-select:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(0, 255, 204, 0.1);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.1);
 }
 
 .source-sort-select:focus {
@@ -286,6 +287,7 @@
 
 .source-main {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -306,17 +308,30 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.source-badges span {
-  background: rgba(0, 255, 204, 0.08);
-  border: 1px solid rgba(0, 255, 204, 0.2);
-  color: var(--accent);
-  border-radius: 6px;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.82rem;
+.source-badges .source-badge {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel) 88%);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text) 20%);
+  border-radius: 8px;
+  padding: 0.34rem 0.58rem;
+  font-size: 0.8rem;
   font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.source-badges .source-badge-seeders {
+  min-width: 96px;
+}
+
+.source-badges span:not(.source-badge) {
+  display: none;
 }
 
 .section-header {
@@ -386,7 +401,7 @@
 }
 
 .cast-card:hover .cast-img {
-  box-shadow: 0 8px 25px rgba(0, 255, 204, 0.3);
+  box-shadow: 0 8px 25px rgba(var(--accent-rgb), 0.3);
   border: 1px solid var(--accent);
 }
 
@@ -428,8 +443,8 @@
 }
 
 .image-card:hover {
-  box-shadow: 0 0 30px rgba(0, 255, 204, 0.4);
-  border: 1px solid rgba(0, 255, 204, 0.3);
+  box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 
 .image-card img {
@@ -519,7 +534,7 @@
 }
 
 .lightbox-nav:hover {
-  background: rgba(0, 255, 204, 0.2);
+  background: rgba(var(--accent-rgb), 0.2);
   color: var(--accent);
 }
 
@@ -534,9 +549,11 @@
 @media (max-width: 760px) {
   .source-row {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .source-badges {
+    margin-left: 0;
     justify-content: flex-start;
   }
 }
@@ -685,7 +702,7 @@
 
 .season-selector:hover, .season-selector:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 15px rgba(0, 255, 204, 0.1);
+  box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.1);
   outline: none;
 }
 
@@ -714,7 +731,7 @@
 
 .episode-card:hover {
   transform: translateX(5px);
-  border-color: rgba(0, 255, 204, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.4);
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
 }
 
@@ -804,10 +821,10 @@
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  background: rgba(0, 255, 204, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   padding: 1.2rem;
   border-radius: 12px;
-  border: 1px solid rgba(0, 255, 204, 0.2);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 
 .back-to-episodes-btn {
@@ -885,6 +902,7 @@
   transform: translateY(-1px);
 }
 
+
 .torrent-file-picker-overlay {
   position: fixed;
   inset: 0;
@@ -897,8 +915,8 @@
 }
 
 .torrent-file-picker-modal {
-  width: min(1120px, 97vw);
-  max-height: 88vh;
+  width: min(1380px, 99vw);
+  max-height: 92vh;
   display: flex;
   flex-direction: column;
   background: #0f1215;
@@ -935,26 +953,30 @@
 
 .torrent-file-picker-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(900px, 1fr) auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.55rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 1040px;
 }
 
 .torrent-file-picker-name {
   min-width: 0;
   color: var(--text);
   font-size: 0.9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
   white-space: nowrap;
+  scrollbar-width: thin;
 }
 
 .torrent-file-picker-size {
   color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .torrent-file-picker-footer {
@@ -1004,4 +1026,3 @@
     justify-content: center;
   }
 }
-

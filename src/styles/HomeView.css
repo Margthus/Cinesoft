@@ -94,7 +94,7 @@
 
 .hero-badge {
   background-color: var(--accent);
-  color: black;
+  color: var(--text-on-accent);
   padding: 0.4rem 0.8rem;
   border-radius: 4px;
   font-weight: 900;
@@ -118,18 +118,18 @@
 }
 
 .movies-scroll::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border-radius: 10px;
 }
 
 .movies-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 204, 0.2);
+  background: rgba(var(--accent-rgb), 0.2);
   border-radius: 10px;
   transition: background 0.3s ease;
 }
 
 .movies-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 255, 204, 0.4);
+  background: rgba(var(--accent-rgb), 0.4);
 }
 
 

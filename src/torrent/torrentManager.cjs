@@ -102,6 +102,7 @@ class TorrentManager {
 
     return new Promise((resolve, reject) => {
       const bodyStr = body ? JSON.stringify(body) : null;
+      const requestTimeout = 10000;
       const options = {
         hostname: '127.0.0.1',
         port: this.apiPort,
@@ -111,7 +112,7 @@ class TorrentManager {
           'Content-Type': 'application/json',
           ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
         },
-        timeout: 10000,
+        timeout: requestTimeout,
       };
 
       const req = http.request(options, (res) => {
@@ -181,6 +182,7 @@ class TorrentManager {
   async setSessionOptions(options) {
     return this._request('POST', '/session-options', options || {});
   }
+
 
   /** Pause a torrent. */
   async pause(id) {
