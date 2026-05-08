@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Download, Pause, Play, Trash2, FolderOpen, Loader2, CheckCircle2,
-  ArrowDown, ArrowUp, Users, Clock, HardDrive, Settings2, X, Save, ListChecks
+  ArrowDown, ArrowUp, Users, Clock, HardDrive, Settings2, X, Save, ListChecks, ChevronUp, ChevronDown
 } from 'lucide-react';
 import '../styles/Downloads.css';
 
@@ -112,6 +112,11 @@ const DownloadsView = ({ settings }) => {
     setTorrents((prev) => prev.filter((torrent) => torrent.id !== id));
   };
 
+  const handleReorder = async (id, direction) => {
+    await window.electronAPI?.torrentReorder?.(id, direction);
+    fetchTorrents();
+  };
+
   const handleChangeDir = async () => {
     const dir = await window.electronAPI?.selectDownloadDir?.();
     if (dir) setDownloadDir(dir);
@@ -199,7 +204,14 @@ const DownloadsView = ({ settings }) => {
     }
   };
 
-  const activeTorrents = torrents.filter((torrent) => !torrent.done);
+  const activeTorrents = torrents
+    .filter((torrent) => !torrent.done)
+    .sort((a, b) => {
+      const orderA = Number(a.queueOrder) || Number.MAX_SAFE_INTEGER;
+      const orderB = Number(b.queueOrder) || Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      return Number(a.addedAt || 0) - Number(b.addedAt || 0);
+    });
   const completedTorrents = torrents.filter((torrent) => torrent.done);
 
   if (loading) {
@@ -237,7 +249,18 @@ const DownloadsView = ({ settings }) => {
           {activeTorrents.length > 0 && (
             <TorrentSection title={t.active} count={activeTorrents.length} icon={<ArrowDown size={18} />}>
               {activeTorrents.map((torrent) => (
-                <TorrentCard key={torrent.id} torrent={torrent} t={t} onPause={handlePause} onResume={handleResume} onRemove={handleRemove} onFiles={openFileModal} />
+                <TorrentCard
+                  key={torrent.id}
+                  torrent={torrent}
+                  t={t}
+                  onPause={handlePause}
+                  onResume={handleResume}
+                  onRemove={handleRemove}
+                  onFiles={openFileModal}
+                  onReorder={handleReorder}
+                  canMoveUp={activeTorrents.length > 1 && activeTorrents[0].id !== torrent.id}
+                  canMoveDown={activeTorrents.length > 1 && activeTorrents[activeTorrents.length - 1].id !== torrent.id}
+                />
               ))}
             </TorrentSection>
           )}
@@ -390,7 +413,7 @@ const TorrentSection = ({ title, count, icon, children }) => (
   </div>
 );
 
-const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles }) => {
+const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown }) => {
   const posterUrl = torrent.mediaInfo?.poster || '';
   const isDone = torrent.done;
   const isPaused = torrent.paused;
@@ -399,6 +422,16 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles }) => {
 
   return (
     <div className={`torrent-card ${isDone ? 'completed' : ''}`}>
+      {!isDone && (canMoveUp || canMoveDown) && (
+        <div className="torrent-queue-controls">
+          <button className="queue-btn" onClick={() => onReorder(torrent.id, 'up')} disabled={!canMoveUp} aria-label="Move up">
+            <ChevronUp size={14} />
+          </button>
+          <button className="queue-btn" onClick={() => onReorder(torrent.id, 'down')} disabled={!canMoveDown} aria-label="Move down">
+            <ChevronDown size={14} />
+          </button>
+        </div>
+      )}
       <div className="torrent-poster">
         {posterUrl ? <img src={posterUrl} alt={torrent.title} /> : <div className="torrent-poster-placeholder"><Download size={34} /></div>}
       </div>

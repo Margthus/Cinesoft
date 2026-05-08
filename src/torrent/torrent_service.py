@@ -609,7 +609,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             )
             try:
-                with urllib.request.urlopen(req) as response:
+                with urllib.request.urlopen(req, timeout=20) as response:
                     torrent_data = response.read()
                 magnet_from_body = extract_magnet_url(torrent_data.decode("utf-8", errors="ignore"))
                 if magnet_from_body:
@@ -760,8 +760,13 @@ class APIHandler(BaseHTTPRequestHandler):
             handle = session.add_torrent(atp)
             info_hash_hex = normalize_info_hash(handle.info_hash())
             handle.unset_flags(lt.torrent_flags.auto_managed)
-            handle.set_flags(lt.torrent_flags.paused)
-            handle.pause()
+            try:
+                handle.unset_flags(lt.torrent_flags.upload_mode)
+            except Exception:
+                pass
+            # Keep the torrent running so metadata can be fetched reliably.
+            # We only pause + upload_mode after metadata exists.
+            handle.resume()
 
             torrents[info_hash_hex] = {
                 "handle": handle,
@@ -787,8 +792,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 if files:
                     file_priorities = [0] * len(files)
                     handle.prioritize_files(file_priorities)
-                handle.set_flags(lt.torrent_flags.upload_mode)
-                handle.pause()
+                    handle.set_flags(lt.torrent_flags.upload_mode)
+                    handle.pause()
             except Exception:
                 pass
 
@@ -848,8 +853,26 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         files = self._collect_files(h)
         if files is None:
+            # For pending-selection torrents, ensure metadata fetch is still active.
+            if entry.get("pending_selection"):
+                try:
+                    h.unset_flags(lt.torrent_flags.upload_mode)
+                except Exception:
+                    pass
+                try:
+                    h.resume()
+                except Exception:
+                    pass
             self._send_json({"ok": False, "error": "Metadata not ready"}, 503)
             return
+        if entry.get("pending_selection"):
+            try:
+                file_priorities = [0] * len(files)
+                h.prioritize_files(file_priorities)
+                h.set_flags(lt.torrent_flags.upload_mode)
+                h.pause()
+            except Exception:
+                pass
         selected = []
         try:
             prios = h.get_file_priorities()

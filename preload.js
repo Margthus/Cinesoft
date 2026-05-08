@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   torrentSelectFiles: (id, fileIndexes, resume) => ipcRenderer.invoke('torrent-select-files', id, fileIndexes, resume),
   torrentGetStatus: (id) => ipcRenderer.invoke('torrent-get-status', id),
   torrentGetAll: () => ipcRenderer.invoke('torrent-get-all'),
+  torrentReorder: (id, direction) => ipcRenderer.invoke('torrent-reorder', id, direction),
   torrentPause: (id) => ipcRenderer.invoke('torrent-pause', id),
   torrentResume: (id) => ipcRenderer.invoke('torrent-resume', id),
   torrentRemove: (id, deleteFiles) => ipcRenderer.invoke('torrent-remove', id, deleteFiles),

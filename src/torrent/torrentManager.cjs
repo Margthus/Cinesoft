@@ -98,14 +98,13 @@ class TorrentManager {
   }
 
   /** Make an HTTP request to the Python API. */
-  async _request(method, path, body = null) {
+  async _request(method, path, body = null, timeoutMs = 10000) {
     if (!this._ready) {
       await this.start();
     }
 
     return new Promise((resolve, reject) => {
       const bodyStr = body ? JSON.stringify(body) : null;
-      const requestTimeout = 10000;
       const options = {
         hostname: '127.0.0.1',
         port: this.apiPort,
@@ -115,7 +114,7 @@ class TorrentManager {
           'Content-Type': 'application/json',
           ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
         },
-        timeout: requestTimeout,
+        timeout: timeoutMs,
       };
 
       const req = http.request(options, (res) => {
@@ -143,12 +142,12 @@ class TorrentManager {
 
   /** Add a torrent. */
   async add(opts) {
-    return this._request('POST', '/add', opts);
+    return this._request('POST', '/add', opts, 45000);
   }
 
   /** Add torrent paused and return file list for selection. */
   async prepare(opts) {
-    return this._request('POST', '/prepare', opts);
+    return this._request('POST', '/prepare', opts, 45000);
   }
 
   /** Get torrent file list. */

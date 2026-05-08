@@ -105,6 +105,34 @@ const removePersistedDownload = (key) => {
   savePersistedDownloads(current.filter((item) => item.key !== key));
 };
 
+const getQueueOrderForKey = (key) => {
+  const current = getPersistedDownloads();
+  const entry = current.find((item) => String(item.key) === String(key));
+  const value = Number(entry?.queueOrder);
+  return Number.isFinite(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER;
+};
+
+const getNextQueueOrder = () => {
+  const current = getPersistedDownloads();
+  const max = current.reduce((acc, item) => {
+    const value = Number(item?.queueOrder);
+    return Number.isFinite(value) && value > acc ? value : acc;
+  }, 0);
+  return max + 1;
+};
+
+const setQueueOrderForKeys = (orderedKeys = []) => {
+  if (!Array.isArray(orderedKeys) || !orderedKeys.length) return;
+  const current = getPersistedDownloads();
+  const next = current.map((entry) => ({ ...entry }));
+  const byKey = new Map(next.map((entry) => [String(entry.key), entry]));
+  orderedKeys.forEach((key, index) => {
+    const entry = byKey.get(String(key));
+    if (entry) entry.queueOrder = index + 1;
+  });
+  savePersistedDownloads(next);
+};
+
 const getManuallyPausedIds = () => {
   const entries = getPersistedDownloads();
   return new Set(
@@ -148,6 +176,9 @@ const enforceTorrentRules = async () => {
     const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
     const manuallyPausedIds = getManuallyPausedIds();
     const sorted = [...torrents].sort((a, b) => {
+      const orderA = getQueueOrderForKey(a.id);
+      const orderB = getQueueOrderForKey(b.id);
+      if (orderA !== orderB) return orderA - orderB;
       const aTime = Number(a.addedAt || 0);
       const bTime = Number(b.addedAt || 0);
       return aTime - bTime;
@@ -160,18 +191,24 @@ const enforceTorrentRules = async () => {
       }
     }
 
-    const downloadingActive = sorted.filter((t) => !t.done && !t.paused);
-    if (downloadingActive.length > settings.maxActiveDownloads) {
-      for (const t of downloadingActive.slice(settings.maxActiveDownloads)) {
+    const queueCandidates = sorted.filter((t) => !t.done && !t.pendingSelection);
+    const activeNow = queueCandidates.filter((t) => !t.paused);
+    const desiredActiveIds = new Set(
+      queueCandidates
+        .filter((t) => !manuallyPausedIds.has(String(t.id)))
+        .slice(0, settings.maxActiveDownloads)
+        .map((t) => String(t.id))
+    );
+
+    // Always align active set with queue priority, even when active count already matches.
+    for (const t of activeNow) {
+      if (!desiredActiveIds.has(String(t.id))) {
         await torrentManager.pause(t.id);
       }
     }
 
-    const currentActive = sorted.filter((t) => !t.done && !t.paused).length;
-    if (currentActive < settings.maxActiveDownloads) {
-      const pausedQueue = sorted.filter((t) => !t.done && t.paused && !manuallyPausedIds.has(String(t.id)));
-      const toResumeCount = settings.maxActiveDownloads - currentActive;
-      for (const t of pausedQueue.slice(0, toResumeCount)) {
+    for (const t of queueCandidates) {
+      if (desiredActiveIds.has(String(t.id)) && t.paused) {
         await torrentManager.resume(t.id);
       }
     }
@@ -882,6 +919,7 @@ ipcMain.handle('torrent-add', async (event, opts) => {
         title: opts?.title || '',
         mediaInfo: opts?.mediaInfo || {},
         paused: false,
+        queueOrder: getNextQueueOrder(),
       });
     }
     return result;
@@ -947,9 +985,46 @@ ipcMain.handle('torrent-get-all', async () => {
   try {
     const tm = await ensureTorrentManager();
     const result = await tm.getAll();
+    if (Array.isArray(result?.torrents)) {
+      result.torrents = result.torrents.map((torrent) => ({
+        ...torrent,
+        queueOrder: getQueueOrderForKey(torrent.id),
+      }));
+    }
     return result;
   } catch (err) {
     return { ok: false, error: err.message, torrents: [] };
+  }
+});
+
+ipcMain.handle('torrent-reorder', async (event, id, direction) => {
+  try {
+    const tm = await ensureTorrentManager();
+    const all = await tm.getAll();
+    const active = (all?.torrents || [])
+      .filter((torrent) => !torrent.done)
+      .sort((a, b) => {
+        const orderA = getQueueOrderForKey(a.id);
+        const orderB = getQueueOrderForKey(b.id);
+        if (orderA !== orderB) return orderA - orderB;
+        return Number(a.addedAt || 0) - Number(b.addedAt || 0);
+      });
+
+    const currentIndex = active.findIndex((torrent) => String(torrent.id) === String(id));
+    if (currentIndex < 0) return { ok: false, error: 'Torrent not found in queue' };
+
+    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (nextIndex < 0 || nextIndex >= active.length) return { ok: true, unchanged: true };
+
+    const reordered = [...active];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(nextIndex, 0, moved);
+    setQueueOrderForKeys(reordered.map((torrent) => torrent.id));
+
+    await enforceTorrentRules();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 });
 

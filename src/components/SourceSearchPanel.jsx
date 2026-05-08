@@ -345,7 +345,9 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
       let files = Array.isArray(prepared.files) ? prepared.files : [];
       if (!prepared.metadataReady) {
-        for (let i = 0; i < 8 && !files.length; i += 1) {
+        // Metadata acquisition for magnet links can be slow, especially when another torrent is active.
+        // Poll for up to ~60s before failing.
+        for (let i = 0; i < 120 && !files.length; i += 1) {
           await new Promise((resolve) => setTimeout(resolve, 500));
           const latest = await window.electronAPI.torrentGetFiles(prepared.id);
           if (latest?.ok && Array.isArray(latest.files)) {

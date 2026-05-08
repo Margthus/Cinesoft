@@ -149,6 +149,7 @@
 }
 
 .torrent-card {
+  position: relative;
   display: flex;
   gap: 1.4rem;
   padding: 1.2rem;
@@ -159,6 +160,40 @@
   border-radius: 20px;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
   transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.torrent-queue-controls {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  z-index: 3;
+}
+
+.queue-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(11, 15, 20, 0.88);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.queue-btn:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: var(--accent);
+}
+
+.queue-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .torrent-card:hover {
@@ -205,6 +240,7 @@
   flex-direction: column;
   gap: 0.85rem;
   justify-content: center;
+  padding-right: 2.5rem;
 }
 
 .torrent-title-row {
