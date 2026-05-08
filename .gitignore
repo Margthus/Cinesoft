@@ -10,6 +10,7 @@ node_modules/
 
 # Build artifacts
 dist/
+renderer/
 dist-electron/
 build/
 out/

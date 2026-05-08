@@ -32,21 +32,31 @@
     "react-router-dom": "^7.14.2"
   },
   "build": {
-    "extraResources": [
-      {
-        "from": "resources/ffmpeg",
-        "to": "ffmpeg",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "resources/prowlarr",
-        "to": "resources/prowlarr",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ]
+    "appId": "com.margthus.cinesoft",
+    "productName": "CineSoft",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "src/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico"
+    }
   }
 }

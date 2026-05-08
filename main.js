@@ -10,7 +10,6 @@ try {
 } catch {
   DatabaseSync = null;
 }
-const isDev = require('electron-is-dev');
 const Store = require('electron-store');
 const store = new Store();
 const { TorrentManager } = require('./src/torrent/torrentManager.cjs');
@@ -290,25 +289,42 @@ if (!store.has('language')) {
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
 }
+
+// Packaged builds can show a black window on some systems with GPU compositing.
+// Disabling hardware acceleration is a pragmatic stability fix for desktop delivery.
+app.disableHardwareAcceleration();
+
 function createWindow() {
+  const windowIconPath = path.join(__dirname, 'build', 'icon.png');
+  const isDevMode = !app.isPackaged;
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     backgroundColor: '#000000',
+    icon: fs.existsSync(windowIconPath) ? windowIconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: isDevMode,
     },
     title: 'Cinesoft',
     autoHideMenuBar: true,
   });
-  const url = isDev
-    ? 'http://localhost:5173'
-    : `file://${path.join(__dirname, 'dist/index.html')}`;
 
-  win.loadURL(url);
+  if (isDevMode) {
+    win.loadURL('http://localhost:5173');
+  } else {
+    const indexFile = path.join(__dirname, 'renderer', 'index.html');
+    win.loadFile(indexFile).catch((error) => {
+      console.error('[Main] Failed to load renderer:', error.message);
+    });
+  }
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[Main] Renderer load failed', { errorCode, errorDescription, validatedURL });
+  });
 
   // if (isDev) {
   //   win.webContents.openDevTools();
