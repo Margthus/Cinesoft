@@ -89,6 +89,8 @@ const FALLBACK_SUBTITLE_ADDON_BASE_URLS = [
   'https://turkcealtyaziorg-stremio-addon.mycodelab.com.tr',
 ];
 const OPENSUBTITLES_V3_BASE_URL = 'https://opensubtitles-v3.strem.io';
+const SUBTITLE_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const subtitleSearchCache = new Map();
 
 const subtitleHttpAgent = new http.Agent({ keepAlive: false });
 const subtitleHttpsAgent = new https.Agent({ keepAlive: false });
@@ -1872,6 +1874,25 @@ const buildSubtitleRequestCandidates = ({ type, target }) => {
   return candidates;
 };
 
+const getSubtitleCacheKey = ({ type, target }) => `${String(type || '').toLowerCase()}|${String(target || '').toLowerCase()}`;
+
+const getCachedSubtitleSearch = (cacheKey) => {
+  const hit = subtitleSearchCache.get(cacheKey);
+  if (!hit) return null;
+  if ((Date.now() - Number(hit.cachedAt || 0)) > SUBTITLE_SEARCH_CACHE_TTL_MS) {
+    subtitleSearchCache.delete(cacheKey);
+    return null;
+  }
+  return hit.payload || null;
+};
+
+const setCachedSubtitleSearch = (cacheKey, payload) => {
+  subtitleSearchCache.set(cacheKey, {
+    cachedAt: Date.now(),
+    payload,
+  });
+};
+
 const guessSubtitleLabel = (subtitle = {}, url = '') => {
   const direct = String(
     subtitle?.label
@@ -1945,33 +1966,49 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
     }
 
     const type = normalizeSubtitleType(tmdbType);
-    const target = type === 'movie'
-      ? `${imdbId}`
-      : `${imdbId}:${season}:${episode}`;
+    const targets = type === 'movie'
+      ? [`${imdbId}`]
+      : [`${imdbId}:${season}:${episode}`];
+    const cacheKey = getSubtitleCacheKey({ type, target: targets.join('|') });
+    const cached = getCachedSubtitleSearch(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        debug: {
+          ...(cached.debug || {}),
+          cache: 'hit',
+        },
+      };
+    }
     let data = null;
     let resolvedBase = '';
     let resolvedProvider = '';
+    let resolvedTarget = '';
     const tried = [];
     const errors = [];
-    const requestCandidates = buildSubtitleRequestCandidates({ type, target });
-    for (const candidate of requestCandidates) {
-      const url = `${candidate.base}${candidate.route}`;
-      tried.push(url);
-      try {
-        data = await fetchJsonWithTimeout(url, 20000);
-        if (data) {
-          resolvedBase = candidate.base;
-          resolvedProvider = candidate.provider;
-          break;
+    for (const target of targets) {
+      const requestCandidates = buildSubtitleRequestCandidates({ type, target });
+      for (const candidate of requestCandidates) {
+        const url = `${candidate.base}${candidate.route}`;
+        tried.push(url);
+        try {
+          data = await fetchJsonWithTimeout(url, 20000);
+          if (data) {
+            resolvedBase = candidate.base;
+            resolvedProvider = candidate.provider;
+            resolvedTarget = target;
+            break;
+          }
+        } catch (err) {
+          const errDetails = extractRequestErrorDetails(err);
+          errors.push({
+            provider: candidate.provider,
+            url,
+            ...errDetails,
+          });
         }
-      } catch (err) {
-        const errDetails = extractRequestErrorDetails(err);
-        errors.push({
-          provider: candidate.provider,
-          url,
-          ...errDetails,
-        });
       }
+      if (data) break;
     }
     if (!data) {
       logSafeEvent('subtitles', 'search_failed_all_sources', 'Subtitle search failed on all addon endpoints', {
@@ -1982,7 +2019,7 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
         tried,
         errors,
       });
-      return {
+      const responsePayload = {
         ok: true,
         subtitles: [],
         imdbId,
@@ -1993,12 +2030,14 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
           message: 'No subtitle payload received from addon endpoints',
         },
       };
+      setCachedSubtitleSearch(cacheKey, responsePayload);
+      return responsePayload;
     }
     const rawSubs = Array.isArray(data?.subtitles)
       ? data.subtitles
       : (Array.isArray(data?.all) ? data.all : (Array.isArray(data) ? data : []));
     const subtitles = sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider);
-    return {
+    const responsePayload = {
       ok: true,
       subtitles,
       imdbId,
@@ -2006,11 +2045,14 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
         source: resolvedProvider || 'unknown',
         tried,
         errors,
+        resolvedTarget,
         resolvedProvider,
         resolvedBase,
         rawCount: rawSubs.length,
       },
     };
+    setCachedSubtitleSearch(cacheKey, responsePayload);
+    return responsePayload;
   } catch (err) {
     logSafeEvent('subtitles', 'search_failed', 'Library subtitle search failed', { error: err.message });
     return { ok: false, error: err.message };
@@ -2022,6 +2064,7 @@ ipcMain.handle('library-subtitles-download', async (event, payload = {}) => {
     const filePath = String(payload.fullPath || '').trim();
     const subtitleUrl = String(payload.subtitleUrl || '').trim();
     const subtitleProvider = String(payload.subtitleProvider || '').trim();
+    const outputBaseName = String(payload.outputBaseName || '').trim();
     if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Video file not found' };
     if (!subtitleUrl) return { ok: false, error: 'Subtitle URL missing' };
     let parsedUrl;
@@ -2046,7 +2089,7 @@ ipcMain.handle('library-subtitles-download', async (event, payload = {}) => {
     const { text, contentType } = await fetchTextWithTimeout(subtitleUrl, 25000);
     if (!text || !text.trim()) return { ok: false, error: 'Subtitle content is empty' };
     const videoDir = path.dirname(filePath);
-    const videoBase = path.parse(filePath).name;
+    const videoBase = outputBaseName || path.parse(filePath).name;
     const extByUrl = path.extname(new URL(subtitleUrl).pathname || '').toLowerCase();
     const extByType = /\b(vtt)\b/i.test(contentType) ? '.vtt' : '.srt';
     const subtitleExt = extByUrl && extByUrl.length <= 5 ? extByUrl : extByType;
@@ -2073,6 +2116,19 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     }
     const fileUrl = pathToFileURL(filePath).href;
     await shell.openExternal(fileUrl);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-library-folder', async (event, payload = {}) => {
+  try {
+    const filePath = String(payload.fullPath || '');
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { ok: false, error: 'File not found' };
+    }
+    shell.showItemInFolder(filePath);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };

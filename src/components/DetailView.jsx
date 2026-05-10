@@ -46,6 +46,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
             query MediaDetail($id: Int!) {
               Media(id: $id, type: ANIME) {
               id
+              format
               title { romaji english native }
               description(asHtml: false)
               coverImage { extraLarge large }
@@ -121,6 +122,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
             studios: m.studios?.nodes?.filter(s => s.isAnimationStudio).map(s => s.name) || [],
             externalCatalog: 'anilist',
             media_type: 'anime',
+            animeFormat: m.format || '',
           });
           hasResolvedData = true;
         } catch (err) {
@@ -242,6 +244,10 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
     ? `linear-gradient(to top, var(--background) 10%, transparent), linear-gradient(to right, var(--background) 20%, transparent), url(${backdropUrl})`
     : 'linear-gradient(180deg, rgba(0, 255, 204, 0.08), transparent 60%), radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 30%)';
 
+  const sourceType = (type === 'anime' && String(data?.animeFormat || '').toUpperCase() === 'MOVIE')
+    ? 'movie'
+    : type;
+
   return (
     <div className="detail-view">
       <button className="close-btn" onClick={() => navigate(-1)}><X size={24} /></button>
@@ -281,7 +287,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
       </div>
 
       <div className="detail-sections">
-        <SourceSearchPanel item={data} type={type} settings={settings} />
+        <SourceSearchPanel item={data} type={sourceType} settings={settings} />
 
         {filteredCast?.length > 0 && (
           <section className="detail-section">

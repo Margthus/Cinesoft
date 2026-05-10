@@ -8,6 +8,33 @@ import {
 import { detectTorrentioSite, normalizeTorrentioConfig } from '../utils/torrentio';
 import { fetchSeasonDetails, searchContent, fetchDetails } from '../utils/tmdb';
 
+const TORRENTIO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const TORRENTIO_CACHE_MAX_ENTRIES = 1500;
+const torrentioSearchCache = new Map();
+
+const buildTorrentioCacheKey = (payload = {}) => JSON.stringify(payload);
+
+const getCachedTorrentioSearch = (key) => {
+  const entry = torrentioSearchCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - Number(entry.cachedAt || 0)) > TORRENTIO_CACHE_TTL_MS) {
+    torrentioSearchCache.delete(key);
+    return null;
+  }
+  return Array.isArray(entry.results) ? entry.results : null;
+};
+
+const setCachedTorrentioSearch = (key, results = []) => {
+  torrentioSearchCache.set(key, {
+    cachedAt: Date.now(),
+    results: Array.isArray(results) ? results : [],
+  });
+  if (torrentioSearchCache.size > TORRENTIO_CACHE_MAX_ENTRIES) {
+    const oldestKey = torrentioSearchCache.keys().next().value;
+    if (oldestKey) torrentioSearchCache.delete(oldestKey);
+  }
+};
+
 const formatSize = (bytes) => {
   const value = Number(bytes) || 0;
   if (value <= 0) return '0 B';
@@ -331,6 +358,24 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
     const url = isMovie
       ? `${baseUrl}/stream/movie/${imdbId}.json`
       : `${baseUrl}/stream/series/${imdbId}:${targetSeason}:${targetEpisode}.json`;
+    const cacheKey = buildTorrentioCacheKey({
+      baseUrl,
+      imdbId: String(imdbId || ''),
+      season: Number(targetSeason || 0),
+      episode: Number(targetEpisode || 0),
+      isMovie: Boolean(isMovie),
+      maxResults,
+      blocked,
+      enabledSites,
+    });
+    const cachedResults = getCachedTorrentioSearch(cacheKey);
+    if (cachedResults) {
+      logSourceSearch('cache_hit', 'Torrentio cache hit', {
+        provider: 'Torrentio',
+        resultCount: cachedResults.length,
+      });
+      return cachedResults;
+    }
 
     try {
       const startedAt = Date.now();
@@ -349,7 +394,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         durationMs: Date.now() - startedAt,
       });
       const data = await response.json();
-      return (data.streams || []).map((stream, index) => {
+      const mapped = (data.streams || []).map((stream, index) => {
         const titleParts = String(stream.title || '')
           .split(/\r?\n/)
           .map((line) => line.trim())
@@ -395,6 +440,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         const hay = `${stream.title || ''} ${stream.provider || ''}`.toLowerCase();
         return !hasBlockedKeyword(hay, blocked);
       }).slice(0, maxResults);
+      setCachedTorrentioSearch(cacheKey, mapped);
+      return mapped;
     } catch (e) {
       logSourceSearch('exception', 'Torrentio request failed', {
         provider: 'Torrentio',

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { ArrowLeft, Captions, CheckCircle2, Download, Film, HardDrive, Library, PlayCircle, Tv, X } from 'lucide-react';
+import { ArrowLeft, Captions, CheckCircle2, Download, Film, FolderOpen, HardDrive, Library, PlayCircle, Tv, X } from 'lucide-react';
 import SourceSearchPanel from './SourceSearchPanel';
 import { fetchDetails, fetchSeasonDetails, searchContent } from '../utils/tmdb';
 import '../styles/LibraryView.css';
@@ -537,6 +537,10 @@ const LibraryView = ({ settings }) => {
     await window.electronAPI?.openLibraryVideo?.({ fullPath: item.fullPath });
   };
 
+  const openFolder = async (item) => {
+    await window.electronAPI?.openLibraryFolder?.({ fullPath: item.fullPath });
+  };
+
   const openMovieSubtitleModal = async (item) => {
     if (!item?.fullPath || !window.electronAPI?.searchLibrarySubtitles) return;
     setMovieSubtitleTarget(item);
@@ -610,6 +614,7 @@ const LibraryView = ({ settings }) => {
         seasonDetails={seasonDetails}
         onBack={() => setSelectedSeriesKey('')}
         onOpenVideo={openVideo}
+        onOpenFolder={openFolder}
       />
     );
   }
@@ -676,16 +681,27 @@ const LibraryView = ({ settings }) => {
                 )}
                 <div className="library-play-overlay"><PlayCircle size={34} /></div>
                 {card.type === 'movie' && (
-                  <button
-                    className="library-card-subtitle-btn"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openMovieSubtitleModal(item);
-                    }}
-                  >
-                    <Captions size={14} />
-                    {isTr ? 'Altyazi' : 'Subtitle'}
-                  </button>
+                  <div className="library-card-actions">
+                    <button
+                      className="library-card-folder-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openFolder(item);
+                      }}
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                    <button
+                      className="library-card-subtitle-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openMovieSubtitleModal(item);
+                      }}
+                    >
+                      <Captions size={14} />
+                      {isTr ? 'Altyazi' : 'Subtitle'}
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="library-meta">
@@ -764,7 +780,7 @@ const LibraryView = ({ settings }) => {
   );
 };
 
-const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onBack, onOpenVideo }) => {
+const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onBack, onOpenVideo, onOpenFolder }) => {
   const [searchTarget, setSearchTarget] = useState(null);
   const [subtitleTarget, setSubtitleTarget] = useState(null);
   const [subtitleList, setSubtitleList] = useState([]);
@@ -909,7 +925,9 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
           const episodes = tmdbEpisodes.length ? tmdbEpisodes : fallbackEpisodes;
           return (
             <section className="series-season" key={number}>
-              <h2>{tmdbSeason?.name || season.name || `${isTr ? 'Sezon' : 'Season'} ${number}`}</h2>
+              <div className="series-season-head">
+                <h2>{tmdbSeason?.name || season.name || `${isTr ? 'Sezon' : 'Season'} ${number}`}</h2>
+              </div>
               <div className="episode-list">
                 {episodes.map((episode) => {
                   const local = downloaded.get(`${number}:${episode.episode_number}`);
@@ -928,6 +946,9 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
                       ) : local ? (
                         <>
                         <div className="episode-ready-actions">
+                          <button className="episode-ready episode-action" onClick={() => onOpenFolder?.(local)}>
+                            <FolderOpen size={15} />
+                          </button>
                           <button className="episode-ready episode-action" onClick={() => onOpenVideo(local)}>
                             <CheckCircle2 size={15} /> {isTr ? 'Oynat' : 'Play'}
                           </button>
