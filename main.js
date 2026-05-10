@@ -3,6 +3,9 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
+const http = require('http');
+const https = require('https');
+const axios = require('axios');
 const { pathToFileURL } = require('url');
 let DatabaseSync = null;
 try {
@@ -79,6 +82,21 @@ const DEFAULT_TORRENTIO_SETTINGS = {
     ibit: true,
     all: true,
   },
+};
+const DEFAULT_SUBTITLE_ADDON_BASE_URL = 'https://turkcealtyaziorg-stremio-addon.mycodelab.live';
+const FALLBACK_SUBTITLE_ADDON_BASE_URLS = [
+  'https://turkcealtyaziorg-stremio-addon.mycodelab.live',
+  'https://turkcealtyaziorg-stremio-addon.mycodelab.com.tr',
+];
+const OPENSUBTITLES_V3_BASE_URL = 'https://opensubtitles-v3.strem.io';
+
+const subtitleHttpAgent = new http.Agent({ keepAlive: false });
+const subtitleHttpsAgent = new https.Agent({ keepAlive: false });
+const SUBTITLE_REQUEST_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  Accept: 'application/json,text/plain,text/html,*/*',
+  'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+  Connection: 'close',
 };
 
 const getPersistedDownloads = () => {
@@ -1708,6 +1726,337 @@ ipcMain.handle('torrent-validate-candidate', async (event, payload = {}) => {
   }
 
   return result;
+});
+
+const getSubtitleAddonBaseUrl = () => {
+  const custom = String(store.get('subtitleAddonBaseUrl') || '').trim();
+  const base = custom || DEFAULT_SUBTITLE_ADDON_BASE_URL;
+  return base.replace(/\/+$/, '');
+};
+
+const getSubtitleAddonBaseUrls = () => {
+  const custom = String(store.get('subtitleAddonBaseUrl') || '').trim().replace(/\/+$/, '');
+  const list = custom ? [custom] : [];
+  for (const url of FALLBACK_SUBTITLE_ADDON_BASE_URLS) {
+    const normalized = String(url || '').trim().replace(/\/+$/, '');
+    if (!normalized) continue;
+    if (!list.includes(normalized)) list.push(normalized);
+  }
+  return list;
+};
+
+const fetchJsonWithTimeout = async (url, timeoutMs = 20000) => {
+  try {
+    const response = await axios.get(url, {
+      timeout: timeoutMs,
+      headers: SUBTITLE_REQUEST_HEADERS,
+      responseType: 'json',
+      maxRedirects: 5,
+      httpAgent: subtitleHttpAgent,
+      httpsAgent: subtitleHttpsAgent,
+      validateStatus: () => true,
+    });
+    if (!response || response.status < 200 || response.status >= 300) {
+      const err = new Error(`HTTP ${response?.status || 0}`);
+      err.code = `HTTP_${response?.status || 0}`;
+      throw err;
+    }
+    return response.data;
+  } catch (err) {
+    if (err?.response?.status) {
+      const wrapped = new Error(`HTTP ${err.response.status}`);
+      wrapped.code = `HTTP_${err.response.status}`;
+      wrapped.cause = err;
+      throw wrapped;
+    }
+    throw err;
+  }
+};
+
+const fetchTextWithTimeout = async (url, timeoutMs = 20000) => {
+  try {
+    const response = await axios.get(url, {
+      timeout: timeoutMs,
+      headers: SUBTITLE_REQUEST_HEADERS,
+      responseType: 'text',
+      maxRedirects: 5,
+      httpAgent: subtitleHttpAgent,
+      httpsAgent: subtitleHttpsAgent,
+      validateStatus: () => true,
+    });
+    if (!response || response.status < 200 || response.status >= 300) {
+      const err = new Error(`HTTP ${response?.status || 0}`);
+      err.code = `HTTP_${response?.status || 0}`;
+      throw err;
+    }
+    return {
+      text: String(response.data || ''),
+      contentType: String(response.headers?.['content-type'] || ''),
+    };
+  } catch (err) {
+    if (err?.response?.status) {
+      const wrapped = new Error(`HTTP ${err.response.status}`);
+      wrapped.code = `HTTP_${err.response.status}`;
+      wrapped.cause = err;
+      throw wrapped;
+    }
+    throw err;
+  }
+};
+
+const extractRequestErrorDetails = (err) => {
+  const cause = err?.cause || err?.innerError || null;
+  return {
+    error: String(err?.message || 'request failed'),
+    name: String(err?.name || ''),
+    cause: cause ? String(cause?.message || '') : '',
+    code: String(cause?.code || err?.code || ''),
+    errno: String(cause?.errno || err?.errno || ''),
+    syscall: String(cause?.syscall || err?.syscall || ''),
+    address: String(cause?.address || err?.address || ''),
+    port: Number(cause?.port || err?.port || 0) || null,
+  };
+};
+
+const resolveImdbIdForSubtitle = async ({ imdbId, tmdbType, tmdbId }) => {
+  const direct = String(imdbId || '').trim();
+  if (direct.startsWith('tt')) return direct;
+  const type = String(tmdbType || '').trim().toLowerCase();
+  const id = Number(tmdbId) || 0;
+  const apiKey = String(store.get('apiKey') || '').trim();
+  if (!apiKey || !id || !type) return '';
+  const endpointType = type === 'tv' || type === 'anime' ? 'tv' : 'movie';
+  const url = new URL(`https://api.themoviedb.org/3/${endpointType}/${id}/external_ids`);
+  url.searchParams.set('api_key', apiKey);
+  const data = await fetchJsonWithTimeout(url.toString(), 15000);
+  const resolved = String(data?.imdb_id || '').trim();
+  return resolved.startsWith('tt') ? resolved : '';
+};
+
+const normalizeSubtitleType = (tmdbType = '') => {
+  const type = String(tmdbType || '').toLowerCase();
+  return type === 'movie' ? 'movie' : 'series';
+};
+
+const buildSubtitleCandidatePaths = ({ type, target }) => {
+  const list = [
+    `/subtitles/${type}/${target}.json`,
+    `/addon/subtitles/${type}/${target}.json`,
+  ];
+  if (type === 'series') {
+    list.push(`/subtitles/tv/${target}.json`);
+    list.push(`/addon/subtitles/tv/${target}.json`);
+  }
+  return list;
+};
+
+const buildSubtitleRequestCandidates = ({ type, target }) => {
+  const candidates = [];
+  const opensubBase = OPENSUBTITLES_V3_BASE_URL.replace(/\/+$/, '');
+  if (opensubBase) {
+    candidates.push({
+      provider: 'opensubtitles-v3',
+      base: opensubBase,
+      route: `/subtitles/${type}/${target}.json`,
+    });
+  }
+  for (const base of getSubtitleAddonBaseUrls()) {
+    for (const route of buildSubtitleCandidatePaths({ type, target })) {
+      candidates.push({
+        provider: 'turkcealtyaziorg-stremio-addon',
+        base,
+        route,
+      });
+    }
+  }
+  return candidates;
+};
+
+const guessSubtitleLabel = (subtitle = {}, url = '') => {
+  const direct = String(
+    subtitle?.label
+    || subtitle?.title
+    || subtitle?.name
+    || subtitle?.fileName
+    || subtitle?.filename
+    || ''
+  ).trim();
+  if (direct) return direct;
+  try {
+    const parsed = new URL(url);
+    const file = decodeURIComponent(path.basename(parsed.pathname || '')).trim();
+    if (file) return file;
+  } catch {}
+  return '';
+};
+
+const sanitizeSubtitleList = (subtitles = [], baseUrl = '', provider = '') => {
+  if (!Array.isArray(subtitles)) return [];
+  return subtitles
+    .map((subtitle, index) => {
+      let url = String(subtitle?.url || '').trim();
+      if (!url) return null;
+      if (url.startsWith('/')) {
+        url = `${String(baseUrl || '').replace(/\/+$/, '')}${url}`;
+      }
+      return {
+        id: String(subtitle?.id || `sub-${index + 1}`),
+        lang: String(subtitle?.lang || 'unknown'),
+        url,
+        label: guessSubtitleLabel(subtitle, url),
+        provider: provider || '',
+      };
+    })
+    .filter(Boolean);
+};
+
+const isPrivateOrLocalHost = (hostname = '') => {
+  const host = String(hostname || '').trim().toLowerCase();
+  if (!host) return true;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+};
+
+ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
+  try {
+    const filePath = String(payload.fullPath || '').trim();
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { ok: false, error: 'Video file not found' };
+    }
+    const season = Math.max(0, Number(payload.season) || 0);
+    const episode = Math.max(0, Number(payload.episode) || 0);
+    const tmdbType = String(payload.tmdbType || '').trim();
+    const imdbId = await resolveImdbIdForSubtitle({
+      imdbId: payload.imdbId,
+      tmdbType,
+      tmdbId: payload.tmdbId,
+    });
+    if (!imdbId) {
+      return { ok: false, error: 'IMDB id not available for this item' };
+    }
+
+    const type = normalizeSubtitleType(tmdbType);
+    const target = type === 'movie'
+      ? `${imdbId}`
+      : `${imdbId}:${season}:${episode}`;
+    let data = null;
+    let resolvedBase = '';
+    let resolvedProvider = '';
+    const tried = [];
+    const errors = [];
+    const requestCandidates = buildSubtitleRequestCandidates({ type, target });
+    for (const candidate of requestCandidates) {
+      const url = `${candidate.base}${candidate.route}`;
+      tried.push(url);
+      try {
+        data = await fetchJsonWithTimeout(url, 20000);
+        if (data) {
+          resolvedBase = candidate.base;
+          resolvedProvider = candidate.provider;
+          break;
+        }
+      } catch (err) {
+        const errDetails = extractRequestErrorDetails(err);
+        errors.push({
+          provider: candidate.provider,
+          url,
+          ...errDetails,
+        });
+      }
+    }
+    if (!data) {
+      logSafeEvent('subtitles', 'search_failed_all_sources', 'Subtitle search failed on all addon endpoints', {
+        imdbId,
+        tmdbType,
+        season,
+        episode,
+        tried,
+        errors,
+      });
+      return {
+        ok: true,
+        subtitles: [],
+        imdbId,
+        debug: {
+          source: 'multi-provider',
+          tried,
+          errors,
+          message: 'No subtitle payload received from addon endpoints',
+        },
+      };
+    }
+    const rawSubs = Array.isArray(data?.subtitles)
+      ? data.subtitles
+      : (Array.isArray(data?.all) ? data.all : (Array.isArray(data) ? data : []));
+    const subtitles = sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider);
+    return {
+      ok: true,
+      subtitles,
+      imdbId,
+      debug: {
+        source: resolvedProvider || 'unknown',
+        tried,
+        errors,
+        resolvedProvider,
+        resolvedBase,
+        rawCount: rawSubs.length,
+      },
+    };
+  } catch (err) {
+    logSafeEvent('subtitles', 'search_failed', 'Library subtitle search failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('library-subtitles-download', async (event, payload = {}) => {
+  try {
+    const filePath = String(payload.fullPath || '').trim();
+    const subtitleUrl = String(payload.subtitleUrl || '').trim();
+    const subtitleProvider = String(payload.subtitleProvider || '').trim();
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Video file not found' };
+    if (!subtitleUrl) return { ok: false, error: 'Subtitle URL missing' };
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(subtitleUrl);
+    } catch {
+      return { ok: false, error: 'Invalid subtitle URL' };
+    }
+    if (!/^https?:$/i.test(parsedUrl.protocol)) {
+      return { ok: false, error: 'Unsupported subtitle URL protocol' };
+    }
+    if (isPrivateOrLocalHost(parsedUrl.hostname)) {
+      return { ok: false, error: 'Subtitle host is not allowed' };
+    }
+    if (subtitleProvider === 'turkcealtyaziorg-stremio-addon') {
+      const allowedBases = getSubtitleAddonBaseUrls();
+      if (!allowedBases.some((base) => subtitleUrl.startsWith(base))) {
+        return { ok: false, error: 'Subtitle source not allowed' };
+      }
+    }
+
+    const { text, contentType } = await fetchTextWithTimeout(subtitleUrl, 25000);
+    if (!text || !text.trim()) return { ok: false, error: 'Subtitle content is empty' };
+    const videoDir = path.dirname(filePath);
+    const videoBase = path.parse(filePath).name;
+    const extByUrl = path.extname(new URL(subtitleUrl).pathname || '').toLowerCase();
+    const extByType = /\b(vtt)\b/i.test(contentType) ? '.vtt' : '.srt';
+    const subtitleExt = extByUrl && extByUrl.length <= 5 ? extByUrl : extByType;
+    const subtitlePath = path.join(videoDir, `${videoBase}${subtitleExt}`);
+    fs.writeFileSync(subtitlePath, text, 'utf8');
+    return { ok: true, path: subtitlePath };
+  } catch (err) {
+    logSafeEvent('subtitles', 'download_failed', 'Library subtitle download failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('logs-get', async () => ({ ok: true, logs: appLogs }));
