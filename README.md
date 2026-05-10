@@ -1,7 +1,5 @@
 # CineSoft
 
-[Latest Release Notes](https://github.com/Margthus/Cinesoft/releases/latest)
-
 ---
 
 ## English
