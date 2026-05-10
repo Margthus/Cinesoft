@@ -49,6 +49,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   const [indexerFilter, setIndexerFilter] = useState('all');
   const [sortBy, setSortBy] = useState(normalizeTorrentioConfig(settings?.torrentio || {}).sortBy || 'seeders');
   const [sourceSearchQuery, setSourceSearchQuery] = useState('');
+  const [searchError, setSearchError] = useState('');
   const [actionLoading, setActionLoading] = useState({});
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [filePickerLoading, setFilePickerLoading] = useState(false);
@@ -60,6 +61,45 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   const prowlarrConfig = settings.prowlarr || DEFAULT_PROWLARR_CONFIG;
   const activeCount = prowlarrConfig.enabled ? 1 : 0;
   const isEpisodic = type === 'tv' || type === 'anime';
+
+  const logSourceSearch = (code, message, details = {}) => {
+    window.electronAPI?.logEvent?.({
+      source: 'source-search',
+      code,
+      message,
+      details,
+    });
+  };
+
+  const validateSourceProvider = () => {
+    if (settings.torrentioEnabled) {
+      logSourceSearch('start', 'Source search started', {
+        provider: 'Torrentio',
+        providerEnabled: true,
+        hasBaseUrl: Boolean(normalizeTorrentioConfig(settings?.torrentio || {}).baseUrl),
+      });
+      return '';
+    }
+
+    logSourceSearch('start', 'Source search started', {
+      provider: 'Prowlarr',
+      providerEnabled: prowlarrConfig.enabled === true,
+      hasBaseUrl: Boolean(prowlarrConfig.baseUrl),
+      hasApiKey: Boolean(prowlarrConfig.apiKey),
+    });
+
+    if (!prowlarrConfig.enabled) return 'No source provider enabled';
+    if (!prowlarrConfig.baseUrl || !prowlarrConfig.apiKey) return 'Prowlarr base URL/API key missing';
+    return '';
+  };
+
+  const resetSearchState = () => {
+    setSearched(true);
+    setSearchError('');
+    setQualityFilter('all');
+    setIndexerFilter('all');
+    setSourceSearchQuery('');
+  };
 
   useEffect(() => {
     if (!settings?.torrentioEnabled) return;
@@ -176,11 +216,40 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
     const idToUse = tmdbMatch ? tmdbMatch.id : item.id;
     if (!idToUse) return null;
+    if (!settings.apiKey) {
+      logSourceSearch('config_missing', 'TMDB API key missing', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        endpoint: '/external_ids',
+        requestSent: false,
+      });
+      throw new Error('TMDB API key missing');
+    }
     try {
-      const response = await fetch(`https://api.themoviedb.org/3/${type === 'movie' ? 'movie' : 'tv'}/${idToUse}/external_ids?api_key=${settings.apiKey}`);
+      const startedAt = Date.now();
+      const endpoint = `/${type === 'movie' ? 'movie' : 'tv'}/${idToUse}/external_ids`;
+      logSourceSearch('request', 'TMDB external IDs request sent', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        endpoint,
+        requestSent: true,
+      });
+      const response = await fetch(`https://api.themoviedb.org/3${endpoint}?api_key=${settings.apiKey}`);
+      logSourceSearch('response', 'TMDB external IDs response received', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        endpoint,
+        status: response.status,
+        ok: response.ok,
+        durationMs: Date.now() - startedAt,
+      });
       const data = await response.json();
       return data.imdb_id;
-    } catch {
+    } catch (error) {
+      logSourceSearch('exception', 'TMDB external IDs request failed', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        endpoint: '/external_ids',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : '',
+      });
+      if (error?.message === 'TMDB API key missing') throw error;
       return null;
     }
   };
@@ -226,6 +295,13 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   };
 
   const searchTorrentioSources = async (imdbId, targetSeason, targetEpisode, isMovie) => {
+    if (!settings.torrentioEnabled) {
+      logSourceSearch('config_missing', 'Torrentio disabled', {
+        provider: 'Torrentio',
+        requestSent: false,
+      });
+      throw new Error('Torrentio disabled');
+    }
     if (!imdbId) return [];
     const torrentioConfig = normalizeTorrentioConfig(settings?.torrentio || {});
     const baseUrl = String(torrentioConfig.baseUrl || 'https://torrentio.strem.fun').replace(/\/+$/, '');
@@ -240,7 +316,21 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       : `${baseUrl}/stream/series/${imdbId}:${targetSeason}:${targetEpisode}.json`;
 
     try {
+      const startedAt = Date.now();
+      logSourceSearch('request', 'Torrentio request sent', {
+        provider: 'Torrentio',
+        providerEnabled: true,
+        hasBaseUrl: Boolean(baseUrl),
+        requestSent: true,
+        endpoint: isMovie ? '/stream/movie/:imdbId.json' : '/stream/series/:imdbId:season:episode.json',
+      });
       const response = await fetch(url);
+      logSourceSearch(response.ok ? 'response' : 'http_error', 'Torrentio response received', {
+        provider: 'Torrentio',
+        status: response.status,
+        ok: response.ok,
+        durationMs: Date.now() - startedAt,
+      });
       const data = await response.json();
       return (data.streams || []).map((stream, index) => {
         const titleParts = String(stream.title || '')
@@ -289,8 +379,13 @@ const SourceSearchPanel = ({ item, type, settings }) => {
         return !hasBlockedKeyword(hay, blocked);
       }).slice(0, maxResults);
     } catch (e) {
+      logSourceSearch('exception', 'Torrentio request failed', {
+        provider: 'Torrentio',
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack : '',
+      });
       console.error('Torrentio error', e);
-      return [];
+      throw e;
     }
   };
 
@@ -445,11 +540,11 @@ const SourceSearchPanel = ({ item, type, settings }) => {
     setSelectedEpisode(ep);
 
     setLoading(true);
-    setSearched(true);
-    setQualityFilter('all');
-    setIndexerFilter('all');
-    setSourceSearchQuery('');
+    resetSearchState();
     try {
+      const configError = validateSourceProvider();
+      if (configError) throw new Error(configError);
+
       if (settings.torrentioEnabled) {
         const imdbId = await getImdbId();
         const sources = await searchTorrentioSources(imdbId, season, ep.episode_number, false);
@@ -470,6 +565,15 @@ const SourceSearchPanel = ({ item, type, settings }) => {
         });
         setResults(sources);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setResults([]);
+      setSearchError(message);
+      logSourceSearch('exception', 'Episode source search failed', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        error: message,
+        stack: error instanceof Error ? error.stack : '',
+      });
     } finally {
       setLoading(false);
     }
@@ -477,10 +581,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
   const handleSeasonPackSearch = async (targetSeason) => {
     setLoading(true);
-    setSearched(true);
-    setQualityFilter('all');
-    setIndexerFilter('all');
-    setSourceSearchQuery('');
+    resetSearchState();
     setSelectedEpisode({
       isPack: true,
       name: targetSeason === 'all'
@@ -489,6 +590,9 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       episode_number: null,
     });
     try {
+      const configError = validateSourceProvider();
+      if (configError) throw new Error(configError);
+
       const title = item.original_title || item.original_name || item.title || item.name;
       const payload = {
         title,
@@ -506,6 +610,15 @@ const SourceSearchPanel = ({ item, type, settings }) => {
         sources = await searchEpisodeSources(prowlarrConfig, { ...payload, title: packTitle, season: targetSeason });
       }
       setResults(sources);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setResults([]);
+      setSearchError(message);
+      logSourceSearch('exception', 'Season pack source search failed', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        error: message,
+        stack: error instanceof Error ? error.stack : '',
+      });
     } finally {
       setLoading(false);
     }
@@ -513,11 +626,11 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
   const handleSearch = async () => {
     setLoading(true);
-    setSearched(true);
-    setQualityFilter('all');
-    setIndexerFilter('all');
-    setSourceSearchQuery('');
+    resetSearchState();
     try {
+      const configError = validateSourceProvider();
+      if (configError) throw new Error(configError);
+
       if (settings.torrentioEnabled) {
         const imdbId = await getImdbId();
         const sources = await searchTorrentioSources(imdbId, isEpisodic ? season : null, isEpisodic ? episode : null, !isEpisodic);
@@ -544,6 +657,15 @@ const SourceSearchPanel = ({ item, type, settings }) => {
 
         setResults(sources);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setResults([]);
+      setSearchError(message);
+      logSourceSearch('exception', 'Source search failed', {
+        provider: settings.torrentioEnabled ? 'Torrentio' : 'Prowlarr',
+        error: message,
+        stack: error instanceof Error ? error.stack : '',
+      });
     } finally {
       setLoading(false);
     }
@@ -620,6 +742,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                 setSelectedEpisode(null);
                 setResults([]);
                 setSearched(false);
+                setSearchError('');
               }}
             >
               {(tmdbMatch?.seasons || item.seasons || [{ season_number: 1, name: 'Season 1' }])
@@ -696,6 +819,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                 setSelectedEpisode(null);
                 setResults([]);
                 setSearched(false);
+                setSearchError('');
               }}>
                 &larr; {settings.language === 'tr' ? 'Bölümlere Dön' : 'Back to Episodes'}
               </button>
@@ -777,7 +901,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       {searched && !loading && filteredAndSortedResults.length === 0 && (
         <div className="source-empty">
           <ShieldAlert size={20} />
-          <span>{t.noSources}</span>
+          <span>{searchError || t.noSources}</span>
         </div>
       )}
 

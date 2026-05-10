@@ -345,6 +345,34 @@ const logEvent = (source, code, message, details = {}) => {
   };
   appLogs.unshift(entry);
   if (appLogs.length > MAX_APP_LOGS) appLogs.length = MAX_APP_LOGS;
+  try {
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.appendFileSync(path.join(logsDir, 'cinesoft.log'), `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (err) {
+    console.error('[Main] Failed to write log file:', err.message);
+  }
+};
+
+const sanitizeLogDetails = (value) => {
+  if (Array.isArray(value)) return value.map(sanitizeLogDetails);
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'string') {
+      return value.replace(/([?&](?:api_key|apikey|apiKey)=)[^&\s]+/gi, '$1***');
+    }
+    return value;
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    if (/^(api[-_ ]?key|apikey|authorization|password|token|secret)$/i.test(key)) {
+      return [key, item ? '***' : item];
+    }
+    return [key, sanitizeLogDetails(item)];
+  }));
+};
+
+const logSafeEvent = (source, code, message, details = {}) => {
+  logEvent(source, code, message, sanitizeLogDetails(details));
 };
 
 const classifyError = (raw = '') => {
@@ -409,7 +437,8 @@ const ensureTorrentManager = async () => {
   return torrentManager;
 };
 
-const sourcesModulePath = pathToFileURL(path.join(__dirname, 'src', 'sources', 'index.mjs')).href;
+const getAppRoot = () => app.isPackaged ? app.getAppPath() : __dirname;
+const sourcesModulePath = pathToFileURL(path.join(getAppRoot(), 'src', 'sources', 'index.mjs')).href;
 
 const getSourcesModule = () => import(sourcesModulePath);
 
@@ -839,6 +868,33 @@ ipcMain.handle('save-settings', (event, settings) => {
       ...(nextTorrentio.enabledSites || {}),
     },
   });
+  const savedApiKey = store.get('apiKey') || '';
+  const savedProwlarr = store.get('prowlarr') || {};
+  const settingsVerified = String(savedApiKey) === String(settings.apiKey || '')
+    && store.get('language') === settings.language
+    && store.get('torrentioEnabled') === (settings.torrentioEnabled || false);
+  logSafeEvent('settings', 'saved', 'Settings saved and verified', {
+    storePath: store.path,
+    userDataPath: app.getPath('userData'),
+    isPackaged: app.isPackaged,
+    settingsVerified,
+    hasTmdbApiKey: Boolean(savedApiKey),
+    tmdbApiKeyLength: String(savedApiKey).length,
+    prowlarrEnabled: savedProwlarr.enabled === true,
+    hasProwlarrBaseUrl: Boolean(savedProwlarr.baseUrl),
+    hasProwlarrApiKey: Boolean(savedProwlarr.apiKey),
+    torrentioEnabled: store.get('torrentioEnabled') === true,
+  });
+  return settingsVerified;
+});
+
+ipcMain.handle('app-log', (event, payload = {}) => {
+  logSafeEvent(
+    payload.source || 'renderer',
+    payload.code || 'info',
+    payload.message || 'Renderer event',
+    payload.details || {},
+  );
   return true;
 });
 
@@ -910,21 +966,69 @@ ipcMain.handle('qbittorrent-add', async (event, opts = {}, qbConfig = {}) => {
 });
 
 ipcMain.handle('search-movie-sources', async (event, params) => {
+  const startedAt = Date.now();
+  const prowlarrConfig = getProwlarrConfig();
+  logSafeEvent('source-search', 'start', 'Movie source search started', {
+    provider: 'Prowlarr',
+    providerEnabled: prowlarrConfig.enabled === true,
+    hasBaseUrl: Boolean(prowlarrConfig.baseUrl),
+    hasApiKey: Boolean(prowlarrConfig.apiKey),
+    requestSent: Boolean(prowlarrConfig.enabled && prowlarrConfig.baseUrl && prowlarrConfig.apiKey),
+    endpoint: '/api/v1/search',
+    params,
+  });
   try {
     const { searchStreamSourcesForMovie } = await getSourcesModule();
-    return await searchStreamSourcesForMovie(getProwlarrConfig(), params);
+    const results = await searchStreamSourcesForMovie({
+      ...prowlarrConfig,
+      logger: (entry) => logSafeEvent('prowlarr', entry.code || 'info', entry.message || 'Prowlarr event', entry.details || {}),
+    }, params);
+    logSafeEvent('source-search', 'success', 'Movie source search finished', {
+      provider: 'Prowlarr',
+      resultCount: Array.isArray(results) ? results.length : 0,
+      durationMs: Date.now() - startedAt,
+    });
+    return results;
   } catch (err) {
-    logEvent('prowlarr', classifyError(err.message), 'Movie source search failed', { error: err.message });
+    logSafeEvent('prowlarr', classifyError(err.message), 'Movie source search failed', {
+      error: err.message,
+      stack: err.stack,
+      durationMs: Date.now() - startedAt,
+    });
     return [];
   }
 });
 
 ipcMain.handle('search-episode-sources', async (event, params) => {
+  const startedAt = Date.now();
+  const prowlarrConfig = getProwlarrConfig();
+  logSafeEvent('source-search', 'start', 'Episode source search started', {
+    provider: 'Prowlarr',
+    providerEnabled: prowlarrConfig.enabled === true,
+    hasBaseUrl: Boolean(prowlarrConfig.baseUrl),
+    hasApiKey: Boolean(prowlarrConfig.apiKey),
+    requestSent: Boolean(prowlarrConfig.enabled && prowlarrConfig.baseUrl && prowlarrConfig.apiKey),
+    endpoint: '/api/v1/search',
+    params,
+  });
   try {
     const { searchStreamSourcesForEpisode } = await getSourcesModule();
-    return await searchStreamSourcesForEpisode(getProwlarrConfig(), params);
+    const results = await searchStreamSourcesForEpisode({
+      ...prowlarrConfig,
+      logger: (entry) => logSafeEvent('prowlarr', entry.code || 'info', entry.message || 'Prowlarr event', entry.details || {}),
+    }, params);
+    logSafeEvent('source-search', 'success', 'Episode source search finished', {
+      provider: 'Prowlarr',
+      resultCount: Array.isArray(results) ? results.length : 0,
+      durationMs: Date.now() - startedAt,
+    });
+    return results;
   } catch (err) {
-    logEvent('prowlarr', classifyError(err.message), 'Episode source search failed', { error: err.message });
+    logSafeEvent('prowlarr', classifyError(err.message), 'Episode source search failed', {
+      error: err.message,
+      stack: err.stack,
+      durationMs: Date.now() - startedAt,
+    });
     return [];
   }
 });

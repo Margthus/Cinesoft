@@ -19,6 +19,7 @@ export class ProwlarrProvider extends SourceProvider {
       enabled: normalized.enabled,
       ...normalized,
     });
+    this.logger = typeof config.logger === 'function' ? config.logger : null;
   }
 
   async searchMovie({ title, year } = {}) {
@@ -56,12 +57,29 @@ export class ProwlarrProvider extends SourceProvider {
 
   async search({ query, categories, indexerIds, mediaType, season, episode }) {
     if (!this.config.enabled || !this.config.baseUrl || !this.config.apiKey || !query) {
+      this.log('config_missing', 'Prowlarr search skipped because provider settings are incomplete', {
+        provider: 'Prowlarr',
+        providerEnabled: this.config.enabled === true,
+        hasBaseUrl: Boolean(this.config.baseUrl),
+        hasApiKey: Boolean(this.config.apiKey),
+        hasQuery: Boolean(query),
+        requestSent: false,
+      });
       return [];
     }
 
     const url = this.buildSearchUrl(query, categories, indexerIds);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeout);
+    const startedAt = Date.now();
+
+    this.log('request', 'Prowlarr search request sent', {
+      provider: 'Prowlarr',
+      endpoint: '/api/v1/search',
+      url: String(url),
+      requestSent: true,
+      mediaType,
+    });
 
     try {
       const response = await fetch(url, {
@@ -71,6 +89,13 @@ export class ProwlarrProvider extends SourceProvider {
           'X-Api-Key': this.config.apiKey,
         },
         signal: controller.signal,
+      });
+      this.log(response.ok ? 'response' : 'http_error', 'Prowlarr search response received', {
+        provider: 'Prowlarr',
+        endpoint: '/api/v1/search',
+        status: response.status,
+        ok: response.ok,
+        durationMs: Date.now() - startedAt,
       });
 
       if (!response.ok) {
@@ -83,6 +108,15 @@ export class ProwlarrProvider extends SourceProvider {
       }
 
       return releases.map((release) => this.normalizeRelease(release, { mediaType, season, episode }));
+    } catch (error) {
+      this.log('exception', 'Prowlarr search request failed', {
+        provider: 'Prowlarr',
+        endpoint: '/api/v1/search',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : '',
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -171,9 +205,15 @@ export class ProwlarrProvider extends SourceProvider {
   async requestJson(pathname, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeout);
+    const startedAt = Date.now();
 
     try {
       const baseUrl = this.config.baseUrl.replace(/\/+$/, '');
+      this.log('request', 'Prowlarr request sent', {
+        provider: 'Prowlarr',
+        endpoint: pathname,
+        requestSent: true,
+      });
       const response = await fetch(`${baseUrl}${pathname}`, {
         method: options.method || 'GET',
         headers: {
@@ -184,15 +224,36 @@ export class ProwlarrProvider extends SourceProvider {
         body: options.body ? JSON.stringify(options.body) : undefined,
         signal: controller.signal,
       });
+      this.log(response.ok ? 'response' : 'http_error', 'Prowlarr response received', {
+        provider: 'Prowlarr',
+        endpoint: pathname,
+        status: response.status,
+        ok: response.ok,
+        durationMs: Date.now() - startedAt,
+      });
 
       if (!response.ok) {
         throw new Error(`Prowlarr request failed with ${response.status}`);
       }
 
       return response.json();
+    } catch (error) {
+      this.log('exception', 'Prowlarr request failed', {
+        provider: 'Prowlarr',
+        endpoint: pathname,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : '',
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  log(code, message, details = {}) {
+    if (!this.logger) return;
+    this.logger({ code, message, details });
   }
 
   buildSearchUrl(query, categories, indexerIds = []) {

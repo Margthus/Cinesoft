@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetPassword: (payload) => ipcRenderer.invoke('reset-password', payload),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  logEvent: (payload) => ipcRenderer.invoke('app-log', payload),
   searchMovieSources: (params) => ipcRenderer.invoke('search-movie-sources', params),
   searchEpisodeSources: (params) => ipcRenderer.invoke('search-episode-sources', params),
   testProwlarrConnection: (prowlarrConfig) => ipcRenderer.invoke('test-prowlarr-connection', prowlarrConfig),
