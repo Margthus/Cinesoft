@@ -109,6 +109,84 @@ const removePersistedDownload = (key) => {
   savePersistedDownloads(current.filter((item) => item.key !== key));
 };
 
+const patchPersistedDownload = (key, changes = {}) => {
+  const current = getPersistedDownloads();
+  let found = false;
+  const next = current.map((item) => {
+    if (String(item.key) !== String(key)) return item;
+    found = true;
+    return {
+      ...item,
+      ...changes,
+      mediaInfo: {
+        ...(item.mediaInfo || {}),
+        ...(changes.mediaInfo || {}),
+      },
+    };
+  });
+  if (found) savePersistedDownloads(next);
+};
+
+const getLibraryFileHash = (filePath) => {
+  try {
+    const stat = fs.statSync(filePath);
+    return crypto.createHash('sha1')
+      .update(`${filePath}|${Number(stat.size || 0)}|${Number(stat.mtimeMs || 0)}`)
+      .digest('hex');
+  } catch {
+    return '';
+  }
+};
+
+const upsertLibraryMetadata = (payload = {}) => {
+  if (!metadataDb) return { ok: false, error: 'metadata db not ready' };
+  const filePath = String(payload.filePath || '');
+  if (!filePath) return { ok: false, error: 'filePath is required' };
+  const fileHash = String(payload.fileHash || '');
+  const title = String(payload.title || '');
+  const year = Number(payload.year) || null;
+  const posterUrl = String(payload.posterUrl || '');
+  const tmdbId = Number(payload.tmdbId) || null;
+  const mediaType = String(payload.mediaType || '');
+  const now = Date.now();
+  const stmt = metadataDb.prepare(`
+    INSERT INTO media_metadata_cache (file_path, file_hash, title, year, poster_url, tmdb_id, media_type, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(file_path) DO UPDATE SET
+      file_hash = excluded.file_hash,
+      title = excluded.title,
+      year = excluded.year,
+      poster_url = excluded.poster_url,
+      tmdb_id = excluded.tmdb_id,
+      media_type = excluded.media_type,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(filePath, fileHash, title, year, posterUrl, tmdbId, mediaType, now);
+  return { ok: true };
+};
+
+const cacheTorrentLibraryMetadata = (torrent) => {
+  try {
+    const posterUrl = String(torrent?.mediaInfo?.poster || '');
+    const relPath = String(torrent?.videoFile?.path || '');
+    if (!posterUrl || !relPath) return;
+    const savePath = String(torrent?.savePath || getDownloadDir());
+    const filePath = path.resolve(savePath, relPath);
+    if (!fs.existsSync(filePath)) return;
+    upsertLibraryMetadata({
+      filePath,
+      fileHash: getLibraryFileHash(filePath),
+      title: torrent?.title || torrent?.name || path.parse(filePath).name,
+      year: Number(torrent?.mediaInfo?.year) || null,
+      posterUrl,
+      tmdbId: Number(torrent?.mediaInfo?.tmdbId) || null,
+      mediaType: String(torrent?.mediaInfo?.type || ''),
+    });
+  } catch (err) {
+    logEvent('library', classifyError(err.message), 'Torrent metadata cache failed', { error: err.message });
+  }
+};
+
 const notifyTorrentCompleted = (torrent) => {
   try {
     if (!Notification.isSupported()) return;
@@ -140,12 +218,37 @@ const isTorrentDownloadCompleted = (torrent) => {
   return Boolean(torrent.done);
 };
 
+const persistTorrentSnapshot = (torrent) => {
+  if (!torrent?.id) return;
+  patchPersistedDownload(torrent.id, {
+    title: torrent.title || torrent.name || '',
+    mediaInfo: torrent.mediaInfo || {},
+    paused: Boolean(torrent.paused),
+    progress: Number(torrent.progress || 0),
+    downloaded: Number(torrent.downloaded || 0),
+    totalSize: Number(torrent.totalSize || 0),
+    completed: isTorrentDownloadCompleted(torrent),
+    completedNotified: completedTorrentNotified.has(String(torrent.id)),
+    lastSeenAt: new Date().toISOString(),
+  });
+};
+
 const updateCompletionNotifications = (torrents = []) => {
   const seenIds = new Set((torrents || []).map((torrent) => String(torrent.id)));
+  torrents.forEach(persistTorrentSnapshot);
 
   if (!completionNotificationBootstrapped) {
     for (const torrent of torrents) {
-      if (isTorrentDownloadCompleted(torrent)) completedTorrentNotified.add(String(torrent.id));
+      if (isTorrentDownloadCompleted(torrent)) {
+        completedTorrentNotified.add(String(torrent.id));
+        patchPersistedDownload(torrent.id, {
+          completedNotified: true,
+          completedAt: new Date().toISOString(),
+          paused: Boolean(torrent.paused),
+          mediaInfo: torrent.mediaInfo || {},
+        });
+        cacheTorrentLibraryMetadata(torrent);
+      }
     }
     completionNotificationBootstrapped = true;
     return;
@@ -155,6 +258,13 @@ const updateCompletionNotifications = (torrents = []) => {
     const id = String(torrent.id);
     if (isTorrentDownloadCompleted(torrent) && !completedTorrentNotified.has(id)) {
       completedTorrentNotified.add(id);
+      patchPersistedDownload(id, {
+        completedNotified: true,
+        completedAt: new Date().toISOString(),
+        paused: Boolean(torrent.paused),
+        mediaInfo: torrent.mediaInfo || {},
+      });
+      cacheTorrentLibraryMetadata(torrent);
       notifyTorrentCompleted(torrent);
     }
   }
@@ -311,12 +421,16 @@ const restorePersistedDownloads = async (tm) => {
 
   for (const entry of entries) {
     try {
+      if (entry.completedNotified || entry.completed) {
+        completedTorrentNotified.add(String(entry.key));
+      }
       const result = await tm.add({
         magnetOrHash: entry.magnetOrHash || '',
         torrentUrl: entry.torrentUrl || '',
         mode: 'download',
         title: entry.title || 'Unknown',
         mediaInfo: entry.mediaInfo || {},
+        seedMode: entry.completedNotified === true || entry.completed === true,
       });
 
       if (result?.ok && entry.paused) {
@@ -1274,9 +1388,14 @@ ipcMain.handle('torrent-resume', async (event, id) => {
 ipcMain.handle('torrent-remove', async (event, id, deleteFiles) => {
   try {
     const tm = await ensureTorrentManager();
+    const status = await tm.getStatus(id);
+    if (status?.ok) {
+      cacheTorrentLibraryMetadata(status);
+    }
     const result = await tm.remove(id, deleteFiles);
     if (result?.ok) {
       removePersistedDownload(id);
+      completedTorrentNotified.delete(String(id));
     }
     return result;
   } catch (err) {
@@ -1440,30 +1559,7 @@ ipcMain.handle('library-metadata-get', async (event, filePaths = []) => {
 
 ipcMain.handle('library-metadata-upsert', async (event, payload = {}) => {
   try {
-    if (!metadataDb) return { ok: false, error: 'metadata db not ready' };
-    const filePath = String(payload.filePath || '');
-    if (!filePath) return { ok: false, error: 'filePath is required' };
-    const fileHash = String(payload.fileHash || '');
-    const title = String(payload.title || '');
-    const year = Number(payload.year) || null;
-    const posterUrl = String(payload.posterUrl || '');
-    const tmdbId = Number(payload.tmdbId) || null;
-    const mediaType = String(payload.mediaType || '');
-    const now = Date.now();
-    const stmt = metadataDb.prepare(`
-      INSERT INTO media_metadata_cache (file_path, file_hash, title, year, poster_url, tmdb_id, media_type, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(file_path) DO UPDATE SET
-        file_hash = excluded.file_hash,
-        title = excluded.title,
-        year = excluded.year,
-        poster_url = excluded.poster_url,
-        tmdb_id = excluded.tmdb_id,
-        media_type = excluded.media_type,
-        updated_at = excluded.updated_at
-    `);
-    stmt.run(filePath, fileHash, title, year, posterUrl, tmdbId, mediaType, now);
-    return { ok: true };
+    return upsertLibraryMetadata(payload);
   } catch (err) {
     logEvent('library', classifyError(err.message), 'Metadata upsert failed', { error: err.message });
     return { ok: false, error: err.message };

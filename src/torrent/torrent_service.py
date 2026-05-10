@@ -677,6 +677,7 @@ class APIHandler(BaseHTTPRequestHandler):
         mode = data.get("mode", "download")
         title = data.get("title", "Unknown")
         media_info = data.get("mediaInfo", {})
+        seed_mode = bool(data.get("seedMode", False))
 
         if mode != "download":
             self._send_json({"ok": False, "error": "Only torrent downloads are supported"}, 400)
@@ -689,6 +690,11 @@ class APIHandler(BaseHTTPRequestHandler):
 
         try:
             atp = self._build_add_params(torrent_id)
+            if seed_mode:
+                try:
+                    atp.flags |= lt.torrent_flags.seed_mode
+                except Exception:
+                    pass
 
             # Check if already exists
             info_hash_hex = str(atp.info_hashes.v1) if hasattr(atp, 'info_hashes') else str(atp.info_hash)
