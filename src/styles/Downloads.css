@@ -330,6 +330,101 @@
   flex-wrap: wrap;
 }
 
+.torrent-file-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.2rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.torrent-file-progress-panel {
+  margin-top: 0.2rem;
+}
+
+.torrent-file-progress-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.torrent-file-progress-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.torrent-file-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px;
+  gap: 0.45rem 0.8rem;
+  align-items: center;
+}
+
+.torrent-file-progress-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.torrent-file-progress-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.torrent-file-progress-state {
+  flex: 0 0 auto;
+  color: #7fd0ff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.torrent-file-progress-state.done {
+  color: var(--accent);
+}
+
+.torrent-file-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.torrent-file-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00ffc3, #00a6ff);
+}
+
+.torrent-file-progress-size {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .torrent-stat {
   display: flex;
   align-items: center;

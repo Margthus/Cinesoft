@@ -41,6 +41,27 @@ const formatETA = (ms) => {
   return `${hours}h ${mins % 60}m`;
 };
 
+const cleanReleaseName = (value = '') => {
+  const lastSegment = String(value || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
+  return lastSegment
+    .replace(/\.[a-z0-9]{2,5}$/i, '')
+    .replace(/\[[^\]]*]/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\bwww\.[^\s-]+(?:\s*-\s*)?/gi, ' ')
+    .replace(/\b[a-z0-9-]+\.(?:com|net|org|io|me|tv|to|cc|xyz)\b/gi, ' ')
+    .replace(/[._]+/g, ' ')
+    .replace(/\b(2160p|1080p|720p|480p|4k|uhd|hdr|dv|x264|x265|h264|h265|hevc|avc|10bit|bluray|brrip|web[- ]?dl|webrip|hdrip|dvdrip|proper|repack|remux|aac|ddp?5?\.?1|atmos|amzn|nf|hulu|yify|yts|rarbg|eztv|tgx|torrentgalaxy|ettv)\b/gi, ' ')
+    .replace(/\b(multi|dubbed|dual audio|turkish|english|subs?|complete|season pack)\b/gi, ' ')
+    .replace(/[-–—]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const formatTorrentTitle = (torrent) => {
+  return torrent.title || torrent.name || torrent.mediaInfo?.title || torrent.mediaInfo?.name || 'Torrent';
+};
+
 const DownloadsView = ({ settings }) => {
   const isTr = settings.language === 'tr';
   const [torrents, setTorrents] = useState([]);
@@ -419,11 +440,15 @@ const TorrentSection = ({ title, count, icon, children }) => (
 );
 
 const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown }) => {
+  const [showFileProgress, setShowFileProgress] = useState(false);
   const posterUrl = torrent.mediaInfo?.poster || '';
   const isDone = torrent.done;
   const isPaused = torrent.paused;
   const statusText = isPaused ? t.paused : isDone ? t.seeding : t.downloading;
   const statusClass = isPaused ? 'status-paused' : isDone ? 'status-completed' : 'status-downloading';
+  const selectedVideoFiles = Array.isArray(torrent.selectedVideoFiles) ? torrent.selectedVideoFiles : [];
+  const displayTitle = formatTorrentTitle(torrent);
+  const displaySubtitle = torrent.name || torrent.title || '';
 
   return (
     <div className={`torrent-card ${isDone ? 'completed' : ''}`}>
@@ -438,14 +463,14 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
         </div>
       )}
       <div className="torrent-poster">
-        {posterUrl ? <img src={posterUrl} alt={torrent.title} /> : <div className="torrent-poster-placeholder"><Download size={34} /></div>}
+        {posterUrl ? <img src={posterUrl} alt={displayTitle} /> : <div className="torrent-poster-placeholder"><Download size={34} /></div>}
       </div>
       <div className="torrent-info">
         <div className="torrent-title-row">
-          <h3 className="torrent-title">{torrent.title}</h3>
+          <h3 className="torrent-title">{displayTitle}</h3>
           <div className={`torrent-status-chip ${statusClass}`}>{statusText}</div>
         </div>
-        <span className="torrent-name">{torrent.name}</span>
+        <span className="torrent-name">{displaySubtitle}</span>
         {!isDone && (
           <div className="torrent-progress-container">
             <div className="torrent-progress-bar"><div className="torrent-progress-fill" style={{ width: `${torrent.progress}%` }} /></div>
@@ -459,6 +484,40 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
           {!isDone && <TorrentStat icon={<Clock size={13} />} text={formatETA(torrent.timeRemaining)} />}
           <TorrentStat icon={<HardDrive size={13} />} text={`${formatSize(torrent.downloaded)} / ${formatSize(torrent.totalSize)}`} />
         </div>
+        {selectedVideoFiles.length > 1 && (
+          <div className="torrent-file-progress-panel">
+            <button
+              className="torrent-file-progress-toggle"
+              onClick={() => setShowFileProgress((current) => !current)}
+              aria-expanded={showFileProgress}
+              type="button"
+            >
+              <span>{t.files} ({selectedVideoFiles.length})</span>
+              {showFileProgress ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {showFileProgress && (
+              <div className="torrent-file-progress-list">
+                {selectedVideoFiles.map((file) => {
+                  const fileProgress = Math.max(0, Math.min(100, Number(file.progress || 0)));
+                  return (
+                    <div className="torrent-file-progress-row" key={`${torrent.id}-${file.index}`}>
+                      <div className="torrent-file-progress-main">
+                        <span className="torrent-file-progress-name">{file.path || file.name}</span>
+                        <span className={file.done ? 'torrent-file-progress-state done' : 'torrent-file-progress-state'}>
+                          {file.done ? t.fileReady : `${t.fileDownloading} ${fileProgress.toFixed(fileProgress >= 10 ? 0 : 1)}%`}
+                        </span>
+                      </div>
+                      <div className="torrent-file-progress-track">
+                        <div className="torrent-file-progress-fill" style={{ width: `${fileProgress}%` }} />
+                      </div>
+                      <span className="torrent-file-progress-size">{formatSize(file.downloaded)} / {formatSize(file.size)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="torrent-actions">
           <button className="torrent-action-btn" onClick={() => onFiles(torrent)}>
             <ListChecks size={15} />
@@ -521,6 +580,8 @@ const getCopy = (isTr) => isTr ? {
   remove: 'Kaldir',
   removeWithFiles: 'Dosyalarla Kaldir',
   files: 'Dosyalar',
+  fileDownloading: 'Iniyor',
+  fileReady: 'Hazir',
   pause: 'Duraklat',
   resume: 'Devam Et',
   downloadDir: 'Indirme Dizini',
@@ -561,6 +622,8 @@ const getCopy = (isTr) => isTr ? {
   remove: 'Remove',
   removeWithFiles: 'Remove with Files',
   files: 'Files',
+  fileDownloading: 'Downloading',
+  fileReady: 'Ready',
   pause: 'Pause',
   resume: 'Resume',
   downloadDir: 'Download Directory',

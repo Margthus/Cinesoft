@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   torrentAdd: (opts) => ipcRenderer.invoke('torrent-add', opts),
   torrentPrepare: (opts) => ipcRenderer.invoke('torrent-prepare', opts),
   torrentGetFiles: (id) => ipcRenderer.invoke('torrent-get-files', id),
-  torrentSelectFiles: (id, fileIndexes, resume) => ipcRenderer.invoke('torrent-select-files', id, fileIndexes, resume),
+  torrentSelectFiles: (id, fileIndexes, resume, sequentialDownload) => ipcRenderer.invoke('torrent-select-files', id, fileIndexes, resume, sequentialDownload),
   torrentGetStatus: (id) => ipcRenderer.invoke('torrent-get-status', id),
   torrentGetAll: () => ipcRenderer.invoke('torrent-get-all'),
   torrentReorder: (id, direction) => ipcRenderer.invoke('torrent-reorder', id, direction),

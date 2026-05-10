@@ -946,30 +946,71 @@
   padding: 0.7rem 1.1rem 0;
 }
 
+.torrent-file-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.75rem 1.1rem 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(0, 255, 195, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 255, 195, 0.055);
+  color: var(--text);
+}
+
+.torrent-file-picker-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.torrent-file-picker-option small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .torrent-file-picker-list {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.6rem 1.1rem;
 }
 
 .torrent-file-picker-row {
   display: grid;
-  grid-template-columns: auto minmax(900px, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.55rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  min-width: 1040px;
+  min-width: 0;
 }
 
 .torrent-file-picker-name {
   min-width: 0;
   color: var(--text);
   font-size: 0.9rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  text-overflow: clip;
+  overflow: hidden;
   white-space: nowrap;
-  scrollbar-width: thin;
+  position: relative;
+}
+
+.torrent-file-picker-name-track {
+  display: inline-block;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 2.5rem;
+  animation: fileNameMarquee 14s linear infinite;
+}
+
+.torrent-file-picker-name:hover .torrent-file-picker-name-track {
+  animation-play-state: paused;
+}
+
+@keyframes fileNameMarquee {
+  0% { transform: translateX(0); }
+  45% { transform: translateX(0); }
+  95% { transform: translateX(-45%); }
+  100% { transform: translateX(0); }
 }
 
 .torrent-file-picker-size {

@@ -36,6 +36,8 @@ DEFAULT_TRACKERS = [
     "udp://tracker.moeking.me:6969/announce",
     "udp://explodie.org:6969/announce",
 ]
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts"}
+
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -461,6 +463,8 @@ def build_status(info_hash_hex):
 
     video_file_idx, video_file_path = find_video_file(h) if ti else (None, None)
     video_info = None
+    selected_file_indexes = []
+    selected_video_files = []
     if video_file_idx is not None and ti:
         files = ti.files()
         fp = h.file_progress()
@@ -471,6 +475,29 @@ def build_status(info_hash_hex):
             "progress": round((fp[video_file_idx] / files.file_size(video_file_idx)) * 100, 2) if video_file_idx < len(fp) and files.file_size(video_file_idx) > 0 else 0,
             "path": files.file_path(video_file_idx),
         }
+        try:
+            prios = h.get_file_priorities()
+            selected_file_indexes = [idx for idx, value in enumerate(prios) if int(value) > 0]
+        except Exception:
+            selected_file_indexes = []
+        for idx in selected_file_indexes:
+            if idx >= files.num_files():
+                continue
+            rel_path = files.file_path(idx)
+            ext = os.path.splitext(rel_path)[1].lower()
+            if ext not in VIDEO_EXTENSIONS:
+                continue
+            size = files.file_size(idx)
+            downloaded = fp[idx] if idx < len(fp) else 0
+            selected_video_files.append({
+                "index": idx,
+                "name": os.path.basename(rel_path),
+                "path": rel_path,
+                "size": size,
+                "downloaded": downloaded,
+                "progress": round((downloaded / size) * 100, 2) if size > 0 else 0,
+                "done": size > 0 and downloaded >= size * 0.995,
+            })
 
     total_size = ti.total_size() if ti else 0
     progress_pct = round(s.progress * 100, 2)
@@ -504,6 +531,9 @@ def build_status(info_hash_hex):
         "done": s.is_seeding or s.is_finished,
         "totalSize": total_size,
         "videoFile": video_info,
+        "selectedVideoFiles": selected_video_files,
+        "selectedFileIndexes": selected_file_indexes,
+        "sequentialDownload": bool(entry.get("sequential_mode")),
         "savePath": getattr(s, "save_path", download_dir),
     }
 
@@ -785,7 +815,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "pending_selection": True,
             }
 
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             files = None
             while time.time() < deadline:
                 files = self._collect_files(handle)
@@ -892,6 +922,7 @@ class APIHandler(BaseHTTPRequestHandler):
         tid = data.get("id")
         file_indexes = data.get("fileIndexes", [])
         resume = data.get("resume", True)
+        sequential_download = bool(data.get("sequentialDownload", False))
         if tid not in torrents:
             self._send_json({"ok": False, "error": "Torrent not found"}, 404)
             return
@@ -922,7 +953,18 @@ class APIHandler(BaseHTTPRequestHandler):
         for idx in valid_indexes:
             priorities[idx] = 1
         h.prioritize_files(priorities)
+        try:
+            if sequential_download:
+                h.set_flags(lt.torrent_flags.sequential_download)
+            else:
+                h.unset_flags(lt.torrent_flags.sequential_download)
+        except Exception:
+            try:
+                h.set_sequential_download(sequential_download)
+            except Exception:
+                pass
         entry["selected_file_idx"] = valid_indexes[0]
+        entry["sequential_mode"] = sequential_download
         entry["pending_selection"] = False
         if resume:
             try:
@@ -934,7 +976,7 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             h.resume()
-        self._send_json({"ok": True, "selectedFileIndexes": valid_indexes, "resumed": bool(resume)})
+        self._send_json({"ok": True, "selectedFileIndexes": valid_indexes, "sequentialDownload": sequential_download, "resumed": bool(resume)})
 
     def _handle_set_speed_limit(self):
         data = self._read_json()

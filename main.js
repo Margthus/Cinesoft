@@ -168,20 +168,26 @@ const upsertLibraryMetadata = (payload = {}) => {
 const cacheTorrentLibraryMetadata = (torrent) => {
   try {
     const posterUrl = String(torrent?.mediaInfo?.poster || '');
-    const relPath = String(torrent?.videoFile?.path || '');
-    if (!posterUrl || !relPath) return;
+    if (!posterUrl) return;
     const savePath = String(torrent?.savePath || getDownloadDir());
-    const filePath = path.resolve(savePath, relPath);
-    if (!fs.existsSync(filePath)) return;
-    upsertLibraryMetadata({
-      filePath,
-      fileHash: getLibraryFileHash(filePath),
-      title: torrent?.title || torrent?.name || path.parse(filePath).name,
-      year: Number(torrent?.mediaInfo?.year) || null,
-      posterUrl,
-      tmdbId: Number(torrent?.mediaInfo?.tmdbId) || null,
-      mediaType: String(torrent?.mediaInfo?.type || ''),
-    });
+    const videoFiles = Array.isArray(torrent?.selectedVideoFiles) && torrent.selectedVideoFiles.length
+      ? torrent.selectedVideoFiles
+      : [torrent?.videoFile].filter(Boolean);
+    for (const videoFile of videoFiles) {
+      const relPath = String(videoFile?.path || '');
+      if (!relPath) continue;
+      const filePath = path.resolve(savePath, relPath);
+      if (!fs.existsSync(filePath)) continue;
+      upsertLibraryMetadata({
+        filePath,
+        fileHash: getLibraryFileHash(filePath),
+        title: torrent?.title || torrent?.name || path.parse(filePath).name,
+        year: Number(torrent?.mediaInfo?.year) || null,
+        posterUrl,
+        tmdbId: Number(torrent?.mediaInfo?.tmdbId) || null,
+        mediaType: String(torrent?.mediaInfo?.type || ''),
+      });
+    }
   } catch (err) {
     logEvent('library', classifyError(err.message), 'Torrent metadata cache failed', { error: err.message });
   }
@@ -208,6 +214,17 @@ const notifyTorrentCompleted = (torrent) => {
 
 const isTorrentDownloadCompleted = (torrent) => {
   if (!torrent || torrent.pendingSelection) return false;
+  const selectedVideos = Array.isArray(torrent.selectedVideoFiles) ? torrent.selectedVideoFiles : [];
+  if (selectedVideos.length > 0) {
+    const allSelectedDone = selectedVideos.every((file) => {
+      const size = Number(file?.size || 0);
+      const downloaded = Number(file?.downloaded || 0);
+      if (size <= 0) return false;
+      if (file?.done === true) return true;
+      return downloaded >= size * 0.995;
+    });
+    if (allSelectedDone) return true;
+  }
   const progress = Number(torrent.progress || 0);
   const totalSize = Number(torrent.totalSize || 0);
   const downloaded = Number(torrent.downloaded || 0);
@@ -227,6 +244,8 @@ const persistTorrentSnapshot = (torrent) => {
     progress: Number(torrent.progress || 0),
     downloaded: Number(torrent.downloaded || 0),
     totalSize: Number(torrent.totalSize || 0),
+    selectedFileIndexes: Array.isArray(torrent.selectedFileIndexes) ? torrent.selectedFileIndexes : [],
+    sequentialDownload: torrent.sequentialDownload === true,
     completed: isTorrentDownloadCompleted(torrent),
     completedNotified: completedTorrentNotified.has(String(torrent.id)),
     lastSeenAt: new Date().toISOString(),
@@ -306,7 +325,7 @@ const getManuallyPausedIds = () => {
   const entries = getPersistedDownloads();
   return new Set(
     entries
-      .filter((item) => item?.paused === true && item?.key)
+      .filter((item) => item?.manuallyPaused === true && item?.key)
       .map((item) => String(item.key))
   );
 };
@@ -421,8 +440,18 @@ const restorePersistedDownloads = async (tm) => {
 
   for (const entry of entries) {
     try {
-      if (entry.completedNotified || entry.completed) {
+      const wasCompleted = entry.completedNotified === true || entry.completed === true;
+      const selectedFileIndexes = Array.isArray(entry.selectedFileIndexes)
+        ? entry.selectedFileIndexes.map((value) => Number(value)).filter(Number.isInteger)
+        : [];
+      if (wasCompleted) {
         completedTorrentNotified.add(String(entry.key));
+        if (!selectedFileIndexes.length) {
+          logSafeEvent('torrent', 'restore_skipped', 'Completed torrent restore skipped because selected files are unknown', {
+            title: entry.title || entry.key,
+          });
+          continue;
+        }
       }
       const result = await tm.add({
         magnetOrHash: entry.magnetOrHash || '',
@@ -430,11 +459,21 @@ const restorePersistedDownloads = async (tm) => {
         mode: 'download',
         title: entry.title || 'Unknown',
         mediaInfo: entry.mediaInfo || {},
-        seedMode: entry.completedNotified === true || entry.completed === true,
+        seedMode: wasCompleted,
       });
 
-      if (result?.ok && entry.paused) {
-        await tm.pause(result.id);
+      if (result?.ok) {
+        if (selectedFileIndexes.length) {
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            const files = await tm.getFiles(result.id);
+            if (files?.ok) break;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          await tm.selectFiles(result.id, selectedFileIndexes, !wasCompleted && !entry.paused, entry.sequentialDownload === true);
+        }
+        if (entry.paused || wasCompleted) {
+          await tm.pause(result.id);
+        }
       }
     } catch (err) {
       console.error('[Main] Failed to restore torrent:', entry.title || entry.key, err.message);
@@ -465,6 +504,24 @@ const logEvent = (source, code, message, details = {}) => {
     fs.appendFileSync(path.join(logsDir, 'cinesoft.log'), `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (err) {
     console.error('[Main] Failed to write log file:', err.message);
+  }
+};
+
+const pruneCompletedPersistedDownloads = (torrents = []) => {
+  const completedLiveIds = new Set(
+    (Array.isArray(torrents) ? torrents : [])
+      .filter((torrent) => isTorrentDownloadCompleted(torrent))
+      .map((torrent) => String(torrent.id))
+  );
+  const current = getPersistedDownloads();
+  const next = current.filter((entry) => {
+    const key = String(entry?.key || '');
+    if (!key) return false;
+    const markedCompleted = entry?.completed === true || entry?.completedNotified === true;
+    return !markedCompleted && !completedLiveIds.has(key);
+  });
+  if (next.length !== current.length) {
+    savePersistedDownloads(next);
   }
 };
 
@@ -643,8 +700,18 @@ app.on('window-all-closed', async () => {
     torrentRulesInterval = null;
   }
   if (torrentManager) {
+    try {
+      const all = await torrentManager.getAll();
+      const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
+      updateCompletionNotifications(torrents);
+      pruneCompletedPersistedDownloads(torrents);
+    } catch (err) {
+      console.error('[Main] Failed to persist final torrent snapshot:', err.message);
+    }
     torrentManager.destroy();
     torrentManager = null;
+  } else {
+    pruneCompletedPersistedDownloads([]);
   }
   if (process.platform !== 'darwin') {
     app.quit();
@@ -1228,6 +1295,7 @@ ipcMain.handle('torrent-add', async (event, opts) => {
         title: opts?.title || '',
         mediaInfo: opts?.mediaInfo || {},
         paused: false,
+        manuallyPaused: false,
         queueOrder: getNextQueueOrder(),
       });
     }
@@ -1256,10 +1324,10 @@ ipcMain.handle('torrent-get-files', async (event, id) => {
   }
 });
 
-ipcMain.handle('torrent-select-files', async (event, id, fileIndexes = [], resume = true) => {
+ipcMain.handle('torrent-select-files', async (event, id, fileIndexes = [], resume = true, sequentialDownload = false) => {
   try {
     const tm = await ensureTorrentManager();
-    const result = await tm.selectFiles(id, fileIndexes, resume);
+    const result = await tm.selectFiles(id, fileIndexes, resume, sequentialDownload);
     if (result?.ok && id) {
       const all = await tm.getAll();
       const current = (all?.torrents || []).find((torrent) => torrent.id === id);
@@ -1271,6 +1339,9 @@ ipcMain.handle('torrent-select-files', async (event, id, fileIndexes = [], resum
           title: current.title || current.name || '',
           mediaInfo: current.mediaInfo || {},
           paused: Boolean(current.paused),
+          manuallyPaused: false,
+          selectedFileIndexes: Array.isArray(result.selectedFileIndexes) ? result.selectedFileIndexes : fileIndexes,
+          sequentialDownload: result.sequentialDownload === true || sequentialDownload === true,
         });
       }
     }
@@ -1352,6 +1423,9 @@ ipcMain.handle('torrent-pause', async (event, id) => {
           title: current.title || current.name || '',
           mediaInfo: current.mediaInfo || {},
           paused: true,
+          manuallyPaused: true,
+          selectedFileIndexes: Array.isArray(current.selectedFileIndexes) ? current.selectedFileIndexes : [],
+          sequentialDownload: current.sequentialDownload === true,
         });
       }
     }
@@ -1376,6 +1450,9 @@ ipcMain.handle('torrent-resume', async (event, id) => {
           title: current.title || current.name || '',
           mediaInfo: current.mediaInfo || {},
           paused: false,
+          manuallyPaused: false,
+          selectedFileIndexes: Array.isArray(current.selectedFileIndexes) ? current.selectedFileIndexes : [],
+          sequentialDownload: current.sequentialDownload === true,
         });
       }
     }
@@ -1525,6 +1602,7 @@ const scanLibraryItems = (rootDir) => {
         title,
         fileName: entry.name,
         fullPath,
+        relativePath: path.relative(rootDir, fullPath),
         size,
         mtimeMs,
         fileHash: crypto.createHash('sha1').update(`${fullPath}|${size}|${mtimeMs}`).digest('hex'),
@@ -1605,9 +1683,17 @@ ipcMain.handle('torrent-validate-candidate', async (event, payload = {}) => {
   const episode = Number(expected.episode) || 0;
   if (season && episode) {
     const code = `s${String(season).padStart(2, '0')}e${String(episode).padStart(2, '0')}`;
+    const seasonCode = `s${String(season).padStart(2, '0')}`;
+    const allowSeasonPack = expected.allowSeasonPack === true;
+    const looksLikeSeasonPack = allowSeasonPack && (
+      lowered.includes(seasonCode)
+      || /\b(complete|season|sezon|pack)\b/i.test(releaseTitle)
+    );
     const passEp = lowered.includes(code);
-    result.checks.episode = passEp ? 'pass' : 'fail';
-    if (passEp) result.score += 30; else result.reasons.push('episode_mismatch');
+    result.checks.episode = passEp ? 'pass' : looksLikeSeasonPack ? 'warn' : 'fail';
+    if (passEp) result.score += 30;
+    else if (looksLikeSeasonPack) result.score += 10;
+    else result.reasons.push('episode_mismatch');
   }
     const size = Number(payload.size) || 0;
   if (size > 0) {

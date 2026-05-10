@@ -156,8 +156,8 @@ class TorrentManager {
   }
 
   /** Select torrent files and optionally resume. */
-  async selectFiles(id, fileIndexes = [], resume = true) {
-    return this._request('POST', '/select-files', { id, fileIndexes, resume });
+  async selectFiles(id, fileIndexes = [], resume = true, sequentialDownload = false) {
+    return this._request('POST', '/select-files', { id, fileIndexes, resume, sequentialDownload });
   }
 
   /** Get status of a specific torrent. */

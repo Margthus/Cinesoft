@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, ShieldAlert, Download, Loader2, X } from 'lucide-react';
 import {
   DEFAULT_PROWLARR_CONFIG,
@@ -33,12 +33,15 @@ const hasBlockedKeyword = (text = '', blocked = []) => {
   });
 };
 
-const SourceSearchPanel = ({ item, type, settings }) => {
+const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode, initialEpisodeName, autoSearchKey }) => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
-  const [season, setSeason] = useState(1);
-  const [episode, setEpisode] = useState(1);
-  const [selectedEpisode, setSelectedEpisode] = useState(null);
+  const [season, setSeason] = useState(Number(initialSeason) || 1);
+  const [episode, setEpisode] = useState(Number(initialEpisode) || 1);
+  const [selectedEpisode, setSelectedEpisode] = useState(initialEpisode ? {
+    episode_number: Number(initialEpisode) || 1,
+    name: initialEpisodeName || `Episode ${initialEpisode}`,
+  } : null);
   const [seasonData, setSeasonData] = useState(null);
   const [searchSeasonData, setSearchSeasonData] = useState(null);
   const [loadingSeason, setLoadingSeason] = useState(false);
@@ -57,6 +60,8 @@ const SourceSearchPanel = ({ item, type, settings }) => {
   const [filePickerTorrentId, setFilePickerTorrentId] = useState('');
   const [filePickerFiles, setFilePickerFiles] = useState([]);
   const [selectedFileIndexes, setSelectedFileIndexes] = useState([]);
+  const [sequentialDownload, setSequentialDownload] = useState(false);
+  const autoSearchDoneRef = useRef('');
 
   const prowlarrConfig = settings.prowlarr || DEFAULT_PROWLARR_CONFIG;
   const activeCount = prowlarrConfig.enabled ? 1 : 0;
@@ -106,6 +111,18 @@ const SourceSearchPanel = ({ item, type, settings }) => {
     const nextSort = normalizeTorrentioConfig(settings?.torrentio || {}).sortBy || 'seeders';
     setSortBy(nextSort);
   }, [settings?.torrentioEnabled, settings?.torrentio?.sortBy]);
+
+  useEffect(() => {
+    if (!initialSeason && !initialEpisode) return;
+    const nextSeason = Number(initialSeason) || 1;
+    const nextEpisode = Number(initialEpisode) || 1;
+    setSeason(nextSeason);
+    setEpisode(nextEpisode);
+    setSelectedEpisode({
+      episode_number: nextEpisode,
+      name: initialEpisodeName || `Episode ${nextEpisode}`,
+    });
+  }, [initialSeason, initialEpisode, initialEpisodeName]);
   useEffect(() => {
     if (isEpisodic && item?.id) {
       const loadSeason = async () => {
@@ -395,15 +412,29 @@ const SourceSearchPanel = ({ item, type, settings }) => {
     setActionLoading(prev => ({ ...prev, [source.id]: true }));
 
     try {
+      const releaseDate = item.release_date || item.first_air_date || '';
+      const releaseYear = releaseDate ? new Date(releaseDate).getFullYear() : 0;
+      const expectedEpisode = isEpisodic && selectedEpisode?.episode_number ? Number(selectedEpisode.episode_number) : 0;
+      const expectedCode = expectedEpisode
+        ? `S${String(season).padStart(2, '0')}E${String(expectedEpisode).padStart(2, '0')}`
+        : '';
+      const sourceTitle = String(source.title || '');
+      const sourceLower = sourceTitle.toLowerCase();
+      const looksLikePackSource = isEpisodic && (
+        selectedEpisode?.isPack === true
+        || (expectedCode && !sourceLower.includes(expectedCode.toLowerCase()) && /\b(complete|season|sezon|pack)\b/i.test(sourceTitle))
+        || /\bS\d{1,2}\b(?!\s*E\d{1,3})/i.test(sourceTitle)
+      );
       const validation = await window.electronAPI?.validateTorrentCandidate?.({
         releaseTitle: source.title || '',
         size: source.size || 0,
         expected: {
-          year: new Date(item.release_date || item.first_air_date || Date.now()).getFullYear(),
+          year: Number.isFinite(releaseYear) ? releaseYear : 0,
           quality: source.quality || '',
           language: settings.language || 'tr',
           season: isEpisodic ? season : 0,
-          episode: isEpisodic && selectedEpisode?.episode_number ? selectedEpisode.episode_number : 0,
+          episode: expectedEpisode,
+          allowSeasonPack: isEpisodic,
         },
       });
       if (validation && validation.ok === false) {
@@ -446,6 +477,8 @@ const SourceSearchPanel = ({ item, type, settings }) => {
           backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : (item.backdrop_url || ''),
           type,
           tmdbId: item.id,
+          season: isEpisodic ? season : null,
+          episode: looksLikePackSource ? null : (expectedEpisode || null),
           quality: source.quality,
           provider: source.provider,
         },
@@ -457,9 +490,10 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       let files = Array.isArray(prepared.files) ? prepared.files : [];
       if (!prepared.metadataReady) {
         // Metadata acquisition for magnet links can be slow, especially when another torrent is active.
-        // Poll for up to ~60s before failing.
+        // Poll for up to ~3 minutes before failing.
         for (let i = 0; i < 120 && !files.length; i += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          const delay = i < 60 ? 1000 : 2000;
+          await new Promise((resolve) => setTimeout(resolve, delay));
           const latest = await window.electronAPI.torrentGetFiles(prepared.id);
           if (latest?.ok && Array.isArray(latest.files)) {
             files = latest.files;
@@ -505,6 +539,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
     setFilePickerTorrentId('');
     setFilePickerFiles([]);
     setSelectedFileIndexes([]);
+    setSequentialDownload(false);
   };
 
   const cancelPickerAndRemoveTorrent = async () => {
@@ -523,7 +558,7 @@ const SourceSearchPanel = ({ item, type, settings }) => {
     if (!filePickerTorrentId || !selectedFileIndexes.length) return;
     setFilePickerLoading(true);
     try {
-      const result = await window.electronAPI.torrentSelectFiles(filePickerTorrentId, selectedFileIndexes, true);
+      const result = await window.electronAPI.torrentSelectFiles(filePickerTorrentId, selectedFileIndexes, true, sequentialDownload);
       if (!result?.ok) {
         throw new Error(result?.error || 'Select files failed');
       }
@@ -548,7 +583,13 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       if (settings.torrentioEnabled) {
         const imdbId = await getImdbId();
         const sources = await searchTorrentioSources(imdbId, season, ep.episode_number, false);
-        setResults(sources);
+        setResults(filterEpisodeSources(sources, {
+          title: item.original_title || item.original_name || item.title || item.name,
+          season,
+          episode: ep.episode_number,
+          episodeTitle: getSearchEpisodeTitle(ep.episode_number, ep.name),
+          year: new Date(item.release_date || item.first_air_date).getFullYear(),
+        }));
       } else {
         const title = item.original_title || item.original_name || item.title || item.name;
         const payload = {
@@ -634,7 +675,19 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       if (settings.torrentioEnabled) {
         const imdbId = await getImdbId();
         const sources = await searchTorrentioSources(imdbId, isEpisodic ? season : null, isEpisodic ? episode : null, !isEpisodic);
-        setResults(sources);
+        if (isEpisodic) {
+          setResults(filterEpisodeSources(sources, {
+            title: item.original_title || item.original_name || item.title || item.name,
+            season,
+            episode,
+            episodeTitle: selectedEpisode?.isPack
+              ? ''
+              : getSearchEpisodeTitle(episode, selectedEpisode?.name),
+            year: new Date(item.release_date || item.first_air_date).getFullYear(),
+          }));
+        } else {
+          setResults(sources);
+        }
       } else {
         const title = item.original_title || item.original_name || item.title || item.name;
         const payload = {
@@ -670,6 +723,13 @@ const SourceSearchPanel = ({ item, type, settings }) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!autoSearchKey || !initialEpisode || autoSearchDoneRef.current === autoSearchKey) return;
+    if (loadingSeason) return;
+    autoSearchDoneRef.current = autoSearchKey;
+    handleSearch();
+  }, [autoSearchKey, initialEpisode, loadingSeason]);
 
   const uniqueIndexers = [...new Set(results.map(r => r.provider || 'Unknown'))].sort();
 
@@ -962,6 +1022,17 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                 {settings.language === 'en' ? 'Clear All' : 'Hepsini Kaldir'}
               </button>
             </div>
+            <label className="torrent-file-picker-option">
+              <input
+                type="checkbox"
+                checked={sequentialDownload}
+                onChange={(event) => setSequentialDownload(event.target.checked)}
+              />
+              <span>
+                <strong>{settings.language === 'en' ? 'Download sequentially' : 'Sirayla indir'}</strong>
+                <small>{settings.language === 'en' ? 'Downloads selected files in playback order.' : 'Secilen dosyalari izleme sirasina gore indirir.'}</small>
+              </span>
+            </label>
             <div className="torrent-file-picker-list">
               {filePickerFiles.map((file) => (
                 <label key={file.index} className="torrent-file-picker-row">
@@ -970,7 +1041,9 @@ const SourceSearchPanel = ({ item, type, settings }) => {
                     checked={selectedFileIndexes.includes(file.index)}
                     onChange={() => toggleSelectedFile(file.index)}
                   />
-                  <span className="torrent-file-picker-name">{file.path || file.name}</span>
+                  <span className="torrent-file-picker-name">
+                    <span className="torrent-file-picker-name-track">{file.path || file.name}</span>
+                  </span>
                   <span className="torrent-file-picker-size">{formatSize(file.size)}</span>
                 </label>
               ))}
@@ -996,11 +1069,120 @@ const searchMovieSources = (prowlarrConfig, payload) => {
   return searchStreamSourcesForMovie(prowlarrConfig, payload);
 };
 
-const searchEpisodeSources = (prowlarrConfig, payload) => {
-  if (window.electronAPI?.searchEpisodeSources) {
-    return window.electronAPI.searchEpisodeSources(payload);
+const normalizeText = (value = '') => String(value || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const tokenize = (value = '') => {
+  const stop = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'your', 'you', 'are', 'was', 'were', 'bir', 've', 'ile', 'icin']);
+  return normalizeText(value)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token && token.length >= 3 && !stop.has(token));
+};
+
+const extractEpisodeCodes = (value = '') => {
+  const text = String(value || '');
+  const found = [];
+  const sxe = [...text.matchAll(/\bS(\d{1,2})E(\d{1,3})\b/gi)];
+  for (const match of sxe) {
+    found.push({
+      season: Number(match[1]),
+      episode: Number(match[2]),
+    });
   }
-  return searchStreamSourcesForEpisode(prowlarrConfig, payload);
+  const xcode = [...text.matchAll(/\b(\d{1,2})x(\d{1,3})\b/gi)];
+  for (const match of xcode) {
+    found.push({
+      season: Number(match[1]),
+      episode: Number(match[2]),
+    });
+  }
+  return found;
+};
+
+const filterEpisodeSources = (sources, payload = {}) => {
+  const payloadTitleRaw = String(payload.title || '');
+  const canonicalTitle = payloadTitleRaw
+    .replace(/\bS\d{1,2}E\d{1,3}\b/gi, ' ')
+    .replace(/\bS\d{1,2}\b/gi, ' ')
+    .replace(/\b(Season|Sezon)\s*\d{1,2}\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const titleTokens = tokenize(canonicalTitle || payloadTitleRaw);
+  const canonicalWords = normalizeText(canonicalTitle).split(' ').filter(Boolean);
+  const episodeTokens = tokenize(payload.episodeTitle || payload.episodeName || '');
+  const expectedSeason = Number(payload.season) || 0;
+  const expectedEpisode = Number(payload.episode) || 0;
+  const expectedYear = Number(payload.year) || 0;
+  const seasonOnlySearch = expectedSeason > 0 && expectedEpisode <= 0;
+  const expectedCode = expectedSeason && expectedEpisode
+    ? `s${String(expectedSeason).padStart(2, '0')}e${String(expectedEpisode).padStart(2, '0')}`
+    : '';
+  const expectedSeasonCode = expectedSeason
+    ? `s${String(expectedSeason).padStart(2, '0')}`
+    : '';
+  const shortSingleWordTitle = canonicalWords.length === 1 && canonicalWords[0].length <= 4;
+
+  const filtered = (Array.isArray(sources) ? sources : []).filter((source) => {
+    const rawTitle = String(source?.title || '');
+    const normalizedTitle = normalizeText(rawTitle);
+    const sourceTokens = new Set(tokenize(rawTitle));
+
+    if (expectedSeason && expectedEpisode) {
+      const codes = extractEpisodeCodes(rawTitle);
+      if (codes.length) {
+        const hasExpected = codes.some((code) => code.season === expectedSeason && code.episode === expectedEpisode);
+        if (!hasExpected) return false;
+      } else if (!normalizedTitle.includes(expectedCode)) {
+        return false;
+      }
+    }
+
+    if (episodeTokens.length >= 2) {
+      const episodeHit = episodeTokens.some((token) => token.length >= 4 && sourceTokens.has(token));
+      if (!episodeHit) return false;
+    }
+
+    if (titleTokens.length >= 2) {
+      const titleMatchCount = titleTokens.filter((token) => sourceTokens.has(token)).length;
+      if (titleMatchCount < 2) return false;
+    }
+
+    if (seasonOnlySearch) {
+      if (expectedSeasonCode && !new RegExp(`\\b${escapeRegex(expectedSeasonCode)}\\b`, 'i').test(normalizedTitle)) {
+        return false;
+      }
+
+      if (shortSingleWordTitle) {
+        const word = canonicalWords[0];
+        const startsWithWord = new RegExp(`^${escapeRegex(word)}(?:\\b|[ ._\\-\\[])`, 'i').test(normalizedTitle);
+        if (!startsWithWord) return false;
+        if (expectedYear > 0 && !normalizedTitle.includes(String(expectedYear))) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  });
+
+  if (filtered.length > 0) return filtered;
+  return Array.isArray(sources) ? sources : [];
+};
+
+const searchEpisodeSources = async (prowlarrConfig, payload) => {
+  let sources;
+  if (window.electronAPI?.searchEpisodeSources) {
+    sources = await window.electronAPI.searchEpisodeSources(payload);
+  } else {
+    sources = await searchStreamSourcesForEpisode(prowlarrConfig, payload);
+  }
+  return filterEpisodeSources(sources, payload);
 };
 
 export default SourceSearchPanel;
