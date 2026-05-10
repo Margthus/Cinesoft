@@ -915,8 +915,8 @@
 }
 
 .torrent-file-picker-modal {
-  width: min(1380px, 99vw);
-  max-height: 92vh;
+  width: min(1820px, 99.5vw);
+  max-height: 96vh;
   display: flex;
   flex-direction: column;
   background: #0f1215;
@@ -975,7 +975,7 @@
   padding: 0.6rem 1.1rem;
 }
 
-.torrent-file-picker-row {
+.source-file-picker-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -985,7 +985,7 @@
   min-width: 0;
 }
 
-.torrent-file-picker-name {
+.source-file-picker-name {
   min-width: 0;
   color: var(--text);
   font-size: 0.9rem;
@@ -994,26 +994,19 @@
   position: relative;
 }
 
-.torrent-file-picker-name-track {
-  display: inline-block;
-  width: max-content;
-  min-width: 100%;
-  padding-right: 2.5rem;
-  animation: fileNameMarquee 14s linear infinite;
+.source-file-picker-name-track {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.torrent-file-picker-name:hover .torrent-file-picker-name-track {
-  animation-play-state: paused;
+.source-file-picker-name:hover .source-file-picker-name-track {
+  text-decoration: none;
 }
 
-@keyframes fileNameMarquee {
-  0% { transform: translateX(0); }
-  45% { transform: translateX(0); }
-  95% { transform: translateX(-45%); }
-  100% { transform: translateX(0); }
-}
-
-.torrent-file-picker-size {
+.source-file-picker-size {
   color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 700;

@@ -1035,16 +1035,16 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
             </label>
             <div className="torrent-file-picker-list">
               {filePickerFiles.map((file) => (
-                <label key={file.index} className="torrent-file-picker-row">
+                <label key={file.index} className="source-file-picker-row">
                   <input
                     type="checkbox"
                     checked={selectedFileIndexes.includes(file.index)}
                     onChange={() => toggleSelectedFile(file.index)}
                   />
-                  <span className="torrent-file-picker-name">
-                    <span className="torrent-file-picker-name-track">{file.path || file.name}</span>
+                  <span className="source-file-picker-name">
+                    <span className="source-file-picker-name-track">{file.path || file.name}</span>
                   </span>
-                  <span className="torrent-file-picker-size">{formatSize(file.size)}</span>
+                  <span className="source-file-picker-size">{formatSize(file.size)}</span>
                 </label>
               ))}
             </div>
@@ -1105,6 +1105,46 @@ const extractEpisodeCodes = (value = '') => {
   return found;
 };
 
+const findContiguousPhraseStart = (tokens = [], phrase = []) => {
+  if (!tokens.length || !phrase.length || phrase.length > tokens.length) return -1;
+  for (let i = 0; i <= tokens.length - phrase.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < phrase.length; j += 1) {
+      if (tokens[i + j] !== phrase[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return i;
+  }
+  return -1;
+};
+
+const hasDirectSeasonMarkerAfterTitle = (sourceTitle = '', canonicalTitle = '', expectedSeason = 0) => {
+  const sourceTokens = normalizeText(sourceTitle).split(' ').filter(Boolean);
+  const titleTokens = normalizeText(canonicalTitle).split(' ').filter(Boolean);
+  if (!sourceTokens.length || !titleTokens.length || !expectedSeason) return false;
+
+  const phraseStart = findContiguousPhraseStart(sourceTokens, titleTokens);
+  if (phraseStart < 0) return false;
+
+  const nextTokens = sourceTokens.slice(phraseStart + titleTokens.length, phraseStart + titleTokens.length + 3);
+  if (!nextTokens.length) return false;
+
+  const seasonCode = `s${String(expectedSeason).padStart(2, '0')}`;
+  const seasonNum = String(expectedSeason);
+  const t0 = nextTokens[0] || '';
+  const t1 = nextTokens[1] || '';
+  const t2 = nextTokens[2] || '';
+
+  if (t0 === seasonCode) return true;
+  if ((t0 === 'season' || t0 === 'sezon') && (t1 === seasonNum || t1 === `0${seasonNum}` || t1 === seasonCode)) return true;
+  if (/^(19|20)\d{2}$/.test(t0) && (t1 === seasonCode || ((t1 === 'season' || t1 === 'sezon') && (t2 === seasonNum || t2 === `0${seasonNum}`)))) return true;
+  if (t0 === 'complete' && (t1 === seasonCode || ((t1 === 'season' || t1 === 'sezon') && (t2 === seasonNum || t2 === `0${seasonNum}`)))) return true;
+
+  return false;
+};
+
 const filterEpisodeSources = (sources, payload = {}) => {
   const payloadTitleRaw = String(payload.title || '');
   const canonicalTitle = payloadTitleRaw
@@ -1156,6 +1196,11 @@ const filterEpisodeSources = (sources, payload = {}) => {
     if (seasonOnlySearch) {
       if (expectedSeasonCode && !new RegExp(`\\b${escapeRegex(expectedSeasonCode)}\\b`, 'i').test(normalizedTitle)) {
         return false;
+      }
+
+      if (canonicalWords.length >= 2) {
+        const strictSeriesMatch = hasDirectSeasonMarkerAfterTitle(rawTitle, canonicalTitle || payloadTitleRaw, expectedSeason);
+        if (!strictSeriesMatch) return false;
       }
 
       if (shortSingleWordTitle) {
