@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
 import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
@@ -20,6 +20,9 @@ const SettingsView = ({ settings, setSettings }) => {
   const [indexerDraft, setIndexerDraft] = useState(null);
   const [addState, setAddState] = useState('');
   const [schemaVisibleCount, setSchemaVisibleCount] = useState(80);
+  const [downloadEngineConfigOpen, setDownloadEngineConfigOpen] = useState(true);
+  const [torrentioConfigOpen, setTorrentioConfigOpen] = useState(true);
+  const [prowlarrConfigOpen, setProwlarrConfigOpen] = useState(true);
 
   useEffect(() => {
     refreshIndexers();
@@ -332,71 +335,89 @@ const SettingsView = ({ settings, setSettings }) => {
               <h2>{t.downloadEngine}</h2>
               <p>{t.downloadEngineHint}</p>
             </div>
+            <div className="settings-card-actions">
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                aria-expanded={downloadEngineConfigOpen}
+                aria-controls="download-engine-config-panel"
+                onClick={() => setDownloadEngineConfigOpen((current) => !current)}
+              >
+                {downloadEngineConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <span>{downloadEngineConfigOpen ? t.hideConfig : t.showConfig}</span>
+              </button>
+            </div>
           </header>
 
-          <div className="panel-grid">
-            <label className="toggle-field">
-              <span>{t.embeddedTorrent}</span>
-              <Toggle
-                checked={!formData.useQbittorrent}
-                onChange={(checked) => {
-                  updateRoot({ useQbittorrent: !checked });
-                }}
-              />
-            </label>
+          <div
+            id="download-engine-config-panel"
+            className={`settings-collapsible ${downloadEngineConfigOpen ? 'open' : 'closed'}`}
+            hidden={!downloadEngineConfigOpen}
+          >
+            <div className="panel-grid">
+              <label className="toggle-field">
+                <span>{t.embeddedTorrent}</span>
+                <Toggle
+                  checked={!formData.useQbittorrent}
+                  onChange={(checked) => {
+                    updateRoot({ useQbittorrent: !checked });
+                  }}
+                />
+              </label>
 
-            <label className="toggle-field">
-              <span>{t.qbittorrent}</span>
-              <Toggle
-                checked={Boolean(formData.useQbittorrent)}
-                onChange={(checked) => {
-                  updateRoot({ useQbittorrent: checked });
-                }}
-              />
-            </label>
+              <label className="toggle-field">
+                <span>{t.qbittorrent}</span>
+                <Toggle
+                  checked={Boolean(formData.useQbittorrent)}
+                  onChange={(checked) => {
+                    updateRoot({ useQbittorrent: checked });
+                  }}
+                />
+              </label>
 
-            <label className="stacked-field">
-              <span>{t.qbBaseUrl}</span>
-              <input
-                className="settings-input"
-                value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    baseUrl: event.target.value,
-                  },
-                })}
-              />
-            </label>
-            <label className="stacked-field">
-              <span>{t.qbUsername}</span>
-              <input
-                className="settings-input"
-                value={formData.qbittorrent?.username || 'admin'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    username: event.target.value,
-                  },
-                })}
-              />
-            </label>
-            <label className="stacked-field">
-              <span>{t.qbPassword}</span>
-              <input
-                className="settings-input"
-                type="password"
-                value={formData.qbittorrent?.password || 'adminadmin'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    password: event.target.value,
-                  },
-                })}
-              />
-            </label>
+              <label className="stacked-field">
+                <span>{t.qbBaseUrl}</span>
+                <input
+                  className="settings-input"
+                  value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
+                  onChange={(event) => updateRoot({
+                    qbittorrent: {
+                      ...(formData.qbittorrent || {}),
+                      baseUrl: event.target.value,
+                    },
+                  })}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.qbUsername}</span>
+                <input
+                  className="settings-input"
+                  value={formData.qbittorrent?.username || 'admin'}
+                  onChange={(event) => updateRoot({
+                    qbittorrent: {
+                      ...(formData.qbittorrent || {}),
+                      username: event.target.value,
+                    },
+                  })}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.qbPassword}</span>
+                <input
+                  className="settings-input"
+                  type="password"
+                  value={formData.qbittorrent?.password || 'adminadmin'}
+                  onChange={(event) => updateRoot({
+                    qbittorrent: {
+                      ...(formData.qbittorrent || {}),
+                      password: event.target.value,
+                    },
+                  })}
+                />
+              </label>
+            </div>
+            <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.qbNote}</p>
           </div>
-          <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.qbNote}</p>
         </section>
 
         <section className="settings-card settings-card-full">
@@ -406,104 +427,122 @@ const SettingsView = ({ settings, setSettings }) => {
               <h2>{settings.language === 'tr' ? 'Torrentio (Stremio)' : 'Torrentio (Stremio)'}</h2>
               <p>{settings.language === 'tr' ? 'Torrentio eklentisini kaynak olarak kullan.' : 'Use Torrentio addon as source.'}</p>
             </div>
-            <Toggle
-              checked={formData.torrentioEnabled || false}
-              onChange={async (checked) => {
-                updateRoot({ torrentioEnabled: checked });
-                if (checked) {
-                  updateProwlarr({ enabled: false, managed: false });
-                  await handleStopProwlarr();
-                }
-              }}
-            />
-          </header>
-          <div className="panel-grid">
-            <label className="stacked-field">
-              <span>{t.torrentioBaseUrl}</span>
-              <input
-                className="settings-input"
-                value={formData.torrentio?.baseUrl || 'https://torrentio.strem.fun'}
-                onChange={(event) => updateRoot({
-                  torrentio: {
-                    ...(formData.torrentio || {}),
-                    baseUrl: event.target.value,
-                  },
-                })}
-              />
-            </label>
-            <label className="stacked-field">
-              <span>{t.torrentioMaxResults}</span>
-              <input
-                className="settings-input"
-                type="number"
-                min="10"
-                max="250"
-                value={formData.torrentio?.maxResults || 80}
-                onChange={(event) => updateRoot({
-                  torrentio: {
-                    ...(formData.torrentio || {}),
-                    maxResults: Math.max(10, Number(event.target.value) || 80),
-                  },
-                })}
-              />
-            </label>
-            <label className="stacked-field">
-              <span>{t.torrentioExcludeKeywords}</span>
-              <input
-                className="settings-input"
-                value={formData.torrentio?.excludeKeywords || ''}
-                onChange={(event) => updateRoot({
-                  torrentio: {
-                    ...(formData.torrentio || {}),
-                    excludeKeywords: event.target.value,
-                  },
-                })}
-              />
-            </label>
-            <label className="stacked-field">
-              <span>{t.torrentioSortBy}</span>
-              <select
-                className="settings-input"
-                value={formData.torrentio?.sortBy || 'seeders'}
-                onChange={(event) => updateRoot({
-                  torrentio: normalizeTorrentioConfig({
-                    ...(formData.torrentio || {}),
-                    sortBy: event.target.value,
-                  }),
-                })}
+            <div className="settings-card-actions">
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                aria-expanded={torrentioConfigOpen}
+                aria-controls="torrentio-config-panel"
+                onClick={() => setTorrentioConfigOpen((current) => !current)}
               >
-                <option value="seeders">{t.seeders}</option>
-                <option value="size">{t.size}</option>
-                <option value="name">{t.name}</option>
-              </select>
-            </label>
-          </div>
-          <div className="stacked-field" style={{ marginTop: '0.9rem' }}>
-            <span>{t.torrentioSites}</span>
-            <div className="torrentio-site-grid">
-              {TORRENTIO_SITE_OPTIONS.map((site) => {
-                const enabled = site.key === 'all'
-                  ? TORRENTIO_SITE_OPTIONS
-                    .filter((option) => option.key !== 'all')
-                    .every((option) => formData.torrentio?.enabledSites?.[option.key] !== false)
-                  : formData.torrentio?.enabledSites?.[site.key] !== false;
-                const siteLabel = site.key === 'all'
-                  ? (formData.language === 'tr' ? 'Hepsi' : 'All')
-                  : site.label;
-                return (
-                  <button
-                    key={site.key}
-                    type="button"
-                    className={`torrentio-site-btn ${enabled ? 'active' : ''}`}
-                    onClick={() => toggleTorrentioSite(site.key)}
-                  >
-                    {siteLabel}
-                  </button>
-                );
-              })}
+                {torrentioConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <span>{torrentioConfigOpen ? t.hideConfig : t.showConfig}</span>
+              </button>
+              <Toggle
+                checked={formData.torrentioEnabled || false}
+                onChange={async (checked) => {
+                  updateRoot({ torrentioEnabled: checked });
+                  if (checked) {
+                    updateProwlarr({ enabled: false, managed: false });
+                    await handleStopProwlarr();
+                  }
+                }}
+              />
             </div>
+          </header>
+          <div
+            id="torrentio-config-panel"
+            className={`settings-collapsible ${torrentioConfigOpen ? 'open' : 'closed'}`}
+            hidden={!torrentioConfigOpen}
+          >
+            <div className="panel-grid">
+              <label className="stacked-field">
+                <span>{t.torrentioBaseUrl}</span>
+                <input
+                  className="settings-input"
+                  value={formData.torrentio?.baseUrl || 'https://torrentio.strem.fun'}
+                  onChange={(event) => updateRoot({
+                    torrentio: {
+                      ...(formData.torrentio || {}),
+                      baseUrl: event.target.value,
+                    },
+                  })}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.torrentioMaxResults}</span>
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="10"
+                  max="250"
+                  value={formData.torrentio?.maxResults || 80}
+                  onChange={(event) => updateRoot({
+                    torrentio: {
+                      ...(formData.torrentio || {}),
+                      maxResults: Math.max(10, Number(event.target.value) || 80),
+                    },
+                  })}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.torrentioExcludeKeywords}</span>
+                <input
+                  className="settings-input"
+                  value={formData.torrentio?.excludeKeywords || ''}
+                  onChange={(event) => updateRoot({
+                    torrentio: {
+                      ...(formData.torrentio || {}),
+                      excludeKeywords: event.target.value,
+                    },
+                  })}
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.torrentioSortBy}</span>
+                <select
+                  className="settings-input"
+                  value={formData.torrentio?.sortBy || 'seeders'}
+                  onChange={(event) => updateRoot({
+                    torrentio: normalizeTorrentioConfig({
+                      ...(formData.torrentio || {}),
+                      sortBy: event.target.value,
+                    }),
+                  })}
+                >
+                  <option value="seeders">{t.seeders}</option>
+                  <option value="size">{t.size}</option>
+                  <option value="name">{t.name}</option>
+                </select>
+              </label>
+            </div>
+            <div className="stacked-field" style={{ marginTop: '0.9rem' }}>
+              <span>{t.torrentioSites}</span>
+              <div className="torrentio-site-grid">
+                {TORRENTIO_SITE_OPTIONS.map((site) => {
+                  const enabled = site.key === 'all'
+                    ? TORRENTIO_SITE_OPTIONS
+                      .filter((option) => option.key !== 'all')
+                      .every((option) => formData.torrentio?.enabledSites?.[option.key] !== false)
+                    : formData.torrentio?.enabledSites?.[site.key] !== false;
+                  const siteLabel = site.key === 'all'
+                    ? (formData.language === 'tr' ? 'Hepsi' : 'All')
+                    : site.label;
+                  return (
+                    <button
+                      key={site.key}
+                      type="button"
+                      className={`torrentio-site-btn ${enabled ? 'active' : ''}`}
+                      onClick={() => toggleTorrentioSite(site.key)}
+                    >
+                      {siteLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.torrentioHint}</p>
           </div>
-          <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.torrentioHint}</p>
         </section>
 
         <section className="settings-card settings-card-full prowlarr-card-shell">
@@ -513,9 +552,26 @@ const SettingsView = ({ settings, setSettings }) => {
               <h2>{t.prowlarr}</h2>
               <p>{t.prowlarrHint}</p>
             </div>
+            <div className="settings-card-actions">
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                aria-expanded={prowlarrConfigOpen}
+                aria-controls="prowlarr-config-panel"
+                onClick={() => setProwlarrConfigOpen((current) => !current)}
+              >
+                {prowlarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <span>{prowlarrConfigOpen ? t.hideConfig : t.showConfig}</span>
+              </button>
+            </div>
           </header>
 
-          <div className="prowlarr-layout">
+          <div
+            id="prowlarr-config-panel"
+            className={`settings-collapsible ${prowlarrConfigOpen ? 'open' : 'closed'}`}
+            hidden={!prowlarrConfigOpen}
+          >
+            <div className="prowlarr-layout">
             <div className="prowlarr-panel">
               <div className="prowlarr-panel-header">
                 <h3>{t.engine}</h3>
@@ -646,7 +702,7 @@ const SettingsView = ({ settings, setSettings }) => {
               {!indexers.length && <div className="empty-box">{indexerStatus === 'failed' ? t.indexerFailed : t.noIndexers}</div>}
             </div>
 
-            <div className="prowlarr-panel prowlarr-panel-wide">
+              <div className="prowlarr-panel prowlarr-panel-wide">
               <div className="prowlarr-panel-header">
                 <h3>{t.addIndexer}</h3>
               </div>
@@ -738,7 +794,8 @@ const SettingsView = ({ settings, setSettings }) => {
                 </div>
               )}
 
-              <div className="status-line">{renderAddStatus(addState, t)}</div>
+                <div className="status-line">{renderAddStatus(addState, t)}</div>
+              </div>
             </div>
           </div>
         </section>
@@ -843,6 +900,8 @@ const getCopy = (language) => ({
     torrentioSortBy: 'Siralama',
     torrentioSites: 'Torrent siteleri',
     torrentioHint: 'Virgulle ayrilan kelimeleri iceren sonuclar gizlenir. Ornek: cam,ts,tc',
+    showConfig: 'Goster',
+    hideConfig: 'Gizle',
     seeders: 'Seedera gore',
     size: 'Boyuta gore',
     name: 'Isme gore',
@@ -916,6 +975,8 @@ const getCopy = (language) => ({
     torrentioSortBy: 'Sorting',
     torrentioSites: 'Torrent sites',
     torrentioHint: 'Hide results that include comma-separated keywords. Example: cam,ts,tc',
+    showConfig: 'Show',
+    hideConfig: 'Hide',
     seeders: 'By seeders',
     size: 'By size',
     name: 'By name',

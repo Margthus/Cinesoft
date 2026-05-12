@@ -90,6 +90,10 @@
   margin-bottom: 1rem;
 }
 
+.settings-card-header > div:not(.settings-card-actions) {
+  min-width: 0;
+}
+
 .settings-card-header h2,
 .prowlarr-panel-header h3 {
   margin: 0;
@@ -251,6 +255,46 @@ select.settings-input option {
 
 .content-card .settings-card-header {
   margin-bottom: 0.9rem;
+}
+
+.settings-card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex: 0 0 auto;
+}
+
+.settings-collapse-btn {
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 12px;
+  min-height: 42px;
+  padding: 0.72rem 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  transition: 0.2s ease;
+  white-space: nowrap;
+}
+
+.settings-collapse-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border-medium));
+}
+
+.settings-collapse-btn svg {
+  color: var(--accent);
+}
+
+.settings-collapsible {
+  display: block;
+}
+
+.settings-collapsible[hidden] {
+  display: none !important;
 }
 
 .content-card .settings-toggle-card {

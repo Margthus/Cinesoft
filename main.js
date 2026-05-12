@@ -91,6 +91,7 @@ const FALLBACK_SUBTITLE_ADDON_BASE_URLS = [
 const OPENSUBTITLES_V3_BASE_URL = 'https://opensubtitles-v3.strem.io';
 const SUBTITLE_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const subtitleSearchCache = new Map();
+const subtitleMetadataCache = new Map();
 
 const subtitleHttpAgent = new http.Agent({ keepAlive: false });
 const subtitleHttpsAgent = new https.Agent({ keepAlive: false });
@@ -1893,6 +1894,94 @@ const setCachedSubtitleSearch = (cacheKey, payload) => {
   });
 };
 
+const stripSubtitleFileExtension = (value = '') => String(value || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+
+const decodeContentDispositionFilename = (headerValue = '') => {
+  const raw = String(headerValue || '').trim();
+  if (!raw) return '';
+  const extended = raw.match(/filename\*\s*=\s*(?:UTF-8''|utf-8''|)([^;]+)/i);
+  const basic = raw.match(/filename\s*=\s*"?([^\";]+)"?/i);
+  const candidate = extended?.[1] || basic?.[1] || '';
+  if (!candidate) return '';
+  try {
+    return decodeURIComponent(candidate.replace(/^["']|["']$/g, '')).trim();
+  } catch {
+    return candidate.replace(/^["']|["']$/g, '').trim();
+  }
+};
+
+const extractSubtitleDownloadCount = (subtitle = {}) => {
+  const candidates = [
+    subtitle?.downloadCount,
+    subtitle?.download_count,
+    subtitle?.downloads,
+    subtitle?.downloads_count,
+    subtitle?.downloadsCount,
+    subtitle?.g,
+  ];
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+  return null;
+};
+
+const getCachedSubtitleMetadata = (url = '') => {
+  const key = String(url || '').trim();
+  if (!key) return null;
+  return subtitleMetadataCache.get(key) || null;
+};
+
+const setCachedSubtitleMetadata = (url = '', payload = {}) => {
+  const key = String(url || '').trim();
+  if (!key) return;
+  subtitleMetadataCache.set(key, payload);
+};
+
+const fetchSubtitleMetadata = async (url, timeoutMs = 8000) => {
+  const cached = getCachedSubtitleMetadata(url);
+  if (cached) return cached;
+  try {
+    const response = await axios.head(url, {
+      timeout: timeoutMs,
+      headers: SUBTITLE_REQUEST_HEADERS,
+      maxRedirects: 5,
+      httpAgent: subtitleHttpAgent,
+      httpsAgent: subtitleHttpsAgent,
+      validateStatus: () => true,
+    });
+    if (!response || response.status < 200 || response.status >= 300) {
+      const empty = {};
+      setCachedSubtitleMetadata(url, empty);
+      return empty;
+    }
+    const metadata = {
+      fileName: decodeContentDispositionFilename(response.headers?.['content-disposition'] || ''),
+    };
+    setCachedSubtitleMetadata(url, metadata);
+    return metadata;
+  } catch {
+    const empty = {};
+    setCachedSubtitleMetadata(url, empty);
+    return empty;
+  }
+};
+
+const mapWithConcurrency = async (items = [], limit = 6, mapper) => {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, list.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= list.length) return;
+      results[currentIndex] = await mapper(list[currentIndex], currentIndex);
+    }
+  }));
+  return results;
+};
+
 const guessSubtitleLabel = (subtitle = {}, url = '') => {
   const direct = String(
     subtitle?.label
@@ -1925,10 +2014,43 @@ const sanitizeSubtitleList = (subtitles = [], baseUrl = '', provider = '') => {
         lang: String(subtitle?.lang || 'unknown'),
         url,
         label: guessSubtitleLabel(subtitle, url),
+        fileName: String(subtitle?.fileName || subtitle?.filename || '').trim(),
+        downloadCount: extractSubtitleDownloadCount(subtitle),
         provider: provider || '',
       };
     })
     .filter(Boolean);
+};
+
+const enrichSubtitleList = async (subtitles = []) => {
+  if (!Array.isArray(subtitles) || subtitles.length === 0) return [];
+
+  const normalized = subtitles.map((subtitle) => ({
+    ...subtitle,
+    fileName: String(subtitle?.fileName || subtitle?.label || '').trim(),
+  }));
+
+  const indexesNeedingLookup = normalized
+    .map((subtitle, index) => ({ subtitle, index }))
+    .filter(({ subtitle }) => !subtitle.fileName && subtitle.provider === 'opensubtitles-v3' && subtitle.url)
+    .slice(0, 40);
+
+  await mapWithConcurrency(indexesNeedingLookup, 6, async ({ subtitle, index }) => {
+    const metadata = await fetchSubtitleMetadata(subtitle.url, 8000);
+    const resolvedFileName = String(metadata?.fileName || '').trim();
+    if (!resolvedFileName) return;
+    normalized[index] = {
+      ...normalized[index],
+      fileName: resolvedFileName,
+      label: resolvedFileName,
+    };
+  });
+
+  return normalized.map((subtitle) => ({
+    ...subtitle,
+    fileName: stripSubtitleFileExtension(subtitle.fileName),
+    label: stripSubtitleFileExtension(subtitle.label || subtitle.fileName),
+  }));
 };
 
 const isPrivateOrLocalHost = (hostname = '') => {
@@ -2036,7 +2158,7 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
     const rawSubs = Array.isArray(data?.subtitles)
       ? data.subtitles
       : (Array.isArray(data?.all) ? data.all : (Array.isArray(data) ? data : []));
-    const subtitles = sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider);
+    const subtitles = await enrichSubtitleList(sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider));
     const responsePayload = {
       ok: true,
       subtitles,

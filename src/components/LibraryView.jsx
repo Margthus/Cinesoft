@@ -303,6 +303,21 @@ const getPreferredSubtitleLang = (appLanguage = '') => {
   return String(appLanguage || '').toLowerCase() === 'tr' ? 'TUR' : 'ENG';
 };
 
+const stripSubtitleDisplayExtension = (value = '') => String(value || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+
+const getSubtitleDisplayName = (subtitle = {}) => {
+  const raw = String(subtitle?.fileName || subtitle?.label || '').trim();
+  const cleaned = stripSubtitleDisplayExtension(raw).replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned;
+};
+
+const formatSubtitleDownloadCount = (value, isTr = false) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return '';
+  const count = new Intl.NumberFormat(isTr ? 'tr-TR' : 'en-US').format(numeric);
+  return isTr ? `${count} indirme` : `${count} downloads`;
+};
+
 const LibraryView = ({ settings }) => {
   const [items, setItems] = useState([]);
   const [rootDir, setRootDir] = useState('');
@@ -755,7 +770,15 @@ const LibraryView = ({ settings }) => {
                     .map((subtitle, index) => (
                       <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
                         <div className="library-subtitle-meta">
-                          <strong>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</strong>
+                          <div className="library-subtitle-title-row">
+                            <strong title={getSubtitleDisplayName(subtitle) || undefined}>
+                              {getSubtitleDisplayName(subtitle) || `${formatSubtitleLang(subtitle.lang, isTr)} (${normalizeSubtitleLang(subtitle.lang) || 'SUB'})`}
+                            </strong>
+                            {formatSubtitleDownloadCount(subtitle.downloadCount, isTr) && (
+                              <span className="library-subtitle-count">{formatSubtitleDownloadCount(subtitle.downloadCount, isTr)}</span>
+                            )}
+                          </div>
+                          <span>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</span>
                         </div>
                         <button
                           className="episode-download-btn"
@@ -1050,7 +1073,15 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
                   {filteredSubtitleList.map((subtitle, index) => (
                     <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
                       <div className="library-subtitle-meta">
-                        <strong>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</strong>
+                        <div className="library-subtitle-title-row">
+                          <strong title={getSubtitleDisplayName(subtitle) || undefined}>
+                            {getSubtitleDisplayName(subtitle) || `${formatSubtitleLang(subtitle.lang, isTr)} (${normalizeSubtitleLang(subtitle.lang) || 'SUB'})`}
+                          </strong>
+                          {formatSubtitleDownloadCount(subtitle.downloadCount, isTr) && (
+                            <span className="library-subtitle-count">{formatSubtitleDownloadCount(subtitle.downloadCount, isTr)}</span>
+                          )}
+                        </div>
+                        <span>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</span>
                       </div>
                       <button
                         className="episode-download-btn"
