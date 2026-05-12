@@ -659,13 +659,26 @@ if (shouldForceSoftwareRendering) {
 }
 
 function createWindow() {
-  const windowIconPath = path.join(__dirname, 'build', 'icon.png');
   const isDevMode = !app.isPackaged;
+  const iconCandidates = process.platform === 'win32'
+    ? [
+        ...(isDevMode ? [path.join(process.cwd(), 'build', 'icon.ico')] : []),
+        path.join(process.resourcesPath, 'build', 'icon.ico'),
+        path.join(app.getAppPath(), 'build', 'icon.ico'),
+        path.join(__dirname, 'build', 'icon.ico'),
+      ]
+    : [
+        ...(isDevMode ? [path.join(process.cwd(), 'build', 'icon.png')] : []),
+        path.join(process.resourcesPath, 'build', 'icon.png'),
+        path.join(app.getAppPath(), 'build', 'icon.png'),
+        path.join(__dirname, 'build', 'icon.png'),
+      ];
+  const windowIconPath = iconCandidates.find((candidate) => fs.existsSync(candidate));
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     backgroundColor: '#000000',
-    icon: fs.existsSync(windowIconPath) ? windowIconPath : undefined,
+    icon: windowIconPath || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -1297,6 +1310,35 @@ ipcMain.handle('get-managed-prowlarr-status', async () => {
     expectedPath: getBundledProwlarrExecutable(),
     dataDir: getManagedProwlarrDataDir(),
   };
+});
+
+ipcMain.handle('open-prowlarr-download-page', async () => {
+  try {
+    await shell.openExternal('https://github.com/prowlarr/prowlarr');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-prowlarr-web-ui', async (event, prowlarrConfig = {}) => {
+  try {
+    const merged = {
+      ...(getProwlarrConfig() || {}),
+      ...(prowlarrConfig || {}),
+    };
+    let baseUrl = String(merged.baseUrl || '').trim();
+    if (!baseUrl) return { ok: false, error: 'Prowlarr URL is empty' };
+    if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
+    const parsed = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { ok: false, error: 'Invalid URL protocol' };
+    }
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

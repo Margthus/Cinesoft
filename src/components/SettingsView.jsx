@@ -83,6 +83,17 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
+  const handleOpenProwlarrDownload = async () => {
+    await window.electronAPI?.openProwlarrDownloadPage?.();
+  };
+
+  const handleOpenProwlarrWebUI = async () => {
+    const result = await window.electronAPI?.openProwlarrWebUI?.(formData.prowlarr || {});
+    if (!result?.ok) {
+      alert(result?.error || 'Prowlarr URL could not be opened');
+    }
+  };
+
   const handleStartProwlarr = async (configOverride) => {
     setManagedStatus('starting');
     const configToStart = configOverride || formData.prowlarr;
@@ -437,7 +448,7 @@ const SettingsView = ({ settings, setSettings }) => {
           <header className="settings-card-header">
             <Globe size={18} />
             <div>
-              <h2>{settings.language === 'tr' ? 'Torrentio (Stremio)' : 'Torrentio (Stremio)'}</h2>
+              <h2>Torrentio</h2>
               <p>{settings.language === 'tr' ? 'Torrentio eklentisini kaynak olarak kullan.' : 'Use Torrentio addon as source.'}</p>
             </div>
             <div className="settings-card-actions">
@@ -566,6 +577,20 @@ const SettingsView = ({ settings, setSettings }) => {
               <p>{t.prowlarrHint}</p>
             </div>
             <div className="settings-card-actions">
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                onClick={handleOpenProwlarrDownload}
+              >
+                <span>{t.downloadProwlarr}</span>
+              </button>
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                onClick={handleOpenProwlarrWebUI}
+              >
+                <span>{t.openProwlarrWebUI}</span>
+              </button>
               <button
                 type="button"
                 className="settings-collapse-btn"
@@ -919,6 +944,8 @@ const getCopy = (language) => ({
     size: 'Boyuta gore',
     name: 'Isme gore',
     prowlarrHint: 'Motor baslatma, baglanti ve indexer yonetimi.',
+    downloadProwlarr: 'Download Prowlarr',
+    openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Motor Kontrolu',
     connection: 'Baglanti',
     filters: 'Arama Filtreleri',
@@ -994,6 +1021,8 @@ const getCopy = (language) => ({
     size: 'By size',
     name: 'By name',
     prowlarrHint: 'Engine start, connection, and indexer management.',
+    downloadProwlarr: 'Download Prowlarr',
+    openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Engine Control',
     connection: 'Connection',
     filters: 'Search Filters',

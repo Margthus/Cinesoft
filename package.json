@@ -40,6 +40,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "build/**/*",
       "renderer/**/*",
       "src/**/*",
       "package.json",

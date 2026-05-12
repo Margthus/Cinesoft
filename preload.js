@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startManagedProwlarr: (prowlarrConfig) => ipcRenderer.invoke('start-managed-prowlarr', prowlarrConfig),
   stopManagedProwlarr: () => ipcRenderer.invoke('stop-managed-prowlarr'),
   getManagedProwlarrStatus: () => ipcRenderer.invoke('get-managed-prowlarr-status'),
+  openProwlarrDownloadPage: () => ipcRenderer.invoke('open-prowlarr-download-page'),
+  openProwlarrWebUI: (prowlarrConfig) => ipcRenderer.invoke('open-prowlarr-web-ui', prowlarrConfig),
 
   // Torrent APIs
   torrentAdd: (opts) => ipcRenderer.invoke('torrent-add', opts),
