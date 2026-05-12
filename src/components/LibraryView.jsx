@@ -303,20 +303,16 @@ const getPreferredSubtitleLang = (appLanguage = '') => {
   return String(appLanguage || '').toLowerCase() === 'tr' ? 'TUR' : 'ENG';
 };
 
-const stripSubtitleDisplayExtension = (value = '') => String(value || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+const SUBTITLE_PROVIDER_OPTIONS = [
+  { key: 'opensubtitles-v3', label: 'OpenSubtitles' },
+  { key: 'turkcealtyaziorg-stremio-addon', label: 'turkcealtyazi.org' },
+];
 
-const getSubtitleDisplayName = (subtitle = {}) => {
-  const raw = String(subtitle?.fileName || subtitle?.label || '').trim();
-  const cleaned = stripSubtitleDisplayExtension(raw).replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-  return cleaned;
-};
-
-const formatSubtitleDownloadCount = (value, isTr = false) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return '';
-  const count = new Intl.NumberFormat(isTr ? 'tr-TR' : 'en-US').format(numeric);
-  return isTr ? `${count} indirme` : `${count} downloads`;
-};
+const normalizeSubtitleProvider = (value = '') => (
+  String(value || '').trim().toLowerCase() === 'turkcealtyaziorg-stremio-addon'
+    ? 'turkcealtyaziorg-stremio-addon'
+    : 'opensubtitles-v3'
+);
 
 const LibraryView = ({ settings }) => {
   const [items, setItems] = useState([]);
@@ -330,6 +326,8 @@ const LibraryView = ({ settings }) => {
   const [movieSubtitleError, setMovieSubtitleError] = useState('');
   const [movieSubtitleSuccess, setMovieSubtitleSuccess] = useState('');
   const [movieSubtitleLangFilter, setMovieSubtitleLangFilter] = useState('ALL');
+  const [movieSubtitleProvider, setMovieSubtitleProvider] = useState('opensubtitles-v3');
+  const [movieSubtitleProviderOffline, setMovieSubtitleProviderOffline] = useState(false);
   const [seriesDetails, setSeriesDetails] = useState(null);
   const [seasonDetails, setSeasonDetails] = useState({});
   const metadataPending = useRef(new Set());
@@ -562,6 +560,7 @@ const LibraryView = ({ settings }) => {
     setMovieSubtitleList([]);
     setMovieSubtitleError('');
     setMovieSubtitleSuccess('');
+    setMovieSubtitleProviderOffline(false);
     setMovieSubtitleSavingId('');
     setMovieSubtitleLangFilter('ALL');
     setMovieSubtitleLoading(true);
@@ -570,12 +569,14 @@ const LibraryView = ({ settings }) => {
         fullPath: item.fullPath,
         tmdbType: item.tmdbType || 'movie',
         tmdbId: item.tmdbId || null,
+        subtitleProvider: normalizeSubtitleProvider(movieSubtitleProvider),
       });
       if (!result?.ok) {
         throw new Error(result?.error || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
       }
       const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
       setMovieSubtitleList(subtitles);
+      setMovieSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
       const preferred = getPreferredSubtitleLang(settings?.language);
       const hasPreferred = subtitles.some((sub) => normalizeSubtitleLang(sub?.lang) === preferred);
       setMovieSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
@@ -596,6 +597,8 @@ const LibraryView = ({ settings }) => {
     setMovieSubtitleSuccess('');
     setMovieSubtitleSavingId('');
     setMovieSubtitleLangFilter('ALL');
+    setMovieSubtitleProvider('opensubtitles-v3');
+    setMovieSubtitleProviderOffline(false);
     setMovieSubtitleLoading(false);
   };
 
@@ -729,8 +732,15 @@ const LibraryView = ({ settings }) => {
       </div>
 
       {movieSubtitleTarget && (
-        <div className="library-subtitle-modal" role="dialog" aria-modal="true">
-          <div className="library-subtitle-panel">
+        <div
+          className="library-subtitle-modal"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeMovieSubtitleModal();
+          }}
+        >
+          <div className="library-subtitle-panel" onMouseDown={(event) => event.stopPropagation()}>
             <div className="library-subtitle-header">
               <div>
                 <strong>{movieSubtitleTarget.cleanTitle || movieSubtitleTarget.displayTitle || movieSubtitleTarget.title || 'Movie'}</strong>
@@ -744,9 +754,51 @@ const LibraryView = ({ settings }) => {
               {movieSubtitleLoading && <p>{isTr ? 'Altyazilar yukleniyor...' : 'Loading subtitles...'}</p>}
               {!movieSubtitleLoading && movieSubtitleError && <p className="library-subtitle-error">{movieSubtitleError}</p>}
               {!movieSubtitleLoading && movieSubtitleSuccess && <p className="library-subtitle-success">{movieSubtitleSuccess}</p>}
-              {!movieSubtitleLoading && movieSubtitleList.length > 0 && (
+              {!movieSubtitleLoading && (
                 <>
                 <div className="library-subtitle-toolbar">
+                  <label htmlFor="movie-subtitle-provider-filter">{isTr ? 'Saglayici' : 'Provider'}</label>
+                  <select
+                    id="movie-subtitle-provider-filter"
+                    className="library-subtitle-select"
+                    value={movieSubtitleProvider}
+                    onChange={async (event) => {
+                      const nextProvider = normalizeSubtitleProvider(event.target.value);
+                      setMovieSubtitleProvider(nextProvider);
+                      if (!movieSubtitleTarget) return;
+                      setMovieSubtitleError('');
+                      setMovieSubtitleSuccess('');
+                      setMovieSubtitleProviderOffline(false);
+                      setMovieSubtitleLoading(true);
+                      try {
+                        const result = await window.electronAPI.searchLibrarySubtitles({
+                          fullPath: movieSubtitleTarget.fullPath,
+                          tmdbType: movieSubtitleTarget.tmdbType || 'movie',
+                          tmdbId: movieSubtitleTarget.tmdbId || null,
+                          subtitleProvider: nextProvider,
+                        });
+                        if (!result?.ok) throw new Error(result?.error || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+                        const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
+                        setMovieSubtitleList(subtitles);
+                        setMovieSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
+                        const preferred = getPreferredSubtitleLang(settings?.language);
+                        const hasPreferred = subtitles.some((sub) => normalizeSubtitleLang(sub?.lang) === preferred);
+                        setMovieSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
+                        if (!subtitles.length) setMovieSubtitleError(isTr ? 'Altyazi bulunamadi' : 'No subtitles found');
+                      } catch (err) {
+                        setMovieSubtitleError(err.message || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+                      } finally {
+                        setMovieSubtitleLoading(false);
+                      }
+                    }}
+                  >
+                    {SUBTITLE_PROVIDER_OPTIONS.map((provider) => (
+                      <option key={provider.key} value={provider.key}>{provider.label}</option>
+                    ))}
+                  </select>
+                  {movieSubtitleProvider === 'turkcealtyaziorg-stremio-addon' && movieSubtitleProviderOffline && (
+                    <span className="library-subtitle-provider-offline">Offline</span>
+                  )}
                   <label htmlFor="movie-subtitle-lang-filter">{isTr ? 'Dil' : 'Language'}</label>
                   <select
                     id="movie-subtitle-lang-filter"
@@ -764,35 +816,29 @@ const LibraryView = ({ settings }) => {
                       ))}
                   </select>
                 </div>
-                <div className="library-subtitle-list">
-                  {movieSubtitleList
-                    .filter((item) => movieSubtitleLangFilter === 'ALL' || normalizeSubtitleLang(item?.lang) === movieSubtitleLangFilter)
-                    .map((subtitle, index) => (
-                      <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
-                        <div className="library-subtitle-meta">
-                          <div className="library-subtitle-title-row">
-                            <strong title={getSubtitleDisplayName(subtitle) || undefined}>
-                              {getSubtitleDisplayName(subtitle) || `${formatSubtitleLang(subtitle.lang, isTr)} (${normalizeSubtitleLang(subtitle.lang) || 'SUB'})`}
-                            </strong>
-                            {formatSubtitleDownloadCount(subtitle.downloadCount, isTr) && (
-                              <span className="library-subtitle-count">{formatSubtitleDownloadCount(subtitle.downloadCount, isTr)}</span>
-                            )}
+                {movieSubtitleList.length > 0 && (
+                  <div className="library-subtitle-list">
+                    {movieSubtitleList
+                      .filter((item) => movieSubtitleLangFilter === 'ALL' || normalizeSubtitleLang(item?.lang) === movieSubtitleLangFilter)
+                      .map((subtitle, index) => (
+                        <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
+                          <div className="library-subtitle-meta">
+                            <strong>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</strong>
                           </div>
-                          <span>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</span>
+                          <button
+                            className="episode-download-btn"
+                            disabled={movieSubtitleSavingId === (subtitle.id || subtitle.url)}
+                            onClick={() => handleMovieSubtitleDownload(subtitle)}
+                          >
+                            <Download size={14} />
+                            {movieSubtitleSavingId === (subtitle.id || subtitle.url)
+                              ? (isTr ? 'Indiriliyor' : 'Downloading')
+                              : (isTr ? 'Indir' : 'Download')}
+                          </button>
                         </div>
-                        <button
-                          className="episode-download-btn"
-                          disabled={movieSubtitleSavingId === (subtitle.id || subtitle.url)}
-                          onClick={() => handleMovieSubtitleDownload(subtitle)}
-                        >
-                          <Download size={14} />
-                          {movieSubtitleSavingId === (subtitle.id || subtitle.url)
-                            ? (isTr ? 'Indiriliyor' : 'Downloading')
-                            : (isTr ? 'Indir' : 'Download')}
-                        </button>
-                      </div>
-                    ))}
-                </div>
+                      ))}
+                  </div>
+                )}
                 </>
               )}
             </div>
@@ -813,6 +859,8 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
   const [subtitleSuccess, setSubtitleSuccess] = useState('');
   const [subtitleDebug, setSubtitleDebug] = useState('');
   const [subtitleLangFilter, setSubtitleLangFilter] = useState('ALL');
+  const [subtitleProvider, setSubtitleProvider] = useState('opensubtitles-v3');
+  const [subtitleProviderOffline, setSubtitleProviderOffline] = useState(false);
   const downloaded = new Map();
   series.episodes.forEach((item) => {
     downloaded.set(`${item.season}:${item.episode}`, item);
@@ -847,6 +895,7 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
     setSubtitleError('');
     setSubtitleSuccess('');
     setSubtitleDebug('');
+    setSubtitleProviderOffline(false);
     setSubtitleLangFilter('ALL');
     setSubtitleSavingId('');
     setSubtitleLoading(true);
@@ -858,6 +907,7 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
         imdbId: details?.external_ids?.imdb_id || '',
         season: seasonNumber,
         episode: episodeNumber,
+        subtitleProvider: normalizeSubtitleProvider(subtitleProvider),
       });
       if (!result?.ok) {
         throw new Error(result?.error || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
@@ -865,6 +915,7 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
       const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
       setSubtitleList(subtitles);
       setSubtitleDebug(buildSubtitleDebugText(result.debug, isTr));
+      setSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
       const preferred = getPreferredSubtitleLang(settings?.language);
       const hasPreferred = subtitles.some((item) => normalizeSubtitleLang(item?.lang) === preferred);
       setSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
@@ -885,6 +936,8 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
     setSubtitleSuccess('');
     setSubtitleDebug('');
     setSubtitleLangFilter('ALL');
+    setSubtitleProvider('opensubtitles-v3');
+    setSubtitleProviderOffline(false);
     setSubtitleSavingId('');
     setSubtitleLoading(false);
   };
@@ -1034,8 +1087,15 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
       )}
 
       {subtitleTarget && (
-        <div className="library-subtitle-modal" role="dialog" aria-modal="true">
-          <div className="library-subtitle-panel">
+        <div
+          className="library-subtitle-modal"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeSubtitleModal();
+          }}
+        >
+          <div className="library-subtitle-panel" onMouseDown={(event) => event.stopPropagation()}>
             <div className="library-subtitle-header">
               <div>
                 <strong>{details?.name || series.title}</strong>
@@ -1051,9 +1111,55 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
               {subtitleLoading && <p>{isTr ? 'Altyazilar yukleniyor...' : 'Loading subtitles...'}</p>}
               {!subtitleLoading && subtitleError && <p className="library-subtitle-error">{subtitleError}</p>}
               {!subtitleLoading && subtitleSuccess && <p className="library-subtitle-success">{subtitleSuccess}</p>}
-              {!subtitleLoading && subtitleList.length > 0 && (
+              {!subtitleLoading && (
                 <>
                 <div className="library-subtitle-toolbar">
+                  <label htmlFor="subtitle-provider-filter">{isTr ? 'Saglayici' : 'Provider'}</label>
+                  <select
+                    id="subtitle-provider-filter"
+                    className="library-subtitle-select"
+                    value={subtitleProvider}
+                    onChange={async (event) => {
+                      const nextProvider = normalizeSubtitleProvider(event.target.value);
+                      setSubtitleProvider(nextProvider);
+                      if (!subtitleTarget?.local?.fullPath) return;
+                      setSubtitleError('');
+                      setSubtitleSuccess('');
+                      setSubtitleProviderOffline(false);
+                      setSubtitleLoading(true);
+                      try {
+                        const result = await window.electronAPI.searchLibrarySubtitles({
+                          fullPath: subtitleTarget.local.fullPath,
+                          tmdbType: subtitleTarget.local.tmdbType || 'tv',
+                          tmdbId: subtitleTarget.local.tmdbId || series.tmdbId || details?.id || null,
+                          imdbId: details?.external_ids?.imdb_id || '',
+                          season: subtitleTarget.season,
+                          episode: subtitleTarget.episode,
+                          subtitleProvider: nextProvider,
+                        });
+                        if (!result?.ok) throw new Error(result?.error || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+                        const subtitles = Array.isArray(result.subtitles) ? result.subtitles : [];
+                        setSubtitleList(subtitles);
+                        setSubtitleDebug(buildSubtitleDebugText(result.debug, isTr));
+                        setSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
+                        const preferred = getPreferredSubtitleLang(settings?.language);
+                        const hasPreferred = subtitles.some((item) => normalizeSubtitleLang(item?.lang) === preferred);
+                        setSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
+                        if (!subtitles.length) setSubtitleError(isTr ? 'Altyazi bulunamadi' : 'No subtitles found');
+                      } catch (err) {
+                        setSubtitleError(err.message || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+                      } finally {
+                        setSubtitleLoading(false);
+                      }
+                    }}
+                  >
+                    {SUBTITLE_PROVIDER_OPTIONS.map((provider) => (
+                      <option key={provider.key} value={provider.key}>{provider.label}</option>
+                    ))}
+                  </select>
+                  {subtitleProvider === 'turkcealtyaziorg-stremio-addon' && subtitleProviderOffline && (
+                    <span className="library-subtitle-provider-offline">Offline</span>
+                  )}
                   <label htmlFor="subtitle-lang-filter">{isTr ? 'Dil' : 'Language'}</label>
                   <select
                     id="subtitle-lang-filter"
@@ -1069,33 +1175,27 @@ const SeriesLibraryView = ({ isTr, series, settings, details, seasonDetails, onB
                     ))}
                   </select>
                 </div>
-                <div className="library-subtitle-list">
-                  {filteredSubtitleList.map((subtitle, index) => (
-                    <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
-                      <div className="library-subtitle-meta">
-                        <div className="library-subtitle-title-row">
-                          <strong title={getSubtitleDisplayName(subtitle) || undefined}>
-                            {getSubtitleDisplayName(subtitle) || `${formatSubtitleLang(subtitle.lang, isTr)} (${normalizeSubtitleLang(subtitle.lang) || 'SUB'})`}
-                          </strong>
-                          {formatSubtitleDownloadCount(subtitle.downloadCount, isTr) && (
-                            <span className="library-subtitle-count">{formatSubtitleDownloadCount(subtitle.downloadCount, isTr)}</span>
-                          )}
+                {subtitleList.length > 0 && (
+                  <div className="library-subtitle-list">
+                    {filteredSubtitleList.map((subtitle, index) => (
+                      <div className="library-subtitle-row" key={`${subtitle.id || 'sub'}-${index}`}>
+                        <div className="library-subtitle-meta">
+                          <strong>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</strong>
                         </div>
-                        <span>{formatSubtitleLang(subtitle.lang, isTr)} ({normalizeSubtitleLang(subtitle.lang) || 'SUB'})</span>
+                        <button
+                          className="episode-download-btn"
+                          disabled={subtitleSavingId === (subtitle.id || subtitle.url)}
+                          onClick={() => handleSubtitleDownload(subtitle)}
+                        >
+                          <Download size={14} />
+                          {subtitleSavingId === (subtitle.id || subtitle.url)
+                            ? (isTr ? 'Indiriliyor' : 'Downloading')
+                            : (isTr ? 'Indir' : 'Download')}
+                        </button>
                       </div>
-                      <button
-                        className="episode-download-btn"
-                        disabled={subtitleSavingId === (subtitle.id || subtitle.url)}
-                        onClick={() => handleSubtitleDownload(subtitle)}
-                      >
-                        <Download size={14} />
-                        {subtitleSavingId === (subtitle.id || subtitle.url)
-                          ? (isTr ? 'Indiriliyor' : 'Downloading')
-                          : (isTr ? 'Indir' : 'Download')}
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
                 </>
               )}
             </div>

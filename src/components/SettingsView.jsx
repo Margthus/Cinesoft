@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, EyeOff, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
 import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
@@ -23,6 +23,7 @@ const SettingsView = ({ settings, setSettings }) => {
   const [downloadEngineConfigOpen, setDownloadEngineConfigOpen] = useState(true);
   const [torrentioConfigOpen, setTorrentioConfigOpen] = useState(true);
   const [prowlarrConfigOpen, setProwlarrConfigOpen] = useState(true);
+  const [tmdbApiKeyVisible, setTmdbApiKeyVisible] = useState(false);
 
   useEffect(() => {
     refreshIndexers();
@@ -320,12 +321,24 @@ const SettingsView = ({ settings, setSettings }) => {
               <p>{t.tmdbHint}</p>
             </div>
           </header>
-          <input
-            className="settings-input"
-            value={formData.apiKey}
-            onChange={(event) => updateRoot({ apiKey: event.target.value })}
-            placeholder={t.tmdb}
-          />
+          <div className="input-action-row">
+            <input
+              className="settings-input"
+              type={tmdbApiKeyVisible ? 'text' : 'password'}
+              value={formData.apiKey}
+              onChange={(event) => updateRoot({ apiKey: event.target.value })}
+              placeholder={t.tmdb}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setTmdbApiKeyVisible((current) => !current)}
+              aria-label={tmdbApiKeyVisible ? 'Hide TMDB API key' : 'Show TMDB API key'}
+              title={tmdbApiKeyVisible ? 'Hide' : 'Show'}
+            >
+              {tmdbApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
         </section>
 
         <section className="settings-card settings-card-full">
