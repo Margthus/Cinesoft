@@ -30,6 +30,16 @@ const App = () => {
       password: 'adminadmin',
     },
     torrentio: normalizeTorrentioConfig({}),
+    radarrEnabled: false,
+    radarrManaged: false,
+    radarrBaseUrl: 'http://127.0.0.1:7878',
+    radarrApiKey: '',
+    radarrExecutablePath: '',
+    radarrPort: 7878,
+    radarrTimeout: 10000,
+    radarrDefaultRootFolder: '',
+    radarrDefaultQualityProfileId: '',
+    radarrSearchAfterAdd: true,
   });
   const [loading, setLoading] = useState(true);
   const [myList, setMyList] = useState([]);
@@ -57,6 +67,16 @@ const App = () => {
               password: 'adminadmin',
             },
             torrentio: normalizeTorrentioConfig(savedSettings.torrentio || {}),
+            radarrEnabled: savedSettings.radarrEnabled === true,
+            radarrManaged: savedSettings.radarrManaged === true,
+            radarrBaseUrl: savedSettings.radarrBaseUrl || 'http://127.0.0.1:7878',
+            radarrApiKey: savedSettings.radarrApiKey || '',
+            radarrExecutablePath: savedSettings.radarrExecutablePath || '',
+            radarrPort: Number(savedSettings.radarrPort || 7878),
+            radarrTimeout: Number(savedSettings.radarrTimeout || 10000),
+            radarrDefaultRootFolder: savedSettings.radarrDefaultRootFolder || '',
+            radarrDefaultQualityProfileId: savedSettings.radarrDefaultQualityProfileId ?? '',
+            radarrSearchAfterAdd: savedSettings.radarrSearchAfterAdd !== false,
           });
 
           if (savedSettings.prowlarr?.managed && !savedSettings.torrentioEnabled) {

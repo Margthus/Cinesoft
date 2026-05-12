@@ -1,0 +1,310 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Radarr.Core</name>
+    </assembly>
+    <members>
+        <member name="T:NzbDrone.Core.Datastore.ExpressionVisitor">
+            <summary>
+            Expression visitor
+            </summary>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.Visit(System.Linq.Expressions.Expression)">
+            <summary>
+            Visits expression and delegates call to different to branch.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitConstant(System.Linq.Expressions.ConstantExpression)">
+            <summary>
+            Visits the constance expression. To be implemented by user.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitMemberAccess(System.Linq.Expressions.MemberExpression)">
+            <summary>
+            Visits the member access expression. To be implemented by user.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitMethodCall(System.Linq.Expressions.MethodCallExpression)">
+            <summary>
+            Visits the method call expression. To be implemented by user.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitBinary(System.Linq.Expressions.BinaryExpression)">
+            <summary>
+            Visits the binary expression.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitUnary(System.Linq.Expressions.UnaryExpression)">
+            <summary>
+            Visits the unary expression.
+            </summary>
+            <param name="expression"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.ExpressionVisitor.VisitLamda(System.Linq.Expressions.LambdaExpression)">
+            <summary>
+            Visits the lambda expression.
+            </summary>
+            <param name="lambdaExpression"></param>
+            <returns></returns>
+        </member>
+        <member name="T:NzbDrone.Core.Datastore.LazyLoaded`1">
+            <summary>
+            Allows a field to be lazy loaded.
+            </summary>
+            <typeparam name="TChild"></typeparam>
+        </member>
+        <member name="T:NzbDrone.Core.Datastore.LazyLoaded`2">
+            <summary>
+            This is the lazy loading proxy.
+            </summary>
+            <typeparam name="TParent">The parent entity that contains the lazy loaded entity.</typeparam>
+            <typeparam name="TChild">The child entity that is being lazy loaded.</typeparam>
+        </member>
+        <member name="M:NzbDrone.Core.Datastore.Migration.Framework.SqliteSchemaDumper.GetDbType(System.String)">
+            <summary>
+            Get DbType from string type definition
+            </summary>
+            <param name="typeNum"></param>
+            <returns></returns>
+        </member>
+        <member name="P:NzbDrone.Core.Download.Clients.DownloadStation.DownloadStation2Task.Type">
+            <summary>
+            /// Possible values are: BT, NZB, http, ftp, eMule and https
+            </summary>
+        </member>
+        <member name="P:NzbDrone.Core.Download.Clients.DownloadStation.DownloadStationTask.Type">
+            <summary>
+            /// Possible values are: BT, NZB, http, ftp, eMule and https
+            </summary>
+        </member>
+        <member name="T:NzbDrone.Core.Download.Clients.Sabnzbd.JsonConverters.SabnzbdStringArrayConverter">
+            <summary>
+            On some properties sab serializes array of single item as plain string.
+            </summary>
+        </member>
+        <member name="M:NzbDrone.Core.Indexers.TorrentRss.TorrentRssSettingsDetector.Detect(NzbDrone.Core.Indexers.TorrentRss.TorrentRssIndexerSettings)">
+            <summary>
+            Detect settings for Parser, based on URL
+            </summary>
+            <param name="settings">Indexer Settings to use for Parser</param>
+            <returns>Parsed Settings or <c>null</c></returns>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Freeleech">
+            <summary>
+            Torrent download amount does not count
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Halfleech">
+            <summary>
+            Torrent download amount only counts 50%
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_DoubleUpload">
+            <summary>
+            Torrent upload amount is doubled
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.PTP_Golden">
+            <summary>
+            Torrent is a very high quality encode, as applied manually by the PTP staff
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.PTP_Approved">
+            <summary>
+            Torrent from PTP that has been checked (by staff or torrent checkers) for release description requirements
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Internal">
+            <summary>
+            Uploader is an internal release group
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Scene">
+            <summary>
+            The release comes from a scene group
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Freeleech75">
+            <summary>
+            Torrent download amount only counts 75%
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.G_Freeleech25">
+            <summary>
+            Torrent download amount only counts 25%
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.Model.IndexerFlags.Nuked">
+            <summary>
+            The release is nuked
+            </summary>
+        </member>
+        <member name="T:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral">
+            <summary>
+            Represents the numeric system used in ancient Rome, employing combinations of letters from the Latin alphabet to signify values.
+            Implementation adapted from: http://www.c-sharpcorner.com/Blogs/14255/converting-to-and-from-roman-numerals.aspx
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral._value">
+            <summary>
+            The numeric value of the roman numeral.
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.MinValue">
+            <summary>
+            Represents the smallest possible value of an <see cref="T:RomanNumeral"/>. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.MaxValue">
+            <summary>
+            Represents the largest possible value of an <see cref="T:RomanNumeral"/>. This field is constant.
+            </summary>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.#ctor">
+            <summary>
+            Initializes a new instance of the <see cref="T:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral"/> class.
+            </summary>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.#ctor(System.Int32)">
+            <summary>
+            Initializes a new instance of the <see cref="T:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral"/> class.
+            </summary>
+            <param name="value">The value.</param>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.#ctor(System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral"/> class.
+            </summary>
+            <param name="romanNumeral">The roman numeral.</param>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.ToInt">
+            <summary>
+            Converts this instance to an integer.
+            </summary>
+            <returns>A numeric int representation.</returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.ToLong">
+            <summary>
+            Converts this instance to a long.
+            </summary>
+            <returns>A numeric long representation.</returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.TryParse(System.String,System.Int32@)">
+            <summary>
+            Converts the string representation of a number to its 32-bit signed integer equivalent. A return value indicates whether the conversion succeeded.
+            </summary>
+            <param name="text">A string containing a number to convert. </param>
+            <param name="value">When this method returns, contains the 32-bit signed integer value equivalent of the number contained in <paramref name="text"/>,
+            if the conversion succeeded, or zero if the conversion failed. The conversion fails if the <paramref name="text"/> parameter is null  or
+            <see cref="F:System.String.Empty"/>, is not of the correct format, or represents a number less than <see cref="F:System.Int32.MinValue"/> or greater than <see cref="F:System.Int32.MaxValue"/>. This parameter is passed uninitialized. </param><filterpriority>1</filterpriority>
+            <returns>
+            true if <paramref name="text"/> was converted successfully; otherwise, false.
+            </returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.ToRomanNumeral(System.Int32)">
+            <summary>
+            Converts a number into a roman numeral.
+            </summary>
+            <param name="number">The number.</param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.ToRomanNumeral">
+            <summary>
+            Returns the Roman numeral that was passed in as either an Arabic numeral
+            or a Roman numeral.
+            </summary>
+            <returns>A <see cref="T:System.String" /> representing a Roman Numeral</returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.RangeGuard(System.Int32)">
+            <summary>
+            Determines whether a given number is within the valid range of values for a roman numeral.
+            </summary>
+            <param name="number">The number to validate.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            $Roman numerals can not be larger than {MaxValue}.
+            or
+            $Roman numerals can not be smaller than {MinValue}.
+            </exception>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.op_Multiply(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral,NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Implements the operator *.
+            </summary>
+            <param name="firstNumeral">The first numeral.</param>
+            <param name="secondNumeral">The second numeral.</param>
+            <returns>
+            The result of the operator.
+            </returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.op_Division(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral,NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Implements the operator /.
+            </summary>
+            <param name="numerator">The numerator.</param>
+            <param name="denominator">The denominator.</param>
+            <returns>
+            The result of the operator.
+            </returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.op_Addition(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral,NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Implements the operator +.
+            </summary>
+            <param name="firstNumeral">The first numeral.</param>
+            <param name="secondNumeral">The second numeral.</param>
+            <returns>
+            The result of the operator.
+            </returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.op_Subtraction(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral,NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Implements the operator -.
+            </summary>
+            <param name="firstNumeral">The first numeral.</param>
+            <param name="secondNumeral">The second numeral.</param>
+            <returns>
+            The result of the operator.
+            </returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.CompareTo(System.Object)">
+            <summary>
+            </summary>
+            <param name="obj">The object.</param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.CompareTo(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Compares to.
+            </summary>
+            <param name="other">The other.</param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.Equals(NzbDrone.Core.Parser.RomanNumerals.RomanNumeral)">
+            <summary>
+            Equalses the specified other.
+            </summary>
+            <param name="other">The other.</param>
+            <returns></returns>
+        </member>
+        <member name="M:NzbDrone.Core.Parser.RomanNumerals.RomanNumeral.ToString">
+            <summary>
+            Returns the Roman Numeral which was passed to this Instance
+            during creation.
+            </summary>
+            <returns>
+            A <see cref="T:System.String" /> that represents a Roman Numeral.
+            </returns>
+        </member>
+    </members>
+</doc>

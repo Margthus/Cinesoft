@@ -519,6 +519,82 @@
   color: var(--accent);
 }
 
+.radarr-modal-card {
+  width: min(560px, calc(100vw - 2rem));
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0e1114;
+  padding: 1rem;
+}
+
+.radarr-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.radarr-modal-header h3 {
+  margin: 0;
+}
+
+.radarr-modal-header .icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.radarr-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.radarr-modal-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.radarr-modal-body select {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 0.75rem 0.85rem;
+}
+
+.radarr-check {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.radarr-error {
+  color: #ff8c8c;
+  margin: 0;
+}
+
+.radarr-success {
+  color: var(--accent);
+  margin: 0;
+}
+
+.radarr-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
 .lightbox-nav {
   position: absolute;
   top: 50%;

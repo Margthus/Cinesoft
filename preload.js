@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getManagedProwlarrStatus: () => ipcRenderer.invoke('get-managed-prowlarr-status'),
   openProwlarrDownloadPage: () => ipcRenderer.invoke('open-prowlarr-download-page'),
   openProwlarrWebUI: (prowlarrConfig) => ipcRenderer.invoke('open-prowlarr-web-ui', prowlarrConfig),
+  selectRadarrExecutable: () => ipcRenderer.invoke('select-radarr-executable'),
+  startManagedRadarr: (radarrConfig) => ipcRenderer.invoke('start-managed-radarr', radarrConfig),
+  stopManagedRadarr: () => ipcRenderer.invoke('stop-managed-radarr'),
+  getManagedRadarrStatus: () => ipcRenderer.invoke('get-managed-radarr-status'),
+  radarrTestConnection: (settings) => ipcRenderer.invoke('radarr:testConnection', settings),
+  radarrGetRootFolders: (settings) => ipcRenderer.invoke('radarr:getRootFolders', settings),
+  radarrGetQualityProfiles: (settings) => ipcRenderer.invoke('radarr:getQualityProfiles', settings),
+  radarrLookupMovieByTmdbId: (payload) => ipcRenderer.invoke('radarr:lookupMovieByTmdbId', payload),
+  radarrAddMovie: (payload) => ipcRenderer.invoke('radarr:addMovie', payload),
+  openRadarrDownloadPage: () => ipcRenderer.invoke('open-radarr-download-page'),
+  openRadarrWebUI: (settings) => ipcRenderer.invoke('open-radarr-web-ui', settings),
 
   // Torrent APIs
   torrentAdd: (opts) => ipcRenderer.invoke('torrent-add', opts),

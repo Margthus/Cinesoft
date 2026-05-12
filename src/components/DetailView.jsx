@@ -13,6 +13,16 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedImageIndex, setSelectedImageIndex] = useState(null);
+  const [radarrModalOpen, setRadarrModalOpen] = useState(false);
+  const [radarrModalLoading, setRadarrModalLoading] = useState(false);
+  const [radarrAddLoading, setRadarrAddLoading] = useState(false);
+  const [radarrStatusMessage, setRadarrStatusMessage] = useState('');
+  const [radarrErrorMessage, setRadarrErrorMessage] = useState('');
+  const [radarrRootFolders, setRadarrRootFolders] = useState([]);
+  const [radarrQualityProfiles, setRadarrQualityProfiles] = useState([]);
+  const [radarrRootFolder, setRadarrRootFolder] = useState('');
+  const [radarrQualityProfileId, setRadarrQualityProfileId] = useState('');
+  const [radarrMonitored, setRadarrMonitored] = useState(true);
 
   const castScrollRef = useRef(null);
   const imageScrollRef = useRef(null);
@@ -247,6 +257,99 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   const sourceType = (type === 'anime' && String(data?.animeFormat || '').toUpperCase() === 'MOVIE')
     ? 'movie'
     : type;
+  const radarrEnabled = settings.radarrEnabled === true;
+
+  const getRadarrSettings = () => ({
+    radarrEnabled: settings.radarrEnabled === true,
+    radarrBaseUrl: String(settings.radarrBaseUrl || ''),
+    radarrApiKey: String(settings.radarrApiKey || ''),
+    radarrDefaultRootFolder: String(settings.radarrDefaultRootFolder || ''),
+    radarrDefaultQualityProfileId: settings.radarrDefaultQualityProfileId ?? '',
+    radarrSearchAfterAdd: settings.radarrSearchAfterAdd !== false,
+  });
+
+  const openRadarrModal = async () => {
+    if (!radarrEnabled) return;
+    setRadarrModalOpen(true);
+    setRadarrErrorMessage('');
+    setRadarrStatusMessage('');
+    setRadarrModalLoading(true);
+    try {
+      const radarrSettings = getRadarrSettings();
+      const [rootRes, qualityRes] = await Promise.all([
+        window.electronAPI?.radarrGetRootFolders?.(radarrSettings),
+        window.electronAPI?.radarrGetQualityProfiles?.(radarrSettings),
+      ]);
+      const roots = Array.isArray(rootRes?.items) ? rootRes.items : [];
+      const profiles = Array.isArray(qualityRes?.items) ? qualityRes.items : [];
+      setRadarrRootFolders(roots);
+      setRadarrQualityProfiles(profiles);
+      const defaultRoot = String(radarrSettings.radarrDefaultRootFolder || roots?.[0]?.path || '');
+      const defaultProfile = String(radarrSettings.radarrDefaultQualityProfileId || profiles?.[0]?.id || '');
+      setRadarrRootFolder(defaultRoot);
+      setRadarrQualityProfileId(defaultProfile);
+      setRadarrMonitored(true);
+      if (!rootRes?.ok || !qualityRes?.ok) {
+        setRadarrErrorMessage(rootRes?.error || qualityRes?.error || 'Failed to load Radarr defaults');
+      }
+    } catch (err) {
+      setRadarrErrorMessage(err?.message || 'Failed to load Radarr defaults');
+    } finally {
+      setRadarrModalLoading(false);
+    }
+  };
+
+  const handleAddToRadarr = async () => {
+    const tmdbId = Number(data?.id);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+      setRadarrErrorMessage('TMDB ID is required to add this movie to Radarr.');
+      return;
+    }
+    if (!radarrRootFolder || !radarrQualityProfileId) {
+      setRadarrErrorMessage('Root folder and quality profile are required.');
+      return;
+    }
+    setRadarrErrorMessage('');
+    setRadarrStatusMessage('');
+    setRadarrAddLoading(true);
+    try {
+      const settingsPayload = getRadarrSettings();
+      const lookup = await window.electronAPI?.radarrLookupMovieByTmdbId?.({
+        settings: settingsPayload,
+        tmdbId,
+      });
+      if (!lookup?.ok || !lookup?.movie) {
+        throw new Error(lookup?.error || 'Movie lookup failed on Radarr.');
+      }
+      const lookupMovie = lookup.movie;
+      const moviePayload = {
+        ...lookupMovie,
+        qualityProfileId: Number(radarrQualityProfileId),
+        rootFolderPath: radarrRootFolder,
+        monitored: radarrMonitored === true,
+        minimumAvailability: 'released',
+        addOptions: {
+          searchForMovie: settings.radarrSearchAfterAdd !== false,
+        },
+      };
+      const addRes = await window.electronAPI?.radarrAddMovie?.({
+        settings: settingsPayload,
+        movie: moviePayload,
+      });
+      if (!addRes?.ok) {
+        if (addRes?.alreadyExists) {
+          setRadarrStatusMessage('Already exists in Radarr.');
+          return;
+        }
+        throw new Error(addRes?.error || 'Failed to add movie to Radarr.');
+      }
+      setRadarrStatusMessage('Added to Radarr.');
+    } catch (err) {
+      setRadarrErrorMessage(err?.message || 'Failed to add movie to Radarr.');
+    } finally {
+      setRadarrAddLoading(false);
+    }
+  };
 
   return (
     <div className="detail-view">
@@ -282,6 +385,16 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                 <><Plus size={20} /> {settings.language === 'tr' ? 'Listeme Ekle' : 'Add to List'}</>
               )}
             </button>
+            {type === 'movie' && (
+              <button
+                className="btn btn-secondary"
+                disabled={!radarrEnabled}
+                onClick={openRadarrModal}
+                title={radarrEnabled ? 'Add this movie to Radarr' : 'Enable Radarr in Settings'}
+              >
+                Add to Radarr
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -359,6 +472,57 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
               src={`https://image.tmdb.org/t/p/original${images[selectedImageIndex].file_path}`}
               alt="Full Size"
             />
+          </div>
+        </div>
+      )}
+
+      {radarrModalOpen && (
+        <div className="lightbox" onClick={() => setRadarrModalOpen(false)}>
+          <div className="radarr-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="radarr-modal-header">
+              <h3>Add to Radarr</h3>
+              <button className="icon-btn" onClick={() => setRadarrModalOpen(false)}><X size={16} /></button>
+            </div>
+            {radarrModalLoading ? (
+              <p>Loading Radarr defaults...</p>
+            ) : (
+              <div className="radarr-modal-body">
+                <label>
+                  <span>Root Folder</span>
+                  <select value={radarrRootFolder} onChange={(event) => setRadarrRootFolder(event.target.value)}>
+                    <option value="">Select root folder</option>
+                    {radarrRootFolders.map((folder) => (
+                      <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Quality Profile</span>
+                  <select value={String(radarrQualityProfileId)} onChange={(event) => setRadarrQualityProfileId(event.target.value)}>
+                    <option value="">Select quality profile</option>
+                    {radarrQualityProfiles.map((profile) => (
+                      <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="radarr-check">
+                  <input type="checkbox" checked={radarrMonitored} onChange={(event) => setRadarrMonitored(event.target.checked)} />
+                  <span>Monitored</span>
+                </label>
+                <label className="radarr-check">
+                  <input type="checkbox" checked={settings.radarrSearchAfterAdd !== false} readOnly />
+                  <span>Search After Add ({settings.radarrSearchAfterAdd !== false ? 'On' : 'Off'})</span>
+                </label>
+                {radarrErrorMessage && <p className="radarr-error">{radarrErrorMessage}</p>}
+                {radarrStatusMessage && <p className="radarr-success">{radarrStatusMessage}</p>}
+                <div className="radarr-modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setRadarrModalOpen(false)}>Cancel</button>
+                  <button className="btn btn-primary" disabled={radarrAddLoading} onClick={handleAddToRadarr}>
+                    {radarrAddLoading ? 'Adding...' : 'Add to Radarr'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

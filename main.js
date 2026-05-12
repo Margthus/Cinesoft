@@ -7,6 +7,7 @@ const http = require('http');
 const https = require('https');
 const axios = require('axios');
 const { pathToFileURL } = require('url');
+const radarrService = require('./src/main/services/radarrService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -634,7 +635,20 @@ const sourcesModulePath = pathToFileURL(path.join(getAppRoot(), 'src', 'sources'
 const getSourcesModule = () => import(sourcesModulePath);
 
 const getProwlarrConfig = () => store.get('prowlarr') || {};
+const getRadarrConfig = () => ({
+  radarrEnabled: store.get('radarrEnabled') === true,
+  radarrManaged: store.get('radarrManaged') === true,
+  radarrBaseUrl: String(store.get('radarrBaseUrl') || ''),
+  radarrApiKey: String(store.get('radarrApiKey') || ''),
+  radarrExecutablePath: String(store.get('radarrExecutablePath') || ''),
+  radarrPort: Number(store.get('radarrPort') || 7878),
+  radarrTimeout: Number(store.get('radarrTimeout') || 10000),
+  radarrDefaultRootFolder: String(store.get('radarrDefaultRootFolder') || ''),
+  radarrDefaultQualityProfileId: store.get('radarrDefaultQualityProfileId') ?? '',
+  radarrSearchAfterAdd: store.get('radarrSearchAfterAdd') !== false,
+});
 let prowlarrProcess = null;
+let radarrProcess = null;
 const getStoredAuthUser = () => store.get('authUser') || null;
 const getStoredAuthSession = () => store.get('authSession') || { authenticated: false, rememberMe: false, username: '' };
 
@@ -728,6 +742,7 @@ app.on('child-process-gone', (_event, details) => {
 
 app.on('window-all-closed', async () => {
   stopManagedProwlarr();
+  stopManagedRadarr();
   if (torrentRulesInterval) {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
@@ -752,6 +767,7 @@ app.on('window-all-closed', async () => {
 });
 
 const getManagedProwlarrDataDir = () => path.join(app.getPath('userData'), 'prowlarr');
+const getManagedRadarrDataDir = () => path.join(app.getPath('userData'), 'radarr');
 
 const getBundledProwlarrExecutable = () => {
   const basePath = app.isPackaged ? process.resourcesPath : __dirname;
@@ -765,6 +781,20 @@ const getProwlarrExecutablePath = (config = {}) => {
   }
 
   const bundled = getBundledProwlarrExecutable();
+  return fs.existsSync(bundled) ? bundled : '';
+};
+
+const getBundledRadarrExecutable = () => {
+  const basePath = app.isPackaged ? process.resourcesPath : __dirname;
+  const executable = process.platform === 'win32' ? 'Radarr.exe' : 'Radarr';
+  return path.join(basePath, 'resources', 'radarr', executable);
+};
+
+const getRadarrExecutablePath = (config = {}) => {
+  if (config.radarrExecutablePath && fs.existsSync(config.radarrExecutablePath)) {
+    return config.radarrExecutablePath;
+  }
+  const bundled = getBundledRadarrExecutable();
   return fs.existsSync(bundled) ? bundled : '';
 };
 
@@ -805,6 +835,49 @@ const ensureProwlarrConfigFile = (config = {}) => {
       '  <LogLevel>info</LogLevel>',
       '  <UpdateMechanism>BuiltIn</UpdateMechanism>',
       '  <Branch>master</Branch>',
+      '</Config>',
+      '',
+    ].join('\n'));
+  }
+
+  return { dataDir, apiKey, port };
+};
+
+const ensureRadarrConfigFile = (config = {}) => {
+  const dataDir = getManagedRadarrDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  const configPath = path.join(dataDir, 'config.xml');
+  const port = Number(config.radarrPort) || 7878;
+  let apiKey = config.radarrApiKey || crypto.randomBytes(16).toString('hex');
+
+  if (fs.existsSync(configPath)) {
+    const xml = fs.readFileSync(configPath, 'utf8');
+    apiKey = readXmlValue(xml, 'ApiKey') || apiKey;
+    const updated = upsertXmlValues(xml, {
+      BindAddress: '127.0.0.1',
+      Port: String(port),
+      ApiKey: apiKey,
+      AuthenticationMethod: 'None',
+      AuthenticationRequired: 'DisabledForLocalAddresses',
+      AuthenticationRequiredWarningDismissed: 'True',
+      UrlBase: '',
+    });
+    fs.writeFileSync(configPath, updated);
+  } else {
+    fs.writeFileSync(configPath, [
+      '<Config>',
+      '  <BindAddress>127.0.0.1</BindAddress>',
+      `  <Port>${port}</Port>`,
+      '  <SslPort>9898</SslPort>',
+      '  <EnableSsl>False</EnableSsl>',
+      '  <LaunchBrowser>False</LaunchBrowser>',
+      '  <AuthenticationMethod>None</AuthenticationMethod>',
+      '  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>',
+      '  <AuthenticationRequiredWarningDismissed>True</AuthenticationRequiredWarningDismissed>',
+      `  <ApiKey>${apiKey}</ApiKey>`,
+      '  <UrlBase></UrlBase>',
+      '  <LogLevel>info</LogLevel>',
       '</Config>',
       '',
     ].join('\n'));
@@ -868,6 +941,33 @@ const stopSystemProwlarr = () => {
       execSync('taskkill /F /IM Prowlarr.exe /T', { stdio: 'ignore' });
     } else {
       execSync('pkill -f Prowlarr', { stdio: 'ignore' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isSystemRadarrRunning = () => {
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync('tasklist /FI "IMAGENAME eq Radarr.exe" /FO CSV /NH', { encoding: 'utf8' });
+      return output.toLowerCase().includes('radarr.exe');
+    }
+    const output = execSync('pgrep -f Radarr', { encoding: 'utf8' });
+    return Boolean(String(output).trim());
+  } catch {
+    return false;
+  }
+};
+
+const stopSystemRadarr = () => {
+  if (!isSystemRadarrRunning()) return false;
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM Radarr.exe /T', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f Radarr', { stdio: 'ignore' });
     }
     return true;
   } catch {
@@ -939,9 +1039,74 @@ const buildManagedProwlarrConfig = (config = {}) => {
   };
 };
 
+const buildManagedRadarrConfig = (config = {}) => {
+  const port = Number(config.radarrPort) || 7878;
+  return {
+    ...config,
+    radarrEnabled: true,
+    radarrManaged: true,
+    radarrBaseUrl: `http://127.0.0.1:${port}`,
+    radarrPort: port,
+    radarrApiKey: config.radarrApiKey,
+  };
+};
+
+const startManagedRadarr = (config = {}) => {
+  const externalProcessStopped = stopSystemRadarr();
+  if (radarrProcess && !radarrProcess.killed) {
+    radarrProcess.kill();
+    radarrProcess = null;
+  }
+
+  const executablePath = getRadarrExecutablePath(config);
+  if (!executablePath) {
+    return {
+      ok: false,
+      message: 'Radarr executable was not found',
+      expectedPath: getBundledRadarrExecutable(),
+    };
+  }
+
+  const prepared = ensureRadarrConfigFile(config);
+  const nextConfig = buildManagedRadarrConfig({
+    ...config,
+    radarrApiKey: prepared.apiKey,
+    radarrPort: prepared.port,
+    radarrExecutablePath: executablePath,
+  });
+
+  radarrProcess = spawn(executablePath, [`-data=${prepared.dataDir}`, '-nobrowser'], {
+    cwd: path.dirname(executablePath),
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+
+  radarrProcess.once('exit', () => {
+    radarrProcess = null;
+  });
+
+  Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
+  return {
+    ok: true,
+    externalProcessStopped,
+    ...nextConfig,
+  };
+};
+
+const stopManagedRadarr = () => {
+  const externalProcessStopped = stopSystemRadarr();
+  if (radarrProcess && !radarrProcess.killed) {
+    radarrProcess.kill();
+    radarrProcess = null;
+    return true;
+  }
+  return externalProcessStopped;
+};
+
 // IPC Handlers
 ipcMain.handle('get-settings', () => {
   const torrentio = store.get('torrentio') || {};
+  const radarr = getRadarrConfig();
   return {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
@@ -961,9 +1126,10 @@ ipcMain.handle('get-settings', () => {
         ...(torrentio.enabledSites?.unknown !== undefined && torrentio.enabledSites?.all === undefined
           ? { all: torrentio.enabledSites.unknown }
           : {}),
-        ...(torrentio.enabledSites || {}),
+      ...(torrentio.enabledSites || {}),
       },
     },
+    ...radarr,
   };
 });
 
@@ -1082,8 +1248,19 @@ ipcMain.handle('save-settings', (event, settings) => {
       ...(nextTorrentio.enabledSites || {}),
     },
   });
+  store.set('radarrEnabled', settings.radarrEnabled === true);
+  store.set('radarrManaged', settings.radarrManaged === true);
+  store.set('radarrBaseUrl', String(settings.radarrBaseUrl || '').trim());
+  store.set('radarrApiKey', String(settings.radarrApiKey || '').trim());
+  store.set('radarrExecutablePath', String(settings.radarrExecutablePath || '').trim());
+  store.set('radarrPort', Number(settings.radarrPort || 7878));
+  store.set('radarrTimeout', Number(settings.radarrTimeout || 10000));
+  store.set('radarrDefaultRootFolder', String(settings.radarrDefaultRootFolder || '').trim());
+  store.set('radarrDefaultQualityProfileId', settings.radarrDefaultQualityProfileId ?? '');
+  store.set('radarrSearchAfterAdd', settings.radarrSearchAfterAdd !== false);
   const savedApiKey = store.get('apiKey') || '';
   const savedProwlarr = store.get('prowlarr') || {};
+  const savedRadarrEnabled = store.get('radarrEnabled') === true;
   const settingsVerified = String(savedApiKey) === String(settings.apiKey || '')
     && store.get('language') === settings.language
     && store.get('torrentioEnabled') === (settings.torrentioEnabled || false);
@@ -1098,6 +1275,7 @@ ipcMain.handle('save-settings', (event, settings) => {
     hasProwlarrBaseUrl: Boolean(savedProwlarr.baseUrl),
     hasProwlarrApiKey: Boolean(savedProwlarr.apiKey),
     torrentioEnabled: store.get('torrentioEnabled') === true,
+    radarrEnabled: savedRadarrEnabled,
   });
   return settingsVerified;
 });
@@ -1312,6 +1490,40 @@ ipcMain.handle('get-managed-prowlarr-status', async () => {
   };
 });
 
+ipcMain.handle('select-radarr-executable', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select Radarr executable',
+    properties: ['openFile'],
+    filters: process.platform === 'win32'
+      ? [{ name: 'Radarr', extensions: ['exe'] }]
+      : [{ name: 'Radarr', extensions: ['*'] }],
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return '';
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle('start-managed-radarr', async (event, radarrConfig) => {
+  return startManagedRadarr(radarrConfig || getRadarrConfig());
+});
+
+ipcMain.handle('stop-managed-radarr', async () => {
+  return {
+    ok: true,
+    stopped: stopManagedRadarr(),
+  };
+});
+
+ipcMain.handle('get-managed-radarr-status', async () => {
+  return {
+    running: Boolean(radarrProcess && !radarrProcess.killed) || isSystemRadarrRunning(),
+    expectedPath: getBundledRadarrExecutable(),
+    dataDir: getManagedRadarrDataDir(),
+  };
+});
+
 ipcMain.handle('open-prowlarr-download-page', async () => {
   try {
     await shell.openExternal('https://github.com/prowlarr/prowlarr');
@@ -1334,6 +1546,79 @@ ipcMain.handle('open-prowlarr-web-ui', async (event, prowlarrConfig = {}) => {
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return { ok: false, error: 'Invalid URL protocol' };
     }
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:testConnection', async (event, radarrSettings = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(radarrSettings || {}) };
+    return await radarrService.testConnection(settings);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:getRootFolders', async (event, radarrSettings = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(radarrSettings || {}) };
+    const items = await radarrService.getRootFolders(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('radarr:getQualityProfiles', async (event, radarrSettings = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(radarrSettings || {}) };
+    const items = await radarrService.getQualityProfiles(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('radarr:lookupMovieByTmdbId', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const movie = await radarrService.lookupMovieByTmdbId(settings, payload?.tmdbId);
+    return { ok: true, movie };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:addMovie', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const result = await radarrService.addMovie(settings, payload?.movie || {});
+    return result;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-radarr-download-page', async () => {
+  try {
+    await shell.openExternal('https://github.com/Radarr/Radarr');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-radarr-web-ui', async (event, radarrSettings = {}) => {
+  try {
+    const merged = { ...getRadarrConfig(), ...(radarrSettings || {}) };
+    let baseUrl = String(merged.radarrBaseUrl || '').trim();
+    if (!baseUrl) return { ok: false, error: 'Radarr Base URL is empty' };
+    if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
+    const parsed = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
     await shell.openExternal(parsed.toString());
     return { ok: true };
   } catch (err) {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Eye, EyeOff, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, EyeOff, Film, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
 import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
@@ -23,7 +23,13 @@ const SettingsView = ({ settings, setSettings }) => {
   const [downloadEngineConfigOpen, setDownloadEngineConfigOpen] = useState(true);
   const [torrentioConfigOpen, setTorrentioConfigOpen] = useState(true);
   const [prowlarrConfigOpen, setProwlarrConfigOpen] = useState(true);
+  const [radarrConfigOpen, setRadarrConfigOpen] = useState(true);
   const [tmdbApiKeyVisible, setTmdbApiKeyVisible] = useState(false);
+  const [radarrApiKeyVisible, setRadarrApiKeyVisible] = useState(false);
+  const [radarrManagedStatus, setRadarrManagedStatus] = useState('');
+  const [radarrStatus, setRadarrStatus] = useState('');
+  const [radarrRootFolders, setRadarrRootFolders] = useState([]);
+  const [radarrQualityProfiles, setRadarrQualityProfiles] = useState([]);
 
   useEffect(() => {
     refreshIndexers();
@@ -40,15 +46,48 @@ const SettingsView = ({ settings, setSettings }) => {
     return () => clearTimeout(retryTimer);
   }, [formData.prowlarr.enabled, formData.prowlarr.baseUrl, formData.prowlarr.apiKey, indexers.length, indexerStatus]);
 
+  useEffect(() => {
+    if (!formData.radarrEnabled) return;
+    if (!formData.radarrBaseUrl || !formData.radarrApiKey) return;
+    loadRadarrLists().catch(() => {});
+  }, [formData.radarrEnabled, formData.radarrBaseUrl, formData.radarrApiKey]);
+
   const updateRoot = (changes) => {
     setFormData((current) => {
       const next = { ...current, ...changes };
-      if ('torrentioEnabled' in changes || 'useQbittorrent' in changes || 'qbittorrent' in changes || 'torrentio' in changes) {
+      if ('torrentioEnabled' in changes
+        || 'useQbittorrent' in changes
+        || 'qbittorrent' in changes
+        || 'torrentio' in changes
+        || 'radarrEnabled' in changes
+        || 'radarrManaged' in changes
+        || 'radarrBaseUrl' in changes
+        || 'radarrApiKey' in changes
+        || 'radarrExecutablePath' in changes
+        || 'radarrPort' in changes
+        || 'radarrTimeout' in changes
+        || 'radarrDefaultRootFolder' in changes
+        || 'radarrDefaultQualityProfileId' in changes
+        || 'radarrSearchAfterAdd' in changes) {
         window.electronAPI?.saveSettings?.(next).then(() => setSettings(next));
       }
       return next;
     });
   };
+
+  const getRadarrSettings = (override = {}) => ({
+    radarrEnabled: formData.radarrEnabled === true,
+    radarrManaged: formData.radarrManaged === true,
+    radarrBaseUrl: String(formData.radarrBaseUrl || ''),
+    radarrApiKey: String(formData.radarrApiKey || ''),
+    radarrExecutablePath: String(formData.radarrExecutablePath || ''),
+    radarrPort: Number(formData.radarrPort || 7878),
+    radarrTimeout: Number(formData.radarrTimeout || 10000),
+    radarrDefaultRootFolder: String(formData.radarrDefaultRootFolder || ''),
+    radarrDefaultQualityProfileId: formData.radarrDefaultQualityProfileId ?? '',
+    radarrSearchAfterAdd: formData.radarrSearchAfterAdd !== false,
+    ...override,
+  });
 
   const updateProwlarr = (changes) => {
     setFormData((current) => {
@@ -91,6 +130,95 @@ const SettingsView = ({ settings, setSettings }) => {
     const result = await window.electronAPI?.openProwlarrWebUI?.(formData.prowlarr || {});
     if (!result?.ok) {
       alert(result?.error || 'Prowlarr URL could not be opened');
+    }
+  };
+
+  const handleOpenRadarrDownload = async () => {
+    await window.electronAPI?.openRadarrDownloadPage?.();
+  };
+
+  const handleOpenRadarrWebUI = async () => {
+    const result = await window.electronAPI?.openRadarrWebUI?.(getRadarrSettings());
+    if (!result?.ok) {
+      alert(result?.error || 'Radarr URL could not be opened');
+    }
+  };
+
+  const handleSelectRadarrExecutable = async () => {
+    const executablePath = await window.electronAPI?.selectRadarrExecutable?.();
+    if (executablePath) {
+      updateRoot({ radarrExecutablePath: executablePath });
+    }
+  };
+
+  const handleStartRadarr = async (configOverride) => {
+    setRadarrManagedStatus('starting');
+    const configToStart = configOverride || getRadarrSettings();
+    const result = await window.electronAPI?.startManagedRadarr?.(configToStart);
+    if (result?.ok) {
+      updateRoot({
+        radarrManaged: true,
+        radarrEnabled: true,
+        radarrBaseUrl: result.radarrBaseUrl || configToStart.radarrBaseUrl,
+        radarrApiKey: result.radarrApiKey || configToStart.radarrApiKey,
+        radarrExecutablePath: result.radarrExecutablePath || configToStart.radarrExecutablePath,
+        radarrPort: Number(result.radarrPort || configToStart.radarrPort || 7878),
+      });
+      setRadarrManagedStatus(result.externalProcessStopped ? 'restarted' : 'running');
+      return;
+    }
+    setRadarrManagedStatus('missing');
+  };
+
+  const handleStopRadarr = async () => {
+    await window.electronAPI?.stopManagedRadarr?.();
+    setRadarrManagedStatus('stopped');
+  };
+
+  const loadRadarrLists = async (custom = null) => {
+    const radarrSettings = custom || getRadarrSettings();
+    if (!radarrSettings.radarrBaseUrl || !radarrSettings.radarrApiKey) return;
+    const [rootRes, qualityRes] = await Promise.all([
+      window.electronAPI?.radarrGetRootFolders?.(radarrSettings),
+      window.electronAPI?.radarrGetQualityProfiles?.(radarrSettings),
+    ]);
+    if (rootRes?.ok) {
+      const items = Array.isArray(rootRes.items) ? rootRes.items : [];
+      setRadarrRootFolders(items);
+      if (!radarrSettings.radarrDefaultRootFolder && items[0]?.path) {
+        updateRoot({ radarrDefaultRootFolder: items[0].path });
+      }
+    }
+    if (qualityRes?.ok) {
+      const items = Array.isArray(qualityRes.items) ? qualityRes.items : [];
+      setRadarrQualityProfiles(items);
+      if ((radarrSettings.radarrDefaultQualityProfileId === '' || radarrSettings.radarrDefaultQualityProfileId === null) && items[0]?.id != null) {
+        updateRoot({ radarrDefaultQualityProfileId: items[0].id });
+      }
+    }
+  };
+
+  const handleTestRadarr = async () => {
+    setRadarrStatus('testing');
+    try {
+      const current = getRadarrSettings();
+      if (!current.radarrEnabled) {
+        setRadarrStatus('disabled');
+        return;
+      }
+      if (!current.radarrBaseUrl || !current.radarrApiKey) {
+        setRadarrStatus('missing');
+        return;
+      }
+      const result = await window.electronAPI?.radarrTestConnection?.(current);
+      if (!result?.ok) {
+        setRadarrStatus(`failed:${result?.error || ''}`);
+        return;
+      }
+      await loadRadarrLists(current);
+      setRadarrStatus(`ok:${result.version || ''}`);
+    } catch (err) {
+      setRadarrStatus(`failed:${err?.message || ''}`);
     }
   };
 
@@ -837,6 +965,190 @@ const SettingsView = ({ settings, setSettings }) => {
             </div>
           </div>
         </section>
+
+        <section className="settings-card settings-card-full prowlarr-card-shell">
+          <header className="settings-card-header">
+            <Film size={18} />
+            <div>
+              <h2>{t.radarr}</h2>
+              <p>{t.radarrHint}</p>
+            </div>
+            <div className="settings-card-actions">
+              <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrDownload}>
+                <span>{t.downloadRadarr}</span>
+              </button>
+              <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrWebUI}>
+                <span>{t.openRadarrWebUI}</span>
+              </button>
+              <button
+                type="button"
+                className="settings-collapse-btn"
+                aria-expanded={radarrConfigOpen}
+                aria-controls="radarr-config-panel"
+                onClick={() => setRadarrConfigOpen((current) => !current)}
+              >
+                {radarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <span>{radarrConfigOpen ? t.hideConfig : t.showConfig}</span>
+              </button>
+            </div>
+          </header>
+
+          <div
+            id="radarr-config-panel"
+            className={`settings-collapsible ${radarrConfigOpen ? 'open' : 'closed'}`}
+            hidden={!radarrConfigOpen}
+          >
+            <div className="prowlarr-layout">
+              <div className="prowlarr-panel">
+                <div className="prowlarr-panel-header">
+                  <h3>{t.engine}</h3>
+                  <Toggle
+                    checked={formData.radarrManaged === true}
+                    onChange={async (checked) => {
+                      updateRoot({ radarrManaged: checked });
+                      if (checked) {
+                        await handleStartRadarr({ ...getRadarrSettings(), radarrManaged: true });
+                      } else {
+                        await handleStopRadarr();
+                      }
+                    }}
+                  />
+                </div>
+                <p className="settings-helper">{t.radarrEngineHint}</p>
+
+                <div className="input-action-row">
+                  <input
+                    className="settings-input"
+                    value={formData.radarrExecutablePath || ''}
+                    onChange={(event) => updateRoot({ radarrExecutablePath: event.target.value })}
+                    placeholder={t.radarrExecutable}
+                  />
+                  <button className="icon-btn" onClick={handleSelectRadarrExecutable}><FolderOpen size={18} /></button>
+                </div>
+
+                <div className="inline-fields">
+                  <label className="stacked-field compact">
+                    <span>{t.port}</span>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      value={formData.radarrPort || 7878}
+                      onChange={(event) => updateRoot({ radarrPort: Number(event.target.value) || 7878 })}
+                    />
+                  </label>
+                  <div className="action-cluster">
+                    <button className="action-btn start" onClick={handleStartRadarr} disabled={radarrManagedStatus === 'starting'}>
+                      {radarrManagedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
+                      {t.start}
+                    </button>
+                    <button className="action-btn stop" onClick={handleStopRadarr}>
+                      <Square size={16} />
+                      {t.stop}
+                    </button>
+                  </div>
+                </div>
+                <div className="status-line">{renderManagedStatus(radarrManagedStatus, t)}</div>
+              </div>
+
+              <div className="prowlarr-panel">
+                <div className="prowlarr-panel-header">
+                  <h3>{t.connection}</h3>
+                  <Toggle
+                    checked={formData.radarrEnabled === true}
+                    onChange={async (checked) => {
+                      updateRoot({ radarrEnabled: checked });
+                      if (checked) {
+                        if (!formData.radarrManaged || radarrManagedStatus !== 'running') {
+                          updateRoot({ radarrManaged: true });
+                          await handleStartRadarr({ ...getRadarrSettings(), radarrEnabled: true, radarrManaged: true });
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <div className="panel-grid">
+                  <label className="stacked-field">
+                    <span>{t.radarrBaseUrl}</span>
+                    <input
+                      className="settings-input"
+                      value={formData.radarrBaseUrl || ''}
+                      onChange={(event) => updateRoot({ radarrBaseUrl: event.target.value })}
+                      placeholder="http://127.0.0.1:7878"
+                    />
+                  </label>
+                  <label className="stacked-field">
+                    <span>{t.radarrApiKey}</span>
+                    <div className="input-action-row">
+                      <input
+                        className="settings-input"
+                        type={radarrApiKeyVisible ? 'text' : 'password'}
+                        value={formData.radarrApiKey || ''}
+                        onChange={(event) => updateRoot({ radarrApiKey: event.target.value })}
+                      />
+                      <button type="button" className="icon-btn" onClick={() => setRadarrApiKeyVisible((v) => !v)}>
+                        {radarrApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="stacked-field">
+                    <span>{t.timeout}</span>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      min="1000"
+                      step="500"
+                      value={formData.radarrTimeout || 10000}
+                      onChange={(event) => updateRoot({ radarrTimeout: Number(event.target.value || 10000) })}
+                    />
+                  </label>
+                  <button className="action-btn subtle full-height" onClick={handleTestRadarr} disabled={radarrStatus === 'testing'}>
+                    {radarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
+                    {t.test}
+                  </button>
+                </div>
+                <div className="status-line">{renderRadarrStatus(radarrStatus, t)}</div>
+              </div>
+
+              <div className="prowlarr-panel">
+                <div className="prowlarr-panel-header">
+                  <h3>{t.radarrDefaults}</h3>
+                </div>
+                <div className="panel-grid">
+                  <label className="stacked-field">
+                    <span>{t.radarrRootFolder}</span>
+                    <select
+                      className="settings-input"
+                      value={formData.radarrDefaultRootFolder || ''}
+                      onChange={(event) => updateRoot({ radarrDefaultRootFolder: event.target.value })}
+                    >
+                      <option value="">{t.selectRootFolder}</option>
+                      {radarrRootFolders.map((folder) => (
+                        <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="stacked-field">
+                    <span>{t.radarrQualityProfile}</span>
+                    <select
+                      className="settings-input"
+                      value={String(formData.radarrDefaultQualityProfileId ?? '')}
+                      onChange={(event) => updateRoot({ radarrDefaultQualityProfileId: event.target.value })}
+                    >
+                      <option value="">{t.selectQualityProfile}</option>
+                      {radarrQualityProfiles.map((profile) => (
+                        <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="toggle-field">
+                    <span>{t.radarrSearchAfterAdd}</span>
+                    <Toggle checked={formData.radarrSearchAfterAdd !== false} onChange={(checked) => updateRoot({ radarrSearchAfterAdd: checked })} />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -908,6 +1220,22 @@ const renderConnectionStatus = (state, t) => {
   return '';
 };
 
+const renderRadarrStatus = (state, t) => {
+  if (!state) return '';
+  if (state === 'testing') return t.testing;
+  if (state === 'disabled') return t.radarrDisabled;
+  if (state === 'missing') return t.radarrMissing;
+  if (state.startsWith('ok:')) {
+    const [, version] = state.split(':');
+    return `${t.testOk}${version ? ` (${version})` : ''}`;
+  }
+  if (state.startsWith('failed:')) {
+    const [, message] = state.split(':');
+    return message || t.testFailed;
+  }
+  return t.testFailed;
+};
+
 const renderAddStatus = (state, t) => {
   if (!state) return '';
   return t[state] || '';
@@ -924,6 +1252,7 @@ const getCopy = (language) => ({
     tmdb: 'TMDB API Anahtari',
     tmdbHint: 'Metadata ve afis aramalari burada calisir.',
     prowlarr: 'Prowlarr',
+    radarr: 'Radarr',
     downloadEngine: 'Indirme Motoru',
     downloadEngineHint: 'Gomulu torrent veya qBittorrent sec.',
     embeddedTorrent: 'Gomulu Torrent',
@@ -944,6 +1273,21 @@ const getCopy = (language) => ({
     size: 'Boyuta gore',
     name: 'Isme gore',
     prowlarrHint: 'Motor baslatma, baglanti ve indexer yonetimi.',
+    radarrHint: 'Film ekleme ve varsayilan Radarr ayarlari.',
+    radarrEngineHint: 'CineSoft, Radarr surecini devralir ve kendi ayarlariyla yeniden baslatir.',
+    radarrExecutable: 'Radarr.exe yolu',
+    downloadRadarr: 'Download Radarr',
+    openRadarrWebUI: 'Open Radarr Web UI',
+    radarrBaseUrl: 'Radarr Base URL',
+    radarrApiKey: 'Radarr API Key',
+    radarrDefaults: 'Varsayilanlar',
+    radarrRootFolder: 'Default Root Folder',
+    radarrQualityProfile: 'Default Quality Profile',
+    radarrSearchAfterAdd: 'Search After Add',
+    selectRootFolder: 'Root folder sec',
+    selectQualityProfile: 'Kalite profili sec',
+    radarrDisabled: 'Radarr devre disi.',
+    radarrMissing: 'Radarr Base URL ve API key gerekli.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Motor Kontrolu',
@@ -1001,6 +1345,7 @@ const getCopy = (language) => ({
     tmdb: 'TMDB API Key',
     tmdbHint: 'Metadata and artwork lookups run here.',
     prowlarr: 'Prowlarr',
+    radarr: 'Radarr',
     downloadEngine: 'Download Engine',
     downloadEngineHint: 'Choose embedded torrent or qBittorrent.',
     embeddedTorrent: 'Embedded Torrent',
@@ -1021,6 +1366,21 @@ const getCopy = (language) => ({
     size: 'By size',
     name: 'By name',
     prowlarrHint: 'Engine start, connection, and indexer management.',
+    radarrHint: 'Movie add flow and default Radarr settings.',
+    radarrEngineHint: 'CineSoft takes over the Radarr process and restarts it with its own settings.',
+    radarrExecutable: 'Radarr executable path',
+    downloadRadarr: 'Download Radarr',
+    openRadarrWebUI: 'Open Radarr Web UI',
+    radarrBaseUrl: 'Radarr Base URL',
+    radarrApiKey: 'Radarr API Key',
+    radarrDefaults: 'Defaults',
+    radarrRootFolder: 'Default Root Folder',
+    radarrQualityProfile: 'Default Quality Profile',
+    radarrSearchAfterAdd: 'Search After Add',
+    selectRootFolder: 'Select root folder',
+    selectQualityProfile: 'Select quality profile',
+    radarrDisabled: 'Radarr is disabled.',
+    radarrMissing: 'Radarr Base URL and API key are required.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Engine Control',
