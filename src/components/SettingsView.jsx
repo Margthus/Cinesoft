@@ -30,6 +30,13 @@ const SettingsView = ({ settings, setSettings }) => {
   const [radarrStatus, setRadarrStatus] = useState('');
   const [radarrRootFolders, setRadarrRootFolders] = useState([]);
   const [radarrQualityProfiles, setRadarrQualityProfiles] = useState([]);
+  const [radarrProwlarrSyncStatus, setRadarrProwlarrSyncStatus] = useState({
+    prowlarr: 'disconnected',
+    radarr: 'disconnected',
+    sync: 'notConfigured',
+    message: '',
+  });
+  const [radarrProwlarrSyncBusy, setRadarrProwlarrSyncBusy] = useState(false);
 
   useEffect(() => {
     refreshIndexers();
@@ -51,6 +58,46 @@ const SettingsView = ({ settings, setSettings }) => {
     if (!formData.radarrBaseUrl || !formData.radarrApiKey) return;
     loadRadarrLists().catch(() => {});
   }, [formData.radarrEnabled, formData.radarrBaseUrl, formData.radarrApiKey]);
+
+  useEffect(() => {
+    if (!radarrConfigOpen) return;
+    if (!formData.radarrEnabled) return;
+    if (!formData.radarrBaseUrl || !formData.radarrApiKey) return;
+    if (!formData.prowlarr?.baseUrl || !formData.prowlarr?.apiKey) return;
+    if (radarrProwlarrSyncBusy) return;
+    if (radarrProwlarrSyncStatus.sync === 'configured') return;
+    handleSyncRadarrNow();
+  }, [
+    radarrConfigOpen,
+    formData.radarrEnabled,
+    formData.radarrBaseUrl,
+    formData.radarrApiKey,
+    formData.prowlarr?.baseUrl,
+    formData.prowlarr?.apiKey,
+  ]);
+
+  useEffect(() => {
+    if (!radarrConfigOpen) return undefined;
+    if (!formData.radarrEnabled) return undefined;
+    if (!formData.radarrBaseUrl || !formData.radarrApiKey) return undefined;
+
+    const refresh = () => {
+      loadRadarrLists().catch(() => {});
+    };
+
+    const interval = setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    const handleVisibility = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [radarrConfigOpen, formData.radarrEnabled, formData.radarrBaseUrl, formData.radarrApiKey]);
 
   const updateRoot = (changes) => {
     setFormData((current) => {
@@ -172,6 +219,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const handleStopRadarr = async () => {
     await window.electronAPI?.stopManagedRadarr?.();
+    updateRoot({ radarrEnabled: false });
     setRadarrManagedStatus('stopped');
   };
 
@@ -222,6 +270,50 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
+  const handleConnectRadarrToProwlarr = async () => {
+    setRadarrProwlarrSyncBusy(true);
+    try {
+      const result = await window.electronAPI?.prowlarrConnectRadarr?.();
+      setRadarrProwlarrSyncStatus({
+        prowlarr: result?.prowlarr || (result?.ok ? 'connected' : 'disconnected'),
+        radarr: result?.radarr || (result?.ok ? 'connected' : 'disconnected'),
+        sync: result?.sync || (result?.ok ? 'configured' : 'notConfigured'),
+        message: result?.ok ? (result?.message || t.syncConfigured) : (result?.error || t.syncFailed),
+      });
+    } catch (err) {
+      setRadarrProwlarrSyncStatus({
+        prowlarr: 'disconnected',
+        radarr: 'disconnected',
+        sync: 'notConfigured',
+        message: err?.message || t.syncFailed,
+      });
+    } finally {
+      setRadarrProwlarrSyncBusy(false);
+    }
+  };
+
+  const handleSyncRadarrNow = async () => {
+    setRadarrProwlarrSyncBusy(true);
+    try {
+      const result = await window.electronAPI?.prowlarrSyncRadarr?.();
+      setRadarrProwlarrSyncStatus({
+        prowlarr: result?.prowlarr || (result?.ok ? 'connected' : 'disconnected'),
+        radarr: result?.radarr || (result?.ok ? 'connected' : 'disconnected'),
+        sync: result?.sync || (result?.ok ? 'configured' : 'notConfigured'),
+        message: result?.ok ? (result?.message || t.syncConfigured) : (result?.error || t.syncFailed),
+      });
+    } catch (err) {
+      setRadarrProwlarrSyncStatus({
+        prowlarr: 'disconnected',
+        radarr: 'disconnected',
+        sync: 'notConfigured',
+        message: err?.message || t.syncFailed,
+      });
+    } finally {
+      setRadarrProwlarrSyncBusy(false);
+    }
+  };
+
   const handleStartProwlarr = async (configOverride) => {
     setManagedStatus('starting');
     const configToStart = configOverride || formData.prowlarr;
@@ -243,6 +335,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const handleStopProwlarr = async () => {
     await window.electronAPI?.stopManagedProwlarr?.();
+    updateProwlarr({ enabled: false });
     setManagedStatus('stopped');
   };
 
@@ -1127,6 +1220,12 @@ const SettingsView = ({ settings, setSettings }) => {
                       ))}
                     </select>
                   </label>
+                  {!radarrRootFolders.length && (
+                    <div className="radarr-warning-box" role="status">
+                      <strong>{t.radarrNoRootFoldersTitle}</strong>
+                      <span>{t.radarrNoRootFoldersHint}</span>
+                    </div>
+                  )}
                   <label className="stacked-field">
                     <span>{t.radarrQualityProfile}</span>
                     <select
@@ -1144,6 +1243,60 @@ const SettingsView = ({ settings, setSettings }) => {
                     <span>{t.radarrSearchAfterAdd}</span>
                     <Toggle checked={formData.radarrSearchAfterAdd !== false} onChange={(checked) => updateRoot({ radarrSearchAfterAdd: checked })} />
                   </label>
+                </div>
+              </div>
+
+              <div className="prowlarr-panel prowlarr-panel-wide">
+                <div className="prowlarr-panel-header">
+                  <h3>{t.prowlarrSync}</h3>
+                </div>
+                <p className="settings-helper">{t.prowlarrSyncHint}</p>
+                <div className="sync-status-grid">
+                  <div className="sync-status-item">
+                    <span>{t.prowlarrLabel}</span>
+                    <strong className={`sync-badge ${radarrProwlarrSyncStatus.prowlarr === 'connected' ? 'ok' : 'off'}`}>
+                      {radarrProwlarrSyncStatus.prowlarr === 'connected' ? t.connected : t.disconnected}
+                    </strong>
+                  </div>
+                  <div className="sync-status-item">
+                    <span>{t.radarrLabel}</span>
+                    <strong className={`sync-badge ${radarrProwlarrSyncStatus.radarr === 'connected' ? 'ok' : 'off'}`}>
+                      {radarrProwlarrSyncStatus.radarr === 'connected' ? t.connected : t.disconnected}
+                    </strong>
+                  </div>
+                  <div className="sync-status-item">
+                    <span>{t.syncStatusLabel}</span>
+                    <strong className={`sync-badge ${
+                      radarrProwlarrSyncStatus.sync === 'configured'
+                        ? 'ok'
+                        : (radarrProwlarrSyncStatus.sync === 'partial' ? 'warn' : 'off')
+                    }`}>
+                      {radarrProwlarrSyncStatus.sync === 'configured'
+                        ? t.syncConfiguredShort
+                        : (radarrProwlarrSyncStatus.sync === 'partial' ? t.syncPartial : t.notConfigured)}
+                    </strong>
+                  </div>
+                </div>
+                {radarrProwlarrSyncStatus.message ? (
+                  <div className="status-line sync-message">{radarrProwlarrSyncStatus.message}</div>
+                ) : null}
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="action-btn subtle"
+                    onClick={handleConnectRadarrToProwlarr}
+                    disabled={radarrProwlarrSyncBusy}
+                  >
+                    {t.connectRadarrToProwlarr}
+                  </button>
+                  <button
+                    type="button"
+                    className="action-btn subtle"
+                    onClick={handleSyncRadarrNow}
+                    disabled={radarrProwlarrSyncBusy}
+                  >
+                    {t.syncNow}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1284,6 +1437,22 @@ const getCopy = (language) => ({
     radarrRootFolder: 'Default Root Folder',
     radarrQualityProfile: 'Default Quality Profile',
     radarrSearchAfterAdd: 'Search After Add',
+    prowlarrSync: 'Prowlarr Sync',
+    prowlarrSyncHint: "Use Prowlarr as Radarr's indexer source.",
+    prowlarrLabel: 'Prowlarr',
+    radarrLabel: 'Radarr',
+    syncStatusLabel: 'Sync status',
+    connectRadarrToProwlarr: 'Connect Radarr to Prowlarr',
+    syncNow: 'Sync Now',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    notConfigured: 'Not configured',
+    syncPartial: 'Partially configured',
+    syncConfiguredShort: 'Configured',
+    syncConfigured: 'Sync configured.',
+    syncFailed: 'Sync failed.',
+    radarrNoRootFoldersTitle: 'No root folders found in Radarr.',
+    radarrNoRootFoldersHint: 'Open Radarr Web UI and add a root folder first.',
     selectRootFolder: 'Root folder sec',
     selectQualityProfile: 'Kalite profili sec',
     radarrDisabled: 'Radarr devre disi.',
@@ -1377,6 +1546,22 @@ const getCopy = (language) => ({
     radarrRootFolder: 'Default Root Folder',
     radarrQualityProfile: 'Default Quality Profile',
     radarrSearchAfterAdd: 'Search After Add',
+    prowlarrSync: 'Prowlarr Sync',
+    prowlarrSyncHint: "Use Prowlarr as Radarr's indexer source.",
+    prowlarrLabel: 'Prowlarr',
+    radarrLabel: 'Radarr',
+    syncStatusLabel: 'Sync status',
+    connectRadarrToProwlarr: 'Connect Radarr to Prowlarr',
+    syncNow: 'Sync Now',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    notConfigured: 'Not configured',
+    syncPartial: 'Partially configured',
+    syncConfiguredShort: 'Configured',
+    syncConfigured: 'Sync configured.',
+    syncFailed: 'Sync failed.',
+    radarrNoRootFoldersTitle: 'No root folders found in Radarr.',
+    radarrNoRootFoldersHint: 'Open Radarr Web UI and add a root folder first.',
     selectRootFolder: 'Select root folder',
     selectQualityProfile: 'Select quality profile',
     radarrDisabled: 'Radarr is disabled.',

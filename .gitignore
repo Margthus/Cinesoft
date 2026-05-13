@@ -55,6 +55,10 @@ resources/prowlarr/
 resources/Prowlarr/
 resources/**/prowlarr/
 resources/**/Prowlarr/
+resources/radarr/
+resources/Radarr/
+resources/**/radarr/
+resources/**/Radarr/
 resources/ffmpeg/
 resources/**/ffmpeg/
 

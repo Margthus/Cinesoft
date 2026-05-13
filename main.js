@@ -89,6 +89,409 @@ const FALLBACK_SUBTITLE_ADDON_BASE_URLS = [
   'https://turkcealtyaziorg-stremio-addon.mycodelab.live',
   'https://turkcealtyaziorg-stremio-addon.mycodelab.com.tr',
 ];
+
+const normalizeHttpUrl = (value = '', label = 'URL') => {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error(`${label} is required.`);
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  const normalized = withProtocol.replace(/\/+$/, '');
+  const parsed = new URL(normalized);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error(`${label} must use http or https.`);
+  }
+  return normalized;
+};
+
+const mapProwlarrError = (error, fallback = 'Prowlarr request failed.') => {
+  if (error?.response) {
+    const status = Number(error.response.status || 0);
+    const data = error.response.data;
+    const message = typeof data === 'string'
+      ? data
+      : (data?.message || data?.error || JSON.stringify(data || {}));
+    if (status === 401 || status === 403) return new Error('Prowlarr authentication failed. Check API key.');
+    if (status === 404) return new Error('Prowlarr endpoint not found. Check Base URL.');
+    if (message && message.length < 320) return new Error(`Prowlarr error (${status}): ${message}`);
+    return new Error(`Prowlarr error (${status}).`);
+  }
+  if (error?.code === 'ECONNREFUSED') return new Error('Could not connect to Prowlarr. Is it running?');
+  if (error?.code === 'ETIMEDOUT' || /timeout/i.test(String(error?.message || ''))) return new Error('Prowlarr request timed out.');
+  return new Error(error?.message || fallback);
+};
+
+const prowlarrRequest = async (prowlarrConfig = {}, endpoint = '', options = {}) => {
+  const baseUrl = normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL');
+  const apiKey = String(prowlarrConfig.apiKey || '').trim();
+  if (!apiKey) throw new Error('Prowlarr API key is required.');
+  const timeout = Number(prowlarrConfig.timeout || 10000);
+  const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  try {
+    const response = await axios({
+      method: String(options.method || 'GET').toUpperCase(),
+      url,
+      data: options.data,
+      params: options.params,
+      timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 10000,
+      validateStatus: () => true,
+      headers: {
+        'X-Api-Key': apiKey,
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
+    if (response.status < 200 || response.status >= 300) {
+      const err = new Error(`HTTP ${response.status}`);
+      err.response = response;
+      throw err;
+    }
+    return response.data;
+  } catch (error) {
+    throw mapProwlarrError(error);
+  }
+};
+
+const setSchemaFieldValue = (fields = [], names = [], value) => {
+  const match = fields.find((field) => names.includes(String(field?.name || '').toLowerCase()));
+  if (match) {
+    match.value = value;
+    return true;
+  }
+  return false;
+};
+
+const triggerProwlarrAppSync = async (prowlarrConfig = {}) => {
+  const commandNames = ['ApplicationIndexerSync', 'ApplicationsSync', 'ApplicationSync'];
+  for (const name of commandNames) {
+    try {
+      const cmd = await prowlarrRequest(prowlarrConfig, '/api/v1/command', {
+        method: 'POST',
+        data: { name },
+      });
+      if (cmd?.id || cmd?.name) {
+        return { ok: true, name, id: cmd?.id };
+      }
+    } catch {
+      // try next known command name
+    }
+  }
+  return { ok: false };
+};
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForProwlarrCommand = async (prowlarrConfig = {}, commandId, timeoutMs = 30000) => {
+  if (!commandId) return { ok: false, timeout: false };
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const cmd = await prowlarrRequest(prowlarrConfig, `/api/v1/command/${commandId}`);
+      const status = String(cmd?.status || '').toLowerCase();
+      if (['completed', 'completedwitherrors'].includes(status)) {
+        return { ok: true, status };
+      }
+      if (['failed', 'aborted', 'cancelled'].includes(status)) {
+        return { ok: false, status };
+      }
+    } catch {
+      // keep waiting until timeout
+    }
+    await delay(900);
+  }
+  return { ok: false, timeout: true };
+};
+
+const getRadarrMissingIndexerNames = async (prowlarrConfig = {}, radarrSettings = {}) => {
+  try {
+    const [prowIdxRows, radIdxRows] = await Promise.all([
+      prowlarrRequest(prowlarrConfig, '/api/v1/indexer'),
+      radarrService.radarrRequest(radarrSettings, '/api/v3/indexer'),
+    ]);
+    const prowNames = (Array.isArray(prowIdxRows) ? prowIdxRows : [])
+      .filter((row) => row?.enable !== false && String(row?.protocol || '').toLowerCase() === 'torrent')
+      .map((row) => String(row?.name || '').trim())
+      .filter(Boolean);
+    const normalizeName = (value = '') => String(value || '')
+      .trim()
+      .replace(/\s*\(prowlarr\)\s*$/i, '')
+      .toLowerCase();
+
+    const radNames = new Set(
+      (Array.isArray(radIdxRows) ? radIdxRows : [])
+        .map((row) => normalizeName(row?.name))
+        .filter(Boolean),
+    );
+    return prowNames.filter((name) => !radNames.has(normalizeName(name)));
+  } catch {
+    return [];
+  }
+};
+
+const getProwlarrTorznabIndexerPath = (indexerId) => `/api/v1/indexer/${indexerId}/newznab/`;
+
+const setRadarrFieldValue = (fields = [], names = [], value) => {
+  const lowerNames = names.map((name) => String(name).toLowerCase());
+  const field = fields.find((item) => lowerNames.includes(String(item?.name || '').toLowerCase()));
+  if (!field) return false;
+  field.value = value;
+  return true;
+};
+
+const addMissingIndexersToRadarrViaTorznab = async (prowlarrConfig = {}, radarrSettings = {}, missingNames = []) => {
+  if (!missingNames.length) return [];
+  const [prowIdxRows, radSchemaRows, radIndexerRows] = await Promise.all([
+    prowlarrRequest(prowlarrConfig, '/api/v1/indexer'),
+    radarrService.radarrRequest(radarrSettings, '/api/v3/indexer/schema'),
+    radarrService.radarrRequest(radarrSettings, '/api/v3/indexer'),
+  ]);
+  const prowlarrIndexers = Array.isArray(prowIdxRows) ? prowIdxRows : [];
+  const schemas = Array.isArray(radSchemaRows) ? radSchemaRows : [];
+  const radarrIndexers = Array.isArray(radIndexerRows) ? radIndexerRows : [];
+  const torznabSchema = schemas.find((row) => String(row?.implementationName || '').toLowerCase() === 'torznab');
+  if (!torznabSchema) return [];
+  const enabledTemplate = radarrIndexers.find((row) => String(row?.name || '').toLowerCase().includes('(prowlarr)') && row?.enable === true);
+
+  const added = [];
+  for (const missingName of missingNames) {
+    const sourceIndexer = prowlarrIndexers.find((row) => String(row?.name || '').trim().toLowerCase() === String(missingName).trim().toLowerCase());
+    if (!sourceIndexer?.id) continue;
+
+    const payload = JSON.parse(JSON.stringify(enabledTemplate || torznabSchema));
+    delete payload.id;
+    delete payload.indexerUrls;
+    delete payload.capabilities;
+    delete payload.protocolCapabilities;
+    payload.enable = true;
+    payload.enableRss = true;
+    payload.enableAutomaticSearch = true;
+    payload.enableInteractiveSearch = true;
+    payload.name = `${missingName} (Prowlarr)`;
+    payload.protocol = 'torrent';
+    payload.implementation = payload.implementation || 'Torznab';
+    payload.implementationName = payload.implementationName || 'Torznab';
+    payload.configContract = payload.configContract || 'TorznabSettings';
+    payload.fields = Array.isArray(payload.fields) ? payload.fields : [];
+    setRadarrFieldValue(payload.fields, ['baseUrl'], normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL'));
+    setRadarrFieldValue(payload.fields, ['apiPath'], getProwlarrTorznabIndexerPath(sourceIndexer.id));
+    setRadarrFieldValue(payload.fields, ['apiKey'], String(prowlarrConfig.apiKey || '').trim());
+
+    try {
+      const created = await radarrService.radarrRequest(radarrSettings, '/api/v3/indexer', {
+        method: 'POST',
+        data: payload,
+      });
+      const createdId = created?.id;
+      if (createdId != null) {
+        try {
+          const fresh = await radarrService.radarrRequest(radarrSettings, `/api/v3/indexer/${createdId}`);
+          const updatePayload = {
+            ...fresh,
+            enable: true,
+            enableRss: true,
+            enableAutomaticSearch: true,
+            enableInteractiveSearch: true,
+          };
+          await radarrService.radarrRequest(radarrSettings, `/api/v3/indexer/${createdId}`, {
+            method: 'PUT',
+            data: updatePayload,
+          });
+        } catch {
+          // Fallback update path for Radarr variants expecting /api/v3/indexer
+          try {
+            const fresh = await radarrService.radarrRequest(radarrSettings, `/api/v3/indexer/${createdId}`);
+            const updatePayload = {
+              ...fresh,
+              enable: true,
+              enableRss: true,
+              enableAutomaticSearch: true,
+              enableInteractiveSearch: true,
+            };
+            await radarrService.radarrRequest(radarrSettings, '/api/v3/indexer', {
+              method: 'PUT',
+              data: updatePayload,
+            });
+          } catch {
+            // Keep created indexer even if explicit enable update fails
+          }
+        }
+      }
+      added.push(missingName);
+    } catch {
+      // ignore single indexer failure, continue with others
+    }
+  }
+  return added;
+};
+
+const normalizeRadarrProwlarrIndexers = async (radarrSettings = {}) => {
+  try {
+    const rows = await radarrService.radarrRequest(radarrSettings, '/api/v3/indexer');
+    const indexers = Array.isArray(rows) ? rows : [];
+    for (const indexer of indexers) {
+      const name = String(indexer?.name || '').toLowerCase();
+      if (!name.includes('(prowlarr)')) continue;
+      const payload = {
+        ...indexer,
+        enable: true,
+        enableRss: true,
+        enableAutomaticSearch: true,
+        enableInteractiveSearch: true,
+      };
+      try {
+        await radarrService.radarrRequest(radarrSettings, `/api/v3/indexer/${indexer.id}`, {
+          method: 'PUT',
+          data: payload,
+        });
+      } catch {
+        await radarrService.radarrRequest(radarrSettings, '/api/v3/indexer', {
+          method: 'PUT',
+          data: payload,
+        });
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+};
+
+const ensureProwlarrRadarrSync = async (prowlarrConfig = {}, radarrSettings = {}, mode = 'connect') => {
+  const prowlarrUrl = normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL');
+  const prowlarrApiKey = String(prowlarrConfig.apiKey || '').trim();
+  const radarrUrl = normalizeHttpUrl(radarrSettings.radarrBaseUrl, 'Radarr URL');
+  const radarrApiKey = String(radarrSettings.radarrApiKey || '').trim();
+
+  if (!prowlarrApiKey) throw new Error('Prowlarr API key is required.');
+  if (!radarrApiKey) throw new Error('Radarr API key is required.');
+
+  const prowlarrTest = await (await getSourcesModule()).testProwlarrConnection({
+    ...prowlarrConfig,
+    enabled: true,
+  });
+  if (!prowlarrTest?.ok) {
+    throw new Error('Prowlarr connection failed.');
+  }
+
+  const radarrTest = await radarrService.testConnection({
+    ...radarrSettings,
+    radarrBaseUrl: radarrUrl,
+    radarrApiKey,
+  });
+  if (!radarrTest?.ok) {
+    throw new Error('Radarr connection failed.');
+  }
+
+  const existingApps = await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications',
+  );
+  const apps = Array.isArray(existingApps) ? existingApps : [];
+  const existingRadarr = apps.find((appItem) => {
+    const impl = String(appItem?.implementationName || appItem?.implementation || '').toLowerCase();
+    const name = String(appItem?.name || '').toLowerCase();
+    return impl === 'radarr' || name.includes('radarr');
+  });
+
+  if (existingRadarr) {
+    const updated = { ...existingRadarr };
+    const fields = Array.isArray(updated.fields) ? [...updated.fields] : [];
+    setSchemaFieldValue(fields, ['baseurl', 'url', 'radarrurl'], radarrUrl);
+    setSchemaFieldValue(fields, ['apikey'], radarrApiKey);
+    setSchemaFieldValue(fields, ['synclevel'], 'fullSync');
+    setSchemaFieldValue(fields, ['tags'], []);
+    updated.fields = fields;
+    updated.tags = [];
+    updated.enable = true;
+    await prowlarrRequest(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      '/api/v1/applications',
+      { method: 'PUT', data: updated },
+    );
+    const syncResult = await triggerProwlarrAppSync({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey });
+    if (syncResult?.ok && syncResult?.id) {
+      await waitForProwlarrCommand({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey }, syncResult.id);
+    }
+    const missingNames = await getRadarrMissingIndexerNames(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+    );
+    const addedByFallback = await addMissingIndexersToRadarrViaTorznab(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+      missingNames,
+    );
+    await normalizeRadarrProwlarrIndexers({ ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey });
+    const remainingMissing = await getRadarrMissingIndexerNames(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+    );
+    return {
+      ok: true,
+      prowlarr: 'connected',
+      radarr: 'connected',
+      sync: remainingMissing.length ? 'partial' : 'configured',
+      message: remainingMissing.length
+        ? `Sync completed, but missing indexers in Radarr: ${remainingMissing.join(', ')}`
+        : (addedByFallback.length
+          ? `Sync updated. Fallback added: ${addedByFallback.join(', ')}`
+          : (mode === 'sync' ? 'Sync updated.' : 'Already configured, updated settings.')),
+    };
+  }
+
+  const schemasResponse = await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications/schema',
+  );
+  const schemas = Array.isArray(schemasResponse) ? schemasResponse : [];
+  const radarrSchema = schemas.find((schema) => String(schema?.implementationName || '').toLowerCase() === 'radarr');
+  if (!radarrSchema) {
+    throw new Error('Could not find Radarr application schema in Prowlarr.');
+  }
+
+  const payload = JSON.parse(JSON.stringify(radarrSchema));
+  payload.name = payload.name || 'Radarr';
+  payload.enable = true;
+  payload.fields = Array.isArray(payload.fields) ? payload.fields : [];
+  setSchemaFieldValue(payload.fields, ['baseurl', 'url', 'radarrurl'], radarrUrl);
+  setSchemaFieldValue(payload.fields, ['apikey'], radarrApiKey);
+  setSchemaFieldValue(payload.fields, ['synclevel'], 'fullSync');
+  setSchemaFieldValue(payload.fields, ['tags'], []);
+  payload.tags = [];
+
+  await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications',
+    { method: 'POST', data: payload },
+  );
+  const syncResult = await triggerProwlarrAppSync({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey });
+  if (syncResult?.ok && syncResult?.id) {
+    await waitForProwlarrCommand({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey }, syncResult.id);
+  }
+  const missingNames = await getRadarrMissingIndexerNames(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+  );
+
+  const addedByFallback = await addMissingIndexersToRadarrViaTorznab(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+    missingNames,
+  );
+  await normalizeRadarrProwlarrIndexers({ ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey });
+  const remainingMissing = await getRadarrMissingIndexerNames(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...radarrSettings, radarrBaseUrl: radarrUrl, radarrApiKey },
+  );
+  return {
+    ok: true,
+    prowlarr: 'connected',
+    radarr: 'connected',
+    sync: remainingMissing.length ? 'partial' : 'configured',
+    message: remainingMissing.length
+      ? `Connected, but missing indexers in Radarr: ${remainingMissing.join(', ')}`
+      : (addedByFallback.length
+        ? `Radarr connected to Prowlarr. Fallback added: ${addedByFallback.join(', ')}`
+        : 'Radarr connected to Prowlarr.'),
+  };
+};
 const OPENSUBTITLES_V3_BASE_URL = 'https://opensubtitles-v3.strem.io';
 const SUBTITLE_SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const subtitleSearchCache = new Map();
@@ -813,7 +1216,7 @@ const ensureProwlarrConfigFile = (config = {}) => {
       BindAddress: '127.0.0.1',
       Port: String(port),
       ApiKey: apiKey,
-      AuthenticationMethod: 'None',
+      AuthenticationMethod: 'Forms',
       AuthenticationRequired: 'DisabledForLocalAddresses',
       AuthenticationRequiredWarningDismissed: 'True',
       UrlBase: '',
@@ -827,7 +1230,7 @@ const ensureProwlarrConfigFile = (config = {}) => {
       '  <SslPort>6969</SslPort>',
       '  <EnableSsl>False</EnableSsl>',
       '  <LaunchBrowser>False</LaunchBrowser>',
-      '  <AuthenticationMethod>None</AuthenticationMethod>',
+      '  <AuthenticationMethod>Forms</AuthenticationMethod>',
       '  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>',
       '  <AuthenticationRequiredWarningDismissed>True</AuthenticationRequiredWarningDismissed>',
       `  <ApiKey>${apiKey}</ApiKey>`,
@@ -858,7 +1261,7 @@ const ensureRadarrConfigFile = (config = {}) => {
       BindAddress: '127.0.0.1',
       Port: String(port),
       ApiKey: apiKey,
-      AuthenticationMethod: 'None',
+      AuthenticationMethod: 'Forms',
       AuthenticationRequired: 'DisabledForLocalAddresses',
       AuthenticationRequiredWarningDismissed: 'True',
       UrlBase: '',
@@ -872,7 +1275,7 @@ const ensureRadarrConfigFile = (config = {}) => {
       '  <SslPort>9898</SslPort>',
       '  <EnableSsl>False</EnableSsl>',
       '  <LaunchBrowser>False</LaunchBrowser>',
-      '  <AuthenticationMethod>None</AuthenticationMethod>',
+      '  <AuthenticationMethod>Forms</AuthenticationMethod>',
       '  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>',
       '  <AuthenticationRequiredWarningDismissed>True</AuthenticationRequiredWarningDismissed>',
       `  <ApiKey>${apiKey}</ApiKey>`,
@@ -1623,6 +2026,26 @@ ipcMain.handle('open-radarr-web-ui', async (event, radarrSettings = {}) => {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('prowlarr:connectRadarr', async () => {
+  try {
+    const prowlarrConfig = getProwlarrConfig();
+    const radarrConfig = getRadarrConfig();
+    return await ensureProwlarrRadarrSync(prowlarrConfig, radarrConfig, 'connect');
+  } catch (err) {
+    return { ok: false, error: err.message, prowlarr: 'disconnected', radarr: 'disconnected', sync: 'notConfigured' };
+  }
+});
+
+ipcMain.handle('prowlarr:syncRadarr', async () => {
+  try {
+    const prowlarrConfig = getProwlarrConfig();
+    const radarrConfig = getRadarrConfig();
+    return await ensureProwlarrRadarrSync(prowlarrConfig, radarrConfig, 'sync');
+  } catch (err) {
+    return { ok: false, error: err.message, prowlarr: 'disconnected', radarr: 'disconnected', sync: 'notConfigured' };
   }
 });
 

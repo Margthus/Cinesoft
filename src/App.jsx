@@ -79,8 +79,11 @@ const App = () => {
             radarrSearchAfterAdd: savedSettings.radarrSearchAfterAdd !== false,
           });
 
-          if (savedSettings.prowlarr?.managed && !savedSettings.torrentioEnabled) {
+          if (savedSettings.prowlarr?.managed && savedSettings.prowlarr?.enabled && !savedSettings.torrentioEnabled) {
             window.electronAPI?.startManagedProwlarr?.(savedSettings.prowlarr);
+          }
+          if (savedSettings.radarrManaged === true && savedSettings.radarrEnabled === true) {
+            window.electronAPI?.startManagedRadarr?.(savedSettings);
           }
         }
       }

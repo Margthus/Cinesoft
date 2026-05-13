@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getManagedProwlarrStatus: () => ipcRenderer.invoke('get-managed-prowlarr-status'),
   openProwlarrDownloadPage: () => ipcRenderer.invoke('open-prowlarr-download-page'),
   openProwlarrWebUI: (prowlarrConfig) => ipcRenderer.invoke('open-prowlarr-web-ui', prowlarrConfig),
+  prowlarrConnectRadarr: () => ipcRenderer.invoke('prowlarr:connectRadarr'),
+  prowlarrSyncRadarr: () => ipcRenderer.invoke('prowlarr:syncRadarr'),
   selectRadarrExecutable: () => ipcRenderer.invoke('select-radarr-executable'),
   startManagedRadarr: (radarrConfig) => ipcRenderer.invoke('start-managed-radarr', radarrConfig),
   stopManagedRadarr: () => ipcRenderer.invoke('stop-managed-radarr'),
