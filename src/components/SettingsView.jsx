@@ -1,26 +1,51 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bookmark,
   ChevronDown,
   ChevronUp,
+  Download,
   Eye,
   EyeOff,
   Film,
   FolderOpen,
   Globe,
+  Home,
   Key,
+  Library,
   Play,
   Radar,
   RefreshCcw,
   Save,
   Search,
+  Settings as SettingsIcon,
   Shield,
+  Sparkles,
   Square,
   Trash2,
+  Tv,
   X,
 } from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
 import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
+
+const DEFAULT_EMBEDDED_TORRENT_SETTINGS = {
+  seedAfterDownload: true,
+  shutdownOnComplete: false,
+  maxActiveDownloads: 3,
+  dhtEnabled: true,
+  lsdEnabled: true,
+  upnpEnabled: true,
+  natPmpEnabled: true,
+  announceToAllTrackers: true,
+  lowSpeedAlertEnabled: false,
+  lowSpeedThresholdKbps: 100,
+  lowSpeedDurationMinutes: 10,
+  globalConnectionLimit: 500,
+  perTorrentConnectionLimit: 100,
+  uploadSlots: 8,
+  diskCacheSize: 'auto',
+};
 
 const SettingsView = ({ settings, setSettings }) => {
   const [formData, setFormData] = useState({
@@ -29,6 +54,8 @@ const SettingsView = ({ settings, setSettings }) => {
     torrentio: normalizeTorrentioConfig(settings.torrentio || {}),
   });
   const [saveState, setSaveState] = useState('');
+  const [qbRadarrState, setQbRadarrState] = useState('');
+  const [embeddedDownloadDir, setEmbeddedDownloadDir] = useState('');
   const [prowlarrStatus, setProwlarrStatus] = useState('');
   const [managedStatus, setManagedStatus] = useState('');
   const [indexers, setIndexers] = useState([]);
@@ -39,9 +66,9 @@ const SettingsView = ({ settings, setSettings }) => {
   const [addState, setAddState] = useState('');
   const [schemaVisibleCount, setSchemaVisibleCount] = useState(80);
   const [downloadEngineConfigOpen, setDownloadEngineConfigOpen] = useState(true);
-  const [torrentioConfigOpen, setTorrentioConfigOpen] = useState(true);
-  const [prowlarrConfigOpen, setProwlarrConfigOpen] = useState(true);
-  const [radarrConfigOpen, setRadarrConfigOpen] = useState(true);
+  const [torrentioConfigOpen] = useState(true);
+  const [prowlarrConfigOpen] = useState(true);
+  const [radarrConfigOpen] = useState(true);
   const [tmdbApiKeyVisible, setTmdbApiKeyVisible] = useState(false);
   const [radarrApiKeyVisible, setRadarrApiKeyVisible] = useState(false);
   const [radarrManagedStatus, setRadarrManagedStatus] = useState('');
@@ -56,6 +83,8 @@ const SettingsView = ({ settings, setSettings }) => {
   });
   const [radarrProwlarrSyncBusy, setRadarrProwlarrSyncBusy] = useState(false);
   const [activeSection, setActiveSection] = useState('general');
+  const [embeddedTorrentSettings, setEmbeddedTorrentSettings] = useState(DEFAULT_EMBEDDED_TORRENT_SETTINGS);
+  const [embeddedAdvancedOpen, setEmbeddedAdvancedOpen] = useState(false);
   const [navGroupsOpen, setNavGroupsOpen] = useState({
     general: true,
     account: true,
@@ -73,6 +102,19 @@ const SettingsView = ({ settings, setSettings }) => {
 
   useEffect(() => {
     refreshIndexers();
+    window.electronAPI?.getDownloadDir?.().then((dir) => {
+      if (typeof dir === 'string' && dir.trim()) {
+        setEmbeddedDownloadDir(dir);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    window.electronAPI?.torrentGetSettings?.().then((result) => {
+      if (result?.settings) {
+        setEmbeddedTorrentSettings({ ...DEFAULT_EMBEDDED_TORRENT_SETTINGS, ...result.settings });
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -136,7 +178,8 @@ const SettingsView = ({ settings, setSettings }) => {
     setFormData((current) => {
       const next = { ...current, ...changes };
       if ('torrentioEnabled' in changes
-        || 'useQbittorrent' in changes
+        || 'embeddedTorrentEnabled' in changes
+        || 'qbittorrentEnabled' in changes
         || 'qbittorrent' in changes
         || 'torrentio' in changes
         || 'radarrEnabled' in changes
@@ -372,6 +415,35 @@ const SettingsView = ({ settings, setSettings }) => {
     setManagedStatus('stopped');
   };
 
+  const updateEmbeddedTorrentSetting = (changes) => {
+    setEmbeddedTorrentSettings((current) => {
+      const next = { ...current, ...changes };
+      window.electronAPI?.torrentSaveSettings?.(next).then((result) => {
+        if (result?.settings) {
+          setEmbeddedTorrentSettings({ ...DEFAULT_EMBEDDED_TORRENT_SETTINGS, ...result.settings });
+        }
+      }).catch(() => {});
+      return next;
+    });
+  };
+
+  const handleEnableProwlarrConnection = async () => {
+    updateProwlarr({ enabled: true });
+    updateRoot({ torrentioEnabled: false });
+    if (!formData.prowlarr.managed || managedStatus !== 'running') {
+      updateProwlarr({ managed: true });
+      await handleStartProwlarr({ ...formData.prowlarr, enabled: true, managed: true });
+    }
+    await refreshIndexers();
+  };
+
+  const handleDisableProwlarrConnection = async () => {
+    updateProwlarr({ enabled: false });
+    if (formData.prowlarr.managed) {
+      await handleStopProwlarr();
+    }
+  };
+
   const handleTestProwlarr = async () => {
     setProwlarrStatus('testing');
     try {
@@ -494,6 +566,18 @@ const SettingsView = ({ settings, setSettings }) => {
   };
 
   const t = getCopy(formData.language);
+  const defaultPageOptions = useMemo(() => ([
+    { value: 'home', label: t.pageHome, icon: Home },
+    { value: 'movies', label: t.pageMovies, icon: Film },
+    { value: 'tv', label: t.pageTv, icon: Tv },
+    { value: 'anime', label: t.pageAnime, icon: Sparkles },
+    { value: 'library', label: t.pageLibrary, icon: Library },
+    { value: 'mylist', label: t.pageMyList, icon: Bookmark },
+    { value: 'downloads', label: t.pageDownloads, icon: Download },
+    { value: 'search', label: t.pageSearch, icon: Search },
+    { value: 'radarr', label: 'Radarr', icon: Radar },
+    { value: 'settings', label: t.pageSettings, icon: SettingsIcon },
+  ]), [t]);
   const starredNames = ['yts', 'the pirate bay', 'nyaa.si'];
 
   const filteredSchemas = schemas.filter((schema) => {
@@ -566,7 +650,8 @@ const SettingsView = ({ settings, setSettings }) => {
       id: 'download',
       label: t.navDownload,
       items: [
-        { id: 'download', label: t.downloadEngine, icon: Save },
+        { id: 'downloadEmbedded', label: t.embeddedTorrent, icon: Save },
+        { id: 'downloadQbittorrent', label: t.qbittorrent, icon: Save },
       ],
     },
     {
@@ -601,13 +686,48 @@ const SettingsView = ({ settings, setSettings }) => {
             <strong>{t.language}</strong>
             <span>{t.languageHint}</span>
           </div>
-          <div className="settings-row-control settings-row-control--segmented">
-            <div className="segmented-control">
-              <button className={formData.language === 'tr' ? 'active' : ''} onClick={() => updateRoot({ language: 'tr' })}>Turkce</button>
-              <button className={formData.language === 'en' ? 'active' : ''} onClick={() => updateRoot({ language: 'en' })}>English</button>
+          <div className="settings-row-control">
+            <CustomSelect
+              value={formData.language || 'tr'}
+              onSelect={(value) => updateRoot({ language: value })}
+              options={[
+                { value: 'tr', label: 'Turkce' },
+                { value: 'en', label: 'English' },
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.defaultPage}</strong>
+            <span>{t.defaultPageHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <div className="settings-icon-select-wrap">
+              <CustomSelect
+                options={defaultPageOptions}
+                value={formData.defaultPage || 'home'}
+                withIcons
+                onSelect={(value) => updateRoot({ defaultPage: value })}
+              />
             </div>
           </div>
         </div>
+
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.notifications}</strong>
+            <span>{t.notificationsHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <Toggle
+              checked={formData.notificationsEnabled !== false}
+              onChange={(checked) => updateRoot({ notificationsEnabled: checked })}
+            />
+          </div>
+        </div>
+
       </div>
     </section>
   );
@@ -630,7 +750,7 @@ const SettingsView = ({ settings, setSettings }) => {
             <strong>{t.tmdbKeyLabel}</strong>
             <span>{t.tmdbKeyDesc}</span>
           </div>
-          <div className="settings-row-control">
+          <div className="settings-row-control settings-row-control--wide">
             <div className="input-action-row">
               <input
                 className="settings-input"
@@ -655,107 +775,308 @@ const SettingsView = ({ settings, setSettings }) => {
     </section>
   );
 
-  const renderDownloadSection = () => (
+  const renderEmbeddedTorrentSection = () => (
     <section className="settings-section-shell">
       <header className="settings-panel-header">
         <div className="settings-panel-title">
           <Save size={18} />
           <div>
-            <h2>{t.downloadEngine}</h2>
-            <p>{t.downloadEngineHint}</p>
+            <h2>{t.embeddedTorrent}</h2>
+            <p>{t.embeddedTorrentDesc}</p>
           </div>
-        </div>
-        <div className="settings-card-actions">
-          <button
-            type="button"
-            className="settings-collapse-btn"
-            aria-expanded={downloadEngineConfigOpen}
-            aria-controls="download-engine-config-panel"
-            onClick={() => setDownloadEngineConfigOpen((current) => !current)}
-          >
-            {downloadEngineConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            <span>{downloadEngineConfigOpen ? t.hideConfig : t.showConfig}</span>
-          </button>
         </div>
       </header>
 
-      <div
-        id="download-engine-config-panel"
-        className={`settings-collapsible ${downloadEngineConfigOpen ? 'open' : 'closed'}`}
-        hidden={!downloadEngineConfigOpen}
-      >
-        <div className="settings-row-list">
-          <div className="settings-row-card">
-            <div className="settings-row-copy">
-              <strong>{t.embeddedTorrent}</strong>
-              <span>{t.embeddedTorrentDesc}</span>
-            </div>
-            <Toggle
-              checked={!formData.useQbittorrent}
-              onChange={(checked) => {
-                updateRoot({ useQbittorrent: !checked });
-              }}
-            />
+      <div className="settings-row-list">
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.embeddedTorrent}</strong>
+            <span>{t.embeddedTorrentDesc}</span>
           </div>
+          <Toggle
+            checked={formData.embeddedTorrentEnabled !== false}
+            onChange={(checked) => {
+              updateRoot({ embeddedTorrentEnabled: checked });
+            }}
+          />
+        </div>
+      </div>
 
-          <div className="settings-row-card">
-            <div className="settings-row-copy">
-              <strong>{t.qbittorrent}</strong>
-              <span>{t.qbittorrentDesc}</span>
-            </div>
-            <Toggle
-              checked={Boolean(formData.useQbittorrent)}
-              onChange={(checked) => {
-                updateRoot({ useQbittorrent: checked });
-              }}
+      <div className="settings-form-card">
+        <label className="stacked-field">
+          <span>{t.defaultDownloadFolder}</span>
+          <div className="input-action-row">
+            <input
+              className="settings-input"
+              value={embeddedDownloadDir}
+              readOnly
             />
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={async () => {
+                const selected = await window.electronAPI?.selectDownloadDir?.();
+                if (typeof selected === 'string' && selected.trim()) {
+                  setEmbeddedDownloadDir(selected);
+                }
+              }}
+              aria-label={t.selectFolder}
+              title={t.selectFolder}
+            >
+              <FolderOpen size={18} />
+            </button>
           </div>
+        </label>
+        <p className="settings-helper">{t.completedToFolderHint}</p>
+      </div>
+
+      <div className="settings-form-card">
+        <div className="settings-panel-header">
+          <div className="settings-panel-title">
+            <div>
+              <h2>{t.advancedTorrentSettings}</h2>
+              <p>{t.advancedTorrentSettingsHint}</p>
+            </div>
+          </div>
+          <button type="button" className="settings-collapse-btn" onClick={() => setEmbeddedAdvancedOpen((current) => !current)}>
+            {embeddedAdvancedOpen ? t.hideConfig : t.showConfig}
+          </button>
         </div>
 
-        <div className="settings-form-card">
-          <div className="panel-grid">
-            <label className="stacked-field">
-              <span>{t.qbBaseUrl}</span>
+        {embeddedAdvancedOpen && (
+          <div className="settings-row-list">
+            <div className="settings-row-card">
+              <div className="settings-row-copy">
+                <strong>DHT</strong>
+                <span>{t.dhtDesc}</span>
+              </div>
+              <Toggle checked={embeddedTorrentSettings.dhtEnabled !== false} onChange={(checked) => updateEmbeddedTorrentSetting({ dhtEnabled: checked })} />
+            </div>
+            <div className="settings-row-card">
+              <div className="settings-row-copy">
+                <strong>LSD</strong>
+                <span>{t.lsdDesc}</span>
+              </div>
+              <Toggle checked={embeddedTorrentSettings.lsdEnabled !== false} onChange={(checked) => updateEmbeddedTorrentSetting({ lsdEnabled: checked })} />
+            </div>
+            <div className="settings-row-card">
+              <div className="settings-row-copy">
+                <strong>UPnP / NAT-PMP</strong>
+                <span>{t.portMapDesc}</span>
+              </div>
+              <Toggle
+                checked={embeddedTorrentSettings.upnpEnabled !== false && embeddedTorrentSettings.natPmpEnabled !== false}
+                onChange={(checked) => updateEmbeddedTorrentSetting({ upnpEnabled: checked, natPmpEnabled: checked })}
+              />
+            </div>
+            <div className="settings-row-card">
+              <div className="settings-row-copy">
+                <strong>{t.announceAllTrackers}</strong>
+                <span>{t.announceAllTrackersDesc}</span>
+              </div>
+              <Toggle checked={embeddedTorrentSettings.announceToAllTrackers !== false} onChange={(checked) => updateEmbeddedTorrentSetting({ announceToAllTrackers: checked })} />
+            </div>
+            <div className="settings-row-card settings-row-card--stacked-mobile">
+              <div className="settings-row-copy">
+                <strong>{t.lowSpeedAlert}</strong>
+                <span>{t.lowSpeedAlertDesc}</span>
+              </div>
+              <div className="panel-grid">
+                <label className="stacked-field compact">
+                  <span>{t.lowSpeedThreshold}</span>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min="1"
+                    max="100000"
+                    value={embeddedTorrentSettings.lowSpeedThresholdKbps ?? 100}
+                    onChange={(event) => updateEmbeddedTorrentSetting({ lowSpeedThresholdKbps: Math.max(1, Number(event.target.value) || 100) })}
+                  />
+                </label>
+                <label className="stacked-field compact">
+                  <span>{t.lowSpeedDuration}</span>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={embeddedTorrentSettings.lowSpeedDurationMinutes ?? 10}
+                    onChange={(event) => updateEmbeddedTorrentSetting({ lowSpeedDurationMinutes: Math.max(1, Number(event.target.value) || 10) })}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="settings-row-card settings-row-card--stacked-mobile">
+              <div className="settings-row-copy">
+                <strong>{t.globalConnectionLimit}</strong>
+                <span>{t.globalConnectionLimitDesc}</span>
+              </div>
               <input
                 className="settings-input"
-                value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    baseUrl: event.target.value,
-                  },
-                })}
+                type="number"
+                min="1"
+                max="5000"
+                value={embeddedTorrentSettings.globalConnectionLimit ?? 500}
+                onChange={(event) => updateEmbeddedTorrentSetting({ globalConnectionLimit: Math.max(1, Number(event.target.value) || 500) })}
               />
-            </label>
-            <label className="stacked-field">
-              <span>{t.qbUsername}</span>
+            </div>
+            <div className="settings-row-card settings-row-card--stacked-mobile">
+              <div className="settings-row-copy">
+                <strong>{t.perTorrentConnectionLimit}</strong>
+                <span>{t.perTorrentConnectionLimitDesc}</span>
+              </div>
               <input
                 className="settings-input"
-                value={formData.qbittorrent?.username || 'admin'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    username: event.target.value,
-                  },
-                })}
+                type="number"
+                min="1"
+                max="1000"
+                value={embeddedTorrentSettings.perTorrentConnectionLimit ?? 100}
+                onChange={(event) => updateEmbeddedTorrentSetting({ perTorrentConnectionLimit: Math.max(1, Number(event.target.value) || 100) })}
               />
-            </label>
-            <label className="stacked-field">
-              <span>{t.qbPassword}</span>
+            </div>
+            <div className="settings-row-card settings-row-card--stacked-mobile">
+              <div className="settings-row-copy">
+                <strong>{t.uploadSlots}</strong>
+                <span>{t.uploadSlotsDesc}</span>
+              </div>
               <input
                 className="settings-input"
-                type="password"
-                value={formData.qbittorrent?.password || 'adminadmin'}
-                onChange={(event) => updateRoot({
-                  qbittorrent: {
-                    ...(formData.qbittorrent || {}),
-                    password: event.target.value,
-                  },
-                })}
+                type="number"
+                min="1"
+                max="128"
+                value={embeddedTorrentSettings.uploadSlots ?? 8}
+                onChange={(event) => updateEmbeddedTorrentSetting({ uploadSlots: Math.max(1, Number(event.target.value) || 8) })}
               />
-            </label>
+            </div>
+            <div className="settings-row-card settings-row-card--stacked-mobile">
+              <div className="settings-row-copy">
+                <strong>{t.diskCacheSize}</strong>
+                <span>{t.diskCacheSizeDesc}</span>
+              </div>
+              <CustomSelect
+                value={embeddedTorrentSettings.diskCacheSize || 'auto'}
+                onSelect={(value) => updateEmbeddedTorrentSetting({ diskCacheSize: value })}
+                options={[
+                  { value: 'auto', label: t.cacheAuto },
+                  { value: '64', label: '64 MB' },
+                  { value: '128', label: '128 MB' },
+                  { value: '256', label: '256 MB' },
+                  { value: '512', label: '512 MB' },
+                ]}
+              />
+            </div>
+            <p className="settings-helper">{t.diskCacheWarning}</p>
           </div>
-          <p className="settings-helper">{t.qbNote}</p>
+        )}
+      </div>
+    </section>
+  );
+
+  const renderQbittorrentSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Save size={18} />
+          <div>
+            <h2>{t.qbittorrent}</h2>
+            <p>{t.qbittorrentDesc}</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="settings-row-list">
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.qbittorrent}</strong>
+            <span>{t.qbittorrentDesc}</span>
+          </div>
+          <Toggle
+            checked={formData.qbittorrentEnabled !== false}
+            onChange={(checked) => {
+              updateRoot({ qbittorrentEnabled: checked });
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="settings-form-card">
+        <div className="panel-grid">
+          <label className="stacked-field">
+            <span>{t.qbBaseUrl}</span>
+            <input
+              className="settings-input"
+              value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
+              onChange={(event) => updateRoot({
+                qbittorrent: {
+                  ...(formData.qbittorrent || {}),
+                  baseUrl: event.target.value,
+                },
+              })}
+            />
+          </label>
+          <label className="stacked-field">
+            <span>{t.qbUsername}</span>
+            <input
+              className="settings-input"
+              value={formData.qbittorrent?.username || 'admin'}
+              onChange={(event) => updateRoot({
+                qbittorrent: {
+                  ...(formData.qbittorrent || {}),
+                  username: event.target.value,
+                },
+              })}
+            />
+          </label>
+          <label className="stacked-field">
+            <span>{t.qbPassword}</span>
+            <input
+              className="settings-input"
+              type="password"
+              value={formData.qbittorrent?.password || 'adminadmin'}
+              onChange={(event) => updateRoot({
+                qbittorrent: {
+                  ...(formData.qbittorrent || {}),
+                  password: event.target.value,
+                },
+              })}
+            />
+          </label>
+        </div>
+        <p className="settings-helper">{t.qbNote}</p>
+        <div className="draft-actions">
+          <button
+            type="button"
+            className="action-btn primary"
+            onClick={async () => {
+              if (formData.qbittorrentEnabled === false) {
+                setQbRadarrState(`failed:${formData.language === 'tr' ? 'qBittorrent kapali.' : 'qBittorrent is disabled.'}`);
+                return;
+              }
+              setQbRadarrState('saving');
+              const payload = {
+                settings: {
+                  radarrBaseUrl: formData.radarrBaseUrl,
+                  radarrApiKey: formData.radarrApiKey,
+                  radarrTimeout: formData.radarrTimeout || 10000,
+                },
+                qbittorrent: {
+                  baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                  username: formData.qbittorrent?.username || '',
+                  password: formData.qbittorrent?.password || '',
+                },
+              };
+              const result = await window.electronAPI?.radarrUpsertQbittorrentClient?.(payload);
+              if (result?.ok) {
+                setQbRadarrState('saved');
+                return;
+              }
+              setQbRadarrState(`failed:${result?.error || ''}`);
+            }}
+          >
+            <Save size={16} />
+            {t.addQbToRadarr}
+          </button>
+          <span className="status-line">{renderQbRadarrState(qbRadarrState, t)}</span>
         </div>
       </div>
     </section>
@@ -772,16 +1093,6 @@ const SettingsView = ({ settings, setSettings }) => {
           </div>
         </div>
         <div className="settings-card-actions">
-          <button
-            type="button"
-            className="settings-collapse-btn"
-            aria-expanded={torrentioConfigOpen}
-            aria-controls="torrentio-config-panel"
-            onClick={() => setTorrentioConfigOpen((current) => !current)}
-          >
-            {torrentioConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            <span>{torrentioConfigOpen ? t.hideConfig : t.showConfig}</span>
-          </button>
           <Toggle
             checked={formData.torrentioEnabled || false}
             onChange={async (checked) => {
@@ -795,11 +1106,7 @@ const SettingsView = ({ settings, setSettings }) => {
         </div>
       </header>
 
-      <div
-        id="torrentio-config-panel"
-        className={`settings-collapsible ${torrentioConfigOpen ? 'open' : 'closed'}`}
-        hidden={!torrentioConfigOpen}
-      >
+      <div id="torrentio-config-panel" className="settings-collapsible open">
         <div className="settings-form-card">
           <div className="panel-grid">
             <label className="stacked-field">
@@ -846,20 +1153,20 @@ const SettingsView = ({ settings, setSettings }) => {
             </label>
             <label className="stacked-field">
               <span>{t.torrentioSortBy}</span>
-              <select
-                className="settings-input"
+              <CustomSelect
                 value={formData.torrentio?.sortBy || 'seeders'}
-                onChange={(event) => updateRoot({
+                onSelect={(value) => updateRoot({
                   torrentio: normalizeTorrentioConfig({
                     ...(formData.torrentio || {}),
-                    sortBy: event.target.value,
+                    sortBy: value,
                   }),
                 })}
-              >
-                <option value="seeders">{t.seeders}</option>
-                <option value="size">{t.size}</option>
-                <option value="name">{t.name}</option>
-              </select>
+                options={[
+                  { value: 'seeders', label: t.seeders },
+                  { value: 'size', label: t.size },
+                  { value: 'name', label: t.name },
+                ]}
+              />
             </label>
           </div>
 
@@ -911,24 +1218,10 @@ const SettingsView = ({ settings, setSettings }) => {
           <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrWebUI}>
             <span>{t.openRadarrWebUI}</span>
           </button>
-          <button
-            type="button"
-            className="settings-collapse-btn"
-            aria-expanded={radarrConfigOpen}
-            aria-controls="radarr-config-panel"
-            onClick={() => setRadarrConfigOpen((current) => !current)}
-          >
-            {radarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            <span>{radarrConfigOpen ? t.hideConfig : t.showConfig}</span>
-          </button>
         </div>
       </header>
 
-      <div
-        id="radarr-config-panel"
-        className={`settings-collapsible ${radarrConfigOpen ? 'open' : 'closed'}`}
-        hidden={!radarrConfigOpen}
-      >
+      <div id="radarr-config-panel" className="settings-collapsible open">
         <div className="prowlarr-layout">
           <div className="prowlarr-panel">
             <div className="prowlarr-panel-header">
@@ -978,7 +1271,7 @@ const SettingsView = ({ settings, setSettings }) => {
                 </button>
               </div>
             </div>
-            <div className="status-line">{renderManagedStatus(radarrManagedStatus, t)}</div>
+            <div className="status-line">{renderRadarrManagedStatus(radarrManagedStatus, t)}</div>
           </div>
 
           <div className="prowlarr-panel">
@@ -1045,16 +1338,17 @@ const SettingsView = ({ settings, setSettings }) => {
             <div className="panel-grid">
               <label className="stacked-field">
                 <span>{t.radarrRootFolder}</span>
-                <select
-                  className="settings-input"
+                <CustomSelect
                   value={formData.radarrDefaultRootFolder || ''}
-                  onChange={(event) => updateRoot({ radarrDefaultRootFolder: event.target.value })}
-                >
-                  <option value="">{t.selectRootFolder}</option>
-                  {radarrRootFolders.map((folder) => (
-                    <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
-                  ))}
-                </select>
+                  onSelect={(value) => updateRoot({ radarrDefaultRootFolder: value })}
+                  options={[
+                    { value: '', label: t.selectRootFolder },
+                    ...radarrRootFolders.map((folder) => ({
+                      value: folder.path,
+                      label: folder.path,
+                    })),
+                  ]}
+                />
               </label>
               {!radarrRootFolders.length && (
                 <div className="radarr-warning-box" role="status">
@@ -1064,16 +1358,17 @@ const SettingsView = ({ settings, setSettings }) => {
               )}
               <label className="stacked-field">
                 <span>{t.radarrQualityProfile}</span>
-                <select
-                  className="settings-input"
+                <CustomSelect
                   value={String(formData.radarrDefaultQualityProfileId ?? '')}
-                  onChange={(event) => updateRoot({ radarrDefaultQualityProfileId: event.target.value })}
-                >
-                  <option value="">{t.selectQualityProfile}</option>
-                  {radarrQualityProfiles.map((profile) => (
-                    <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
-                  ))}
-                </select>
+                  onSelect={(value) => updateRoot({ radarrDefaultQualityProfileId: value })}
+                  options={[
+                    { value: '', label: t.selectQualityProfile },
+                    ...radarrQualityProfiles.map((profile) => ({
+                      value: String(profile.id),
+                      label: profile.name,
+                    })),
+                  ]}
+                />
               </label>
               <label className="toggle-field">
                 <span>{t.radarrSearchAfterAdd}</span>
@@ -1157,24 +1452,10 @@ const SettingsView = ({ settings, setSettings }) => {
           <button type="button" className="settings-collapse-btn" onClick={handleOpenProwlarrWebUI}>
             <span>{t.openProwlarrWebUI}</span>
           </button>
-          <button
-            type="button"
-            className="settings-collapse-btn"
-            aria-expanded={prowlarrConfigOpen}
-            aria-controls="prowlarr-config-panel"
-            onClick={() => setProwlarrConfigOpen((current) => !current)}
-          >
-            {prowlarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            <span>{prowlarrConfigOpen ? t.hideConfig : t.showConfig}</span>
-          </button>
         </div>
       </header>
 
-      <div
-        id="prowlarr-config-panel"
-        className={`settings-collapsible ${prowlarrConfigOpen ? 'open' : 'closed'}`}
-        hidden={!prowlarrConfigOpen}
-      >
+      <div id="prowlarr-config-panel" className="settings-collapsible open">
         <div className="prowlarr-layout">
           <div className="prowlarr-panel">
             <div className="prowlarr-panel-header">
@@ -1215,11 +1496,11 @@ const SettingsView = ({ settings, setSettings }) => {
                 />
               </label>
               <div className="action-cluster">
-                <button className="action-btn start" onClick={handleStartProwlarr} disabled={managedStatus === 'starting'}>
+                <button className="action-btn start" onClick={handleEnableProwlarrConnection} disabled={managedStatus === 'starting'}>
                   {managedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
                   {t.start}
                 </button>
-                <button className="action-btn stop" onClick={handleStopProwlarr}>
+                <button className="action-btn stop" onClick={handleDisableProwlarrConnection}>
                   <Square size={16} />
                   {t.stop}
                 </button>
@@ -1235,14 +1516,10 @@ const SettingsView = ({ settings, setSettings }) => {
               <Toggle
                 checked={formData.prowlarr.enabled}
                 onChange={async (checked) => {
-                  updateProwlarr({ enabled: checked });
                   if (checked) {
-                    updateRoot({ torrentioEnabled: false });
-                    if (!formData.prowlarr.managed || managedStatus !== 'running') {
-                      updateProwlarr({ managed: true });
-                      await handleStartProwlarr({ ...formData.prowlarr, enabled: true, managed: true });
-                    }
-                    await refreshIndexers();
+                    await handleEnableProwlarrConnection();
+                  } else {
+                    await handleDisableProwlarrConnection();
                   }
                 }}
               />
@@ -1408,7 +1685,8 @@ const SettingsView = ({ settings, setSettings }) => {
   const renderActiveSection = () => {
     if (activeSection === 'general') return renderGeneralSection();
     if (activeSection === 'tmdb') return renderTmdbSection();
-    if (activeSection === 'download') return renderDownloadSection();
+    if (activeSection === 'downloadEmbedded') return renderEmbeddedTorrentSection();
+    if (activeSection === 'downloadQbittorrent') return renderQbittorrentSection();
     if (activeSection === 'torrentio') return renderTorrentioSection();
     if (activeSection === 'radarr') return renderRadarrSection();
     if (activeSection === 'prowlarr') return renderProwlarrSection();
@@ -1479,6 +1757,74 @@ const SettingsView = ({ settings, setSettings }) => {
   );
 };
 
+const CustomSelect = ({
+  options = [],
+  value,
+  onSelect,
+  withIcons = false,
+  className = '',
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectRef = useRef(null);
+  const selected = options.find((option) => String(option.value) === String(value)) || options[0];
+  const SelectedIcon = selected?.icon;
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (!selectRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
+
+  return (
+    <div ref={selectRef} className={`settings-icon-select ${isOpen ? 'open' : ''} ${className}`.trim()}>
+      <button type="button" className="settings-icon-select-trigger" onClick={() => setIsOpen((current) => !current)} aria-expanded={isOpen}>
+        <span className="settings-icon-select-value">
+          {withIcons && SelectedIcon ? <SelectedIcon size={16} /> : null}
+          <span>{selected?.label || ''}</span>
+        </span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div className="settings-icon-select-menu">
+          {options.map((option) => {
+            const OptionIcon = option.icon;
+            const isActive = String(option.value) === String(selected?.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`settings-icon-select-option ${isActive ? 'active' : ''}`}
+                onClick={() => {
+                  onSelect(option.value);
+                  setIsOpen(false);
+                }}
+              >
+                <span className="settings-icon-select-value">
+                  {withIcons && OptionIcon ? <OptionIcon size={16} /> : null}
+                  <span>{option.label}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Toggle = ({ checked, onChange }) => (
   <label className="toggle">
     <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
@@ -1502,16 +1848,14 @@ const DynamicField = ({ field, onChange }) => {
   }
 
   if (Array.isArray(options) && options.length > 0) {
+    const mappedOptions = options.map((option) => ({
+      value: option.value ?? option.name ?? option,
+      label: option.name ?? option.label ?? option.value ?? option,
+    }));
     return (
       <label className="stacked-field">
         <span>{field.label || field.name}</span>
-        <select className="settings-input" value={value || ''} onChange={(event) => onChange(event.target.value)}>
-          {options.map((option) => (
-            <option key={option.value ?? option.name ?? option} value={option.value ?? option.name ?? option}>
-              {option.name ?? option.label ?? option.value ?? option}
-            </option>
-          ))}
-        </select>
+        <CustomSelect value={value || ''} onSelect={onChange} options={mappedOptions} />
       </label>
     );
   }
@@ -1531,6 +1875,16 @@ const renderManagedStatus = (state, t) => {
   if (state === 'starting') return t.starting;
   if (state === 'stopped') return t.stopped;
   if (state === 'missing') return t.missing;
+  return '';
+};
+
+const renderRadarrManagedStatus = (state, t) => {
+  if (!state) return '';
+  if (state === 'running') return t.radarrRunning;
+  if (state === 'restarted') return t.radarrRestarted;
+  if (state === 'starting') return t.radarrStarting;
+  if (state === 'stopped') return t.radarrStopped;
+  if (state === 'missing') return t.radarrProcessMissing;
   return '';
 };
 
@@ -1566,6 +1920,14 @@ const renderAddStatus = (state, t) => {
   return t[state] || '';
 };
 
+const renderQbRadarrState = (state, t) => {
+  if (!state) return '';
+  if (state === 'saving') return t.qbToRadarrSaving;
+  if (state === 'saved') return t.qbToRadarrSaved;
+  if (state.startsWith('failed:')) return `${t.qbToRadarrFailed} ${state.slice(7)}`.trim();
+  return '';
+};
+
 const getCopy = (language) => ({
   tr: {
     title: 'Ayarlar',
@@ -1583,8 +1945,21 @@ const getCopy = (language) => ({
     generalSettingsHint: 'Uygulamanin temel ayarlarini yapilandirin.',
     language: 'Dil',
     languageHint: 'Arayuz dilini aninda degistir.',
+    defaultPage: 'Varsayilan Sayfa',
+    defaultPageHint: 'Uygulama acildiginda gosterilecek sayfa.',
+    notifications: 'Bildirimler',
+    notificationsHint: 'Uygulama ici bildirimleri etkinlestir.',
+    pageHome: 'Ana Sayfa',
+    pageMovies: 'Filmler',
+    pageTv: 'Diziler',
+    pageAnime: 'Anime',
+    pageLibrary: 'Kutuphanem',
+    pageMyList: 'Listem',
+    pageDownloads: 'Indirilenler',
+    pageSearch: 'Arama',
+    pageSettings: 'Ayarlar',
     tmdb: 'TMDB API Anahtari',
-    tmdbNav: 'TMDB API',
+    tmdbNav: 'API',
     tmdbHint: 'Metadata ve afis aramalari burada calisir.',
     tmdbKeyLabel: 'API anahtari',
     tmdbKeyDesc: 'TMDB uzerinden veri cekmek icin kullanilir.',
@@ -1600,6 +1975,34 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Kullanici Adi',
     qbPassword: 'qBittorrent Sifre',
     qbNote: 'qBittorrent > Tools > Options > Web UI: Web User Interface secenegini ac, adres/port ayarla (or: http://127.0.0.1:8080) ve kullanici adi/sifre bilgilerini buraya gir.',
+    addQbToRadarr: "qBittorrent'i Radarr'a Ekle",
+    qbToRadarrSaving: "Radarr'a ekleniyor...",
+    qbToRadarrSaved: "qBittorrent Radarr'a eklendi.",
+    qbToRadarrFailed: "qBittorrent Radarr'a eklenemedi.",
+    defaultDownloadFolder: 'Varsayilan indirme klasoru',
+    selectFolder: 'Klasor sec',
+    completedToFolderHint: 'Tamamlanan indirmeler bu klasore kaydedilir.',
+    advancedTorrentSettings: 'Gelismis',
+    advancedTorrentSettingsHint: 'Ag ve libtorrent ayarlari.',
+    dhtDesc: 'Tracker disi es kesfi icin DHT kullan.',
+    lsdDesc: 'Yerel agdaki esleri bul.',
+    portMapDesc: 'Otomatik port yonlendirme dene.',
+    announceAllTrackers: 'Tum trackerlara duyur',
+    announceAllTrackersDesc: 'Es kesfini iyilestirmek icin tum tracker katmanlarini kullan.',
+    lowSpeedAlert: 'Dusuk hiz uyarisi',
+    lowSpeedAlertDesc: 'Hiz bu degerin altina duserse ve belirtilen sure boyunca kalirsa uyar.',
+    lowSpeedThreshold: 'Esik (KB/s)',
+    lowSpeedDuration: 'Sure (dakika)',
+    globalConnectionLimit: 'Maksimum baglanti sayisi',
+    globalConnectionLimitDesc: 'Global baglanti limiti.',
+    perTorrentConnectionLimit: 'Torrent basina baglanti',
+    perTorrentConnectionLimitDesc: 'Her torrent icin baglanti limiti.',
+    uploadSlots: 'Yukleme slotu',
+    uploadSlotsDesc: 'Upload slot sayisi.',
+    diskCacheSize: 'Disk cache boyutu',
+    diskCacheSizeDesc: 'Cache ayari.',
+    cacheAuto: 'Otomatik',
+    diskCacheWarning: 'Ozellikle HDD kullaniminda faydali olabilir, yanlis ayarda RAM tuketimi artar.',
     torrentioBaseUrl: 'Torrentio URL',
     torrentioMaxResults: 'Maksimum sonuc',
     torrentioExcludeKeywords: 'Engellenecek kelimeler',
@@ -1643,6 +2046,11 @@ const getCopy = (language) => ({
     selectQualityProfile: 'Kalite profili sec',
     radarrDisabled: 'Radarr devre disi.',
     radarrMissing: 'Radarr Base URL ve API key gerekli.',
+    radarrStarting: 'Radarr baslatiliyor...',
+    radarrRunning: 'Radarr CineSoft kontrolunde calisiyor.',
+    radarrRestarted: 'Sistemde acik Radarr kapatildi ve CineSoft ayarlariyla yeniden baslatildi.',
+    radarrStopped: 'Radarr durduruldu.',
+    radarrProcessMissing: 'Radarr binary bulunamadi.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Motor Kontrolu',
@@ -1706,8 +2114,21 @@ const getCopy = (language) => ({
     generalSettingsHint: 'Configure the app basics.',
     language: 'Language',
     languageHint: 'Switch the interface language instantly.',
+    defaultPage: 'Default Page',
+    defaultPageHint: 'Page shown when the app opens.',
+    notifications: 'Notifications',
+    notificationsHint: 'Enable in-app notifications.',
+    pageHome: 'Home',
+    pageMovies: 'Movies',
+    pageTv: 'TV Shows',
+    pageAnime: 'Anime',
+    pageLibrary: 'Library',
+    pageMyList: 'My List',
+    pageDownloads: 'Downloads',
+    pageSearch: 'Search',
+    pageSettings: 'Settings',
     tmdb: 'TMDB API Key',
-    tmdbNav: 'TMDB API',
+    tmdbNav: 'API',
     tmdbHint: 'Metadata and artwork lookups run here.',
     tmdbKeyLabel: 'API key',
     tmdbKeyDesc: 'Used for fetching TMDB data.',
@@ -1723,6 +2144,34 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Username',
     qbPassword: 'qBittorrent Password',
     qbNote: 'In qBittorrent go to Tools > Options > Web UI, enable Web User Interface, set host/port (for example http://127.0.0.1:8080), then enter the same username and password here.',
+    addQbToRadarr: 'Add qBittorrent to Radarr',
+    qbToRadarrSaving: 'Adding to Radarr...',
+    qbToRadarrSaved: 'qBittorrent added to Radarr.',
+    qbToRadarrFailed: 'Could not add qBittorrent to Radarr.',
+    defaultDownloadFolder: 'Default download folder',
+    selectFolder: 'Select folder',
+    completedToFolderHint: 'Completed downloads are saved to this folder.',
+    advancedTorrentSettings: 'Advanced',
+    advancedTorrentSettingsHint: 'Network and libtorrent settings.',
+    dhtDesc: 'Use DHT for peer discovery without trackers.',
+    lsdDesc: 'Find peers on the local network.',
+    portMapDesc: 'Try automatic router port mapping.',
+    announceAllTrackers: 'Announce to all trackers',
+    announceAllTrackersDesc: 'Use every tracker tier to improve peer discovery.',
+    lowSpeedAlert: 'Low speed alert',
+    lowSpeedAlertDesc: 'Warn when speed stays below this threshold for the selected duration.',
+    lowSpeedThreshold: 'Threshold (KB/s)',
+    lowSpeedDuration: 'Duration (minutes)',
+    globalConnectionLimit: 'Maximum connections',
+    globalConnectionLimitDesc: 'Global connection limit.',
+    perTorrentConnectionLimit: 'Connections per torrent',
+    perTorrentConnectionLimitDesc: 'Per-torrent connection limit.',
+    uploadSlots: 'Upload slots',
+    uploadSlotsDesc: 'Upload slot count.',
+    diskCacheSize: 'Disk cache size',
+    diskCacheSizeDesc: 'Cache option.',
+    cacheAuto: 'Automatic',
+    diskCacheWarning: 'Useful on HDD setups, but wrong values can increase RAM usage.',
     torrentioBaseUrl: 'Torrentio URL',
     torrentioMaxResults: 'Maximum results',
     torrentioExcludeKeywords: 'Blocked keywords',
@@ -1766,6 +2215,11 @@ const getCopy = (language) => ({
     selectQualityProfile: 'Select quality profile',
     radarrDisabled: 'Radarr is disabled.',
     radarrMissing: 'Radarr Base URL and API key are required.',
+    radarrStarting: 'Starting Radarr...',
+    radarrRunning: 'Radarr is running under CineSoft control.',
+    radarrRestarted: 'A running Radarr instance was stopped and restarted with CineSoft settings.',
+    radarrStopped: 'Radarr stopped.',
+    radarrProcessMissing: 'Radarr binary was not found.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Engine Control',

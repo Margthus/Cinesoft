@@ -12,6 +12,7 @@
 .settings-topbar,
 .settings-panel-title,
 .settings-panel-header,
+.prowlarr-panel-header,
 .input-action-row,
 .inline-fields,
 .action-cluster,
@@ -308,6 +309,10 @@
   max-width: 340px;
 }
 
+.settings-row-control--wide {
+  min-width: min(760px, 100%);
+}
+
 .segmented-control {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -411,6 +416,89 @@ select.settings-input option {
 select.settings-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+}
+
+.settings-icon-select-wrap {
+  width: 100%;
+}
+
+.settings-icon-select {
+  position: relative;
+  width: 100%;
+}
+
+.settings-icon-select-trigger {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  color: var(--text);
+  min-height: 54px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.settings-icon-select-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.settings-icon-select-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  z-index: 12;
+  border-radius: 14px;
+  border: 1px solid var(--border-medium);
+  background: color-mix(in srgb, var(--panel) 92%, var(--background) 8%);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
+  padding: 0.35rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-icon-select-option {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.settings-icon-select-option.active {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.26);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.settings-icon-select-trigger:hover,
+.settings-icon-select.open .settings-icon-select-trigger {
+  border-color: rgba(var(--accent-rgb), 0.34);
+  background: color-mix(in srgb, var(--surface-2) 82%, rgba(var(--accent-rgb), 0.16) 18%);
+}
+
+.settings-icon-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+}
+
+.settings-icon-select-option:hover {
+  border-color: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.09);
+  color: color-mix(in srgb, var(--accent) 78%, var(--text) 22%);
 }
 
 .radarr-warning-box {

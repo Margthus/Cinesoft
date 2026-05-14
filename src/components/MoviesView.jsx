@@ -6,6 +6,8 @@ import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
+const MOVIES_SCROLL_KEY = 'cinesoft_scroll_movies';
+
 const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [movies, setMovies] = useState(movieState.movies);
@@ -29,16 +31,18 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
 
   // Restore scroll
   useEffect(() => {
-    if (movies.length > 0 && movieState.scrollY > 0) {
+    const storedScroll = Number(sessionStorage.getItem(MOVIES_SCROLL_KEY) || 0);
+    const targetScroll = Math.max(Number(movieState.scrollY || 0), storedScroll);
+    if (movies.length > 0 && targetScroll > 0) {
       const timer = setTimeout(() => {
         const container = document.querySelector('.main-content');
         if (container) {
-          container.scrollTo({ top: movieState.scrollY, behavior: 'instant' });
+          container.scrollTo({ top: targetScroll, behavior: 'auto' });
         }
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [movies.length]);
+  }, [movies.length, movieState.scrollY]);
 
   // Save state on change
   useEffect(() => {
@@ -50,7 +54,9 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
     const container = document.querySelector('.main-content');
     const handleScroll = () => {
       if (container) {
-        setMovieState(prev => ({ ...prev, scrollY: container.scrollTop }));
+        const top = container.scrollTop;
+        setMovieState(prev => ({ ...prev, scrollY: top }));
+        sessionStorage.setItem(MOVIES_SCROLL_KEY, String(top));
       }
     };
     
@@ -113,6 +119,12 @@ const MoviesView = ({ settings, myList, onToggleMyList, movieState, setMovieStat
   }, [loading, hasMore]);
 
   const handleInspect = (movie) => {
+    const container = document.querySelector('.main-content');
+    if (container) {
+      const top = container.scrollTop;
+      setMovieState((prev) => ({ ...prev, scrollY: top }));
+      sessionStorage.setItem(MOVIES_SCROLL_KEY, String(top));
+    }
     if (movie.externalCatalog) {
       navigate(`/detail/movie/${encodeURIComponent(movie.id)}`, {
         state: { fallbackItem: movie },

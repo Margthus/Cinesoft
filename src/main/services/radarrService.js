@@ -104,6 +104,22 @@ const getMovies = async (settings = {}) => {
   return Array.isArray(rows) ? rows : [];
 };
 
+const getDownloadClients = async (settings = {}) => {
+  const rows = await radarrRequest(settings, '/api/v3/downloadclient');
+  return Array.isArray(rows) ? rows : [];
+};
+
+const getDownloadClientSchemas = async (settings = {}) => {
+  const rows = await radarrRequest(settings, '/api/v3/downloadclient/schema');
+  return Array.isArray(rows) ? rows : [];
+};
+
+const getMovieById = async (settings = {}, movieId) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  return await radarrRequest(settings, `/api/v3/movie/${id}`);
+};
+
 const lookupMovieByTmdbId = async (settings = {}, tmdbId) => {
   const id = Number(tmdbId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('TMDB ID is required to add this movie to Radarr.');
@@ -149,6 +165,105 @@ const deleteMovie = async (settings = {}, movieId, options = {}) => {
   return { ok: true };
 };
 
+const updateMovie = async (settings = {}, movieId, patch = {}) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+
+  const current = await getMovieById(settings, id);
+  const payload = {
+    ...current,
+    ...patch,
+    id,
+  };
+
+  const response = await radarrRequest(settings, `/api/v3/movie/${id}`, {
+    method: 'PUT',
+    data: payload,
+  });
+  return { ok: true, movie: response };
+};
+
+const normalizeQbBaseUrlParts = (baseUrl = '') => {
+  const raw = String(baseUrl || '').trim();
+  const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  const parsed = new URL(normalized);
+  const useSsl = parsed.protocol === 'https:';
+  const host = parsed.hostname;
+  const port = Number(parsed.port || (useSsl ? 443 : 80));
+  const urlBase = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+  return { host, port, useSsl, urlBase };
+};
+
+const setFieldValue = (fields = [], names = [], value) => {
+  const lowerNames = names.map((item) => String(item).toLowerCase());
+  const field = fields.find((item) => lowerNames.includes(String(item?.name || '').toLowerCase()));
+  if (!field) return false;
+  field.value = value;
+  return true;
+};
+
+const upsertQbittorrentDownloadClient = async (settings = {}, qbConfig = {}) => {
+  const username = String(qbConfig.username || '').trim();
+  const password = String(qbConfig.password || '').trim();
+  const { host, port, useSsl, urlBase } = normalizeQbBaseUrlParts(String(qbConfig.baseUrl || ''));
+  if (!host) throw new Error('qBittorrent host is required.');
+  if (!username || !password) throw new Error('qBittorrent username/password are required.');
+
+  const [clients, schemas] = await Promise.all([
+    getDownloadClients(settings),
+    getDownloadClientSchemas(settings),
+  ]);
+
+  const existing = clients.find((client) => {
+    const impl = String(client?.implementationName || client?.implementation || '').toLowerCase();
+    return impl.includes('qbittorrent');
+  });
+
+  if (existing) {
+    const payload = {
+      ...existing,
+      enable: true,
+      fields: Array.isArray(existing.fields) ? [...existing.fields] : [],
+    };
+    setFieldValue(payload.fields, ['host'], host);
+    setFieldValue(payload.fields, ['port'], port);
+    setFieldValue(payload.fields, ['usessl', 'ssl'], useSsl);
+    setFieldValue(payload.fields, ['urlbase', 'basepath'], urlBase);
+    setFieldValue(payload.fields, ['username', 'user'], username);
+    setFieldValue(payload.fields, ['password', 'pass'], password);
+    const updated = await radarrRequest(settings, '/api/v3/downloadclient', {
+      method: 'PUT',
+      data: payload,
+    });
+    return { ok: true, client: updated, updated: true };
+  }
+
+  const schema = schemas.find((item) => {
+    const impl = String(item?.implementationName || item?.implementation || '').toLowerCase();
+    return impl.includes('qbittorrent');
+  });
+  if (!schema) {
+    throw new Error('Radarr qBittorrent schema not found.');
+  }
+
+  const payload = JSON.parse(JSON.stringify(schema));
+  delete payload.id;
+  payload.enable = true;
+  payload.name = payload.name || 'qBittorrent';
+  payload.fields = Array.isArray(payload.fields) ? payload.fields : [];
+  setFieldValue(payload.fields, ['host'], host);
+  setFieldValue(payload.fields, ['port'], port);
+  setFieldValue(payload.fields, ['usessl', 'ssl'], useSsl);
+  setFieldValue(payload.fields, ['urlbase', 'basepath'], urlBase);
+  setFieldValue(payload.fields, ['username', 'user'], username);
+  setFieldValue(payload.fields, ['password', 'pass'], password);
+  const created = await radarrRequest(settings, '/api/v3/downloadclient', {
+    method: 'POST',
+    data: payload,
+  });
+  return { ok: true, client: created, updated: false };
+};
+
 module.exports = {
   normalizeBaseUrl,
   radarrRequest,
@@ -157,8 +272,13 @@ module.exports = {
   getRootFolders,
   getQualityProfiles,
   getMovies,
+  getDownloadClients,
+  getDownloadClientSchemas,
+  getMovieById,
   lookupMovieByTmdbId,
   lookupMovie,
   addMovie,
   deleteMovie,
+  updateMovie,
+  upsertQbittorrentDownloadClient,
 };

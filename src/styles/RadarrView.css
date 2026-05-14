@@ -111,11 +111,14 @@
 }
 
 .radarr-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
   padding: 0 0.8rem 0.8rem;
 }
 
+.radarr-edit-btn,
 .radarr-remove-btn {
-  width: 100%;
   border: 1px solid rgba(255, 84, 84, 0.35);
   background: rgba(255, 84, 84, 0.08);
   color: #ffb8b8;
@@ -123,6 +126,26 @@
   padding: 0.58rem 0.72rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.radarr-edit-btn {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
+}
+
+.radarr-modal-card {
+  width: min(520px, 96vw);
+}
+
+.radarr-modal-body label select {
+  width: 100%;
+  margin-top: 0.35rem;
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.62rem 0.7rem;
 }
 
 .radarr-remove-btn:disabled {

@@ -6,6 +6,8 @@ import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
+const TV_SCROLL_KEY = 'cinesoft_scroll_tv';
+
 const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [shows, setShows] = useState(tvState.shows);
@@ -29,16 +31,18 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
 
   // Restore scroll
   useEffect(() => {
-    if (shows.length > 0 && tvState.scrollY > 0) {
+    const storedScroll = Number(sessionStorage.getItem(TV_SCROLL_KEY) || 0);
+    const targetScroll = Math.max(Number(tvState.scrollY || 0), storedScroll);
+    if (shows.length > 0 && targetScroll > 0) {
       const timer = setTimeout(() => {
         const container = document.querySelector('.main-content');
         if (container) {
-          container.scrollTo({ top: tvState.scrollY, behavior: 'instant' });
+          container.scrollTo({ top: targetScroll, behavior: 'auto' });
         }
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [shows.length]);
+  }, [shows.length, tvState.scrollY]);
 
   // Save state on change
   useEffect(() => {
@@ -50,7 +54,9 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
     const container = document.querySelector('.main-content');
     const handleScroll = () => {
       if (container) {
-        setTvState(prev => ({ ...prev, scrollY: container.scrollTop }));
+        const top = container.scrollTop;
+        setTvState(prev => ({ ...prev, scrollY: top }));
+        sessionStorage.setItem(TV_SCROLL_KEY, String(top));
       }
     };
     
@@ -113,6 +119,12 @@ const TVShowsView = ({ settings, myList, onToggleMyList, tvState, setTvState, wa
   }, [loading, hasMore]);
 
   const handleInspect = (show) => {
+    const container = document.querySelector('.main-content');
+    if (container) {
+      const top = container.scrollTop;
+      setTvState((prev) => ({ ...prev, scrollY: top }));
+      sessionStorage.setItem(TV_SCROLL_KEY, String(top));
+    }
     if (show.externalCatalog) {
       navigate(`/detail/tv/${encodeURIComponent(show.id)}`, {
         state: { fallbackItem: show },

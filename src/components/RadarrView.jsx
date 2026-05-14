@@ -5,6 +5,20 @@ const RadarrView = ({ settings }) => {
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState('loading');
   const [removingId, setRemovingId] = useState(null);
+  const [editingMovie, setEditingMovie] = useState(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [rootFolders, setRootFolders] = useState([]);
+  const [qualityProfiles, setQualityProfiles] = useState([]);
+  const [editRootFolder, setEditRootFolder] = useState('');
+  const [editQualityProfileId, setEditQualityProfileId] = useState('');
+  const [editMonitored, setEditMonitored] = useState(true);
+
+  const getRadarrConnectionSettings = () => ({
+    radarrEnabled: settings.radarrEnabled === true,
+    radarrBaseUrl: settings.radarrBaseUrl,
+    radarrApiKey: settings.radarrApiKey,
+    radarrTimeout: settings.radarrTimeout || 10000,
+  });
 
   const loadMovies = async () => {
     if (!settings?.radarrEnabled || !settings?.radarrBaseUrl || !settings?.radarrApiKey) {
@@ -14,12 +28,7 @@ const RadarrView = ({ settings }) => {
     }
     setStatus('loading');
     try {
-      const result = await window.electronAPI?.radarrGetMovies?.({
-        radarrEnabled: settings.radarrEnabled === true,
-        radarrBaseUrl: settings.radarrBaseUrl,
-        radarrApiKey: settings.radarrApiKey,
-        radarrTimeout: settings.radarrTimeout || 10000,
-      });
+      const result = await window.electronAPI?.radarrGetMovies?.(getRadarrConnectionSettings());
       if (!result?.ok) {
         setStatus('error');
         setItems([]);
@@ -42,7 +51,7 @@ const RadarrView = ({ settings }) => {
     if (!id) return;
     const title = movie?.title || 'movie';
     const confirmText = settings?.language === 'tr'
-      ? `"${title}" Radarr listesinden kaldırılsın mı?`
+      ? `"${title}" Radarr listesinden kaldirilsin mi?`
       : `Remove "${title}" from Radarr?`;
     if (!window.confirm(confirmText)) return;
 
@@ -50,11 +59,7 @@ const RadarrView = ({ settings }) => {
     try {
       const result = await window.electronAPI?.radarrDeleteMovie?.({
         movieId: id,
-        settings: {
-          radarrBaseUrl: settings.radarrBaseUrl,
-          radarrApiKey: settings.radarrApiKey,
-          radarrTimeout: settings.radarrTimeout || 10000,
-        },
+        settings: getRadarrConnectionSettings(),
         options: {
           deleteFiles: false,
           addImportExclusion: true,
@@ -66,31 +71,121 @@ const RadarrView = ({ settings }) => {
         alert(result?.error || 'Could not remove movie from Radarr.');
       }
     } catch {
-      alert(settings?.language === 'tr' ? 'Film Radarr dan kaldırılamadı.' : 'Could not remove movie from Radarr.');
+      alert(settings?.language === 'tr' ? 'Film Radarrdan kaldirilamadi.' : 'Could not remove movie from Radarr.');
     } finally {
       setRemovingId(null);
+    }
+  };
+
+  const openEditModal = async (movie) => {
+    setEditingMovie(movie || null);
+    setEditLoading(true);
+    setEditRootFolder(String(movie?.rootFolderPath || ''));
+    setEditQualityProfileId(String(movie?.qualityProfileId ?? ''));
+    setEditMonitored(movie?.monitored === true);
+    try {
+      const [rootRes, qualityRes] = await Promise.all([
+        window.electronAPI?.radarrGetRootFolders?.(getRadarrConnectionSettings()),
+        window.electronAPI?.radarrGetQualityProfiles?.(getRadarrConnectionSettings()),
+      ]);
+      const roots = Array.isArray(rootRes?.items) ? rootRes.items : [];
+      const profiles = Array.isArray(qualityRes?.items) ? qualityRes.items : [];
+      setRootFolders(roots);
+      setQualityProfiles(profiles);
+      if (!String(movie?.rootFolderPath || '') && roots[0]?.path) {
+        setEditRootFolder(roots[0].path);
+      }
+      if ((movie?.qualityProfileId == null || movie?.qualityProfileId === '') && profiles[0]?.id != null) {
+        setEditQualityProfileId(String(profiles[0].id));
+      }
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const closeEditModal = () => {
+    setEditingMovie(null);
+    setRootFolders([]);
+    setQualityProfiles([]);
+    setEditRootFolder('');
+    setEditQualityProfileId('');
+    setEditMonitored(true);
+    setEditLoading(false);
+  };
+
+  const handleSaveEdit = async () => {
+    const movieId = Number(editingMovie?.id || 0);
+    if (!movieId || !editRootFolder || !editQualityProfileId) return;
+    setEditLoading(true);
+    try {
+      const result = await window.electronAPI?.radarrUpdateMovie?.({
+        movieId,
+        settings: getRadarrConnectionSettings(),
+        movie: {
+          rootFolderPath: String(editRootFolder || ''),
+          qualityProfileId: Number(editQualityProfileId),
+          monitored: editMonitored === true,
+        },
+      });
+      if (!result?.ok) {
+        alert(result?.error || 'Could not update movie in Radarr.');
+        return;
+      }
+      setItems((prev) => prev.map((entry) => (
+        Number(entry?.id) === movieId
+          ? {
+              ...entry,
+              rootFolderPath: String(editRootFolder || entry?.rootFolderPath || ''),
+              qualityProfileId: Number(editQualityProfileId),
+              monitored: editMonitored === true,
+            }
+          : entry
+      )));
+      closeEditModal();
+    } catch {
+      alert(settings?.language === 'tr' ? 'Film ayarlari guncellenemedi.' : 'Could not update movie settings.');
+    } finally {
+      setEditLoading(false);
     }
   };
 
   const t = settings?.language === 'tr'
     ? {
         title: 'Radarr',
-        subtitle: "Radarr'a eklenen filmler",
+        subtitle: "Radarra eklenen filmler",
         refresh: 'Yenile',
-        remove: 'Kaldır',
-        removing: 'Kaldırılıyor...',
-        disabled: 'Radarr etkin değil veya bağlantı ayarları eksik.',
-        error: 'Radarr film listesi alınamadı.',
-        empty: 'Radarr içinde henüz film yok.',
+        remove: 'Kaldir',
+        edit: 'Duzenle',
+        removing: 'Kaldiriliyor...',
+        save: 'Kaydet',
+        cancel: 'Iptal',
+        rootFolder: 'Root Folder',
+        qualityProfile: 'Kalite Profili',
+        monitoredEdit: 'Takipte',
+        loading: 'Yukleniyor...',
+        selectRoot: 'Root folder sec',
+        selectQuality: 'Kalite profili sec',
+        disabled: 'Radarr etkin degil veya baglanti ayarlari eksik.',
+        error: 'Radarr film listesi alinamadi.',
+        empty: 'Radarr icinde henuz film yok.',
         monitored: 'Takipte',
-        unmonitored: 'Takipte değil',
+        unmonitored: 'Takipte degil',
       }
     : {
         title: 'Radarr',
         subtitle: 'Movies added to Radarr',
         refresh: 'Refresh',
         remove: 'Remove',
+        edit: 'Edit',
         removing: 'Removing...',
+        save: 'Save',
+        cancel: 'Cancel',
+        rootFolder: 'Root Folder',
+        qualityProfile: 'Quality Profile',
+        monitoredEdit: 'Monitored',
+        loading: 'Loading...',
+        selectRoot: 'Select root folder',
+        selectQuality: 'Select quality profile',
         disabled: 'Radarr is disabled or connection settings are missing.',
         error: 'Could not load Radarr movies.',
         empty: 'No movies found in Radarr.',
@@ -134,6 +229,14 @@ const RadarrView = ({ settings }) => {
                 <div className="radarr-card-actions">
                   <button
                     type="button"
+                    className="radarr-edit-btn"
+                    disabled={removingId === movieId}
+                    onClick={() => openEditModal(movie)}
+                  >
+                    {t.edit}
+                  </button>
+                  <button
+                    type="button"
                     className="radarr-remove-btn"
                     disabled={removingId === movieId}
                     onClick={() => handleRemove(movie)}
@@ -145,6 +248,48 @@ const RadarrView = ({ settings }) => {
             );
           })}
         </section>
+      )}
+
+      {editingMovie && (
+        <div className="lightbox" onClick={closeEditModal}>
+          <div className="radarr-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="radarr-modal-header">
+              <h3>{t.edit}</h3>
+            </div>
+            {editLoading ? (
+              <p>{t.loading}</p>
+            ) : (
+              <div className="radarr-modal-body">
+                <label>
+                  <span>{t.rootFolder}</span>
+                  <select value={editRootFolder} onChange={(event) => setEditRootFolder(event.target.value)}>
+                    <option value="">{t.selectRoot}</option>
+                    {rootFolders.map((folder) => (
+                      <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t.qualityProfile}</span>
+                  <select value={String(editQualityProfileId)} onChange={(event) => setEditQualityProfileId(event.target.value)}>
+                    <option value="">{t.selectQuality}</option>
+                    {qualityProfiles.map((profile) => (
+                      <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="radarr-check">
+                  <input type="checkbox" checked={editMonitored} onChange={(event) => setEditMonitored(event.target.checked)} />
+                  <span>{t.monitoredEdit}</span>
+                </label>
+                <div className="radarr-modal-actions">
+                  <button className="btn btn-secondary" onClick={closeEditModal}>{t.cancel}</button>
+                  <button className="btn btn-primary" onClick={handleSaveEdit} disabled={editLoading}>{t.save}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

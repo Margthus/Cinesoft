@@ -6,6 +6,8 @@ import PosterStatusMenu, { PosterStatusBadge } from './PosterStatusMenu';
 import { buildWatchStatusKey } from '../utils/watchStatus';
 import '../styles/ListView.css';
 
+const ANIME_SCROLL_KEY = 'cinesoft_scroll_anime';
+
 const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState, watchStatusMap, onSetWatchStatus }) => {
   const navigate = useNavigate();
   const [anime, setAnime] = useState(animeState.anime);
@@ -17,16 +19,18 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
   const [statusMenu, setStatusMenu] = useState({ open: false, x: 0, y: 0, item: null, status: '' });
 
   useEffect(() => {
-    if (anime.length > 0 && animeState.scrollY > 0) {
+    const storedScroll = Number(sessionStorage.getItem(ANIME_SCROLL_KEY) || 0);
+    const targetScroll = Math.max(Number(animeState.scrollY || 0), storedScroll);
+    if (anime.length > 0 && targetScroll > 0) {
       const timer = setTimeout(() => {
         const container = document.querySelector('.main-content');
         if (container) {
-          container.scrollTo({ top: animeState.scrollY, behavior: 'instant' });
+          container.scrollTo({ top: targetScroll, behavior: 'auto' });
         }
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [anime.length]);
+  }, [anime.length, animeState.scrollY]);
 
   useEffect(() => {
     setAnimeState((prev) => ({ ...prev, anime, page, category, hasMore }));
@@ -36,7 +40,9 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
     const container = document.querySelector('.main-content');
     const handleScroll = () => {
       if (container) {
-        setAnimeState((prev) => ({ ...prev, scrollY: container.scrollTop }));
+        const top = container.scrollTop;
+        setAnimeState((prev) => ({ ...prev, scrollY: top }));
+        sessionStorage.setItem(ANIME_SCROLL_KEY, String(top));
       }
     };
 
@@ -136,6 +142,16 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
     closeStatusMenu();
   };
 
+  const handleInspect = (item) => {
+    const container = document.querySelector('.main-content');
+    if (container) {
+      const top = container.scrollTop;
+      setAnimeState((prev) => ({ ...prev, scrollY: top }));
+      sessionStorage.setItem(ANIME_SCROLL_KEY, String(top));
+    }
+    navigate(`/detail/anime/${encodeURIComponent(item.id)}`, { state: { fallbackItem: item } });
+  };
+
   return (
     <div className="list-view">
       <div className="list-header">
@@ -180,7 +196,7 @@ const AnimeView = ({ settings, myList, onToggleMyList, animeState, setAnimeState
             <div
               key={`${item.id}-${index}`}
               className="movie-item"
-              onClick={() => navigate(`/detail/anime/${encodeURIComponent(item.id)}`, { state: { fallbackItem: item } })}
+              onClick={() => handleInspect(item)}
               ref={isLast ? lastAnimeRef : null}
             >
               <div className="movie-card">

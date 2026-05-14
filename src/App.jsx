@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library } from 'lucide-react';
 import HomeView from './components/HomeView';
 import MoviesView from './components/MoviesView';
@@ -18,13 +18,28 @@ import { WATCH_STATUS_STORAGE_KEY, buildWatchStatusKey } from './utils/watchStat
 import './styles/App.css';
 
 const WELCOME_OVERLAY_SEEN_KEY = 'cinesoftWelcomeSeenV1';
+const DEFAULT_PAGE_ROUTE_MAP = {
+  home: '/',
+  movies: '/movies',
+  tv: '/tv',
+  anime: '/anime',
+  library: '/library',
+  mylist: '/mylist',
+  downloads: '/downloads',
+  search: '/search',
+  radarr: '/radarr',
+  settings: '/settings',
+};
 
 const App = () => {
   const [settings, setSettings] = useState({
     apiKey: '',
     language: 'tr',
+    defaultPage: 'home',
+    notificationsEnabled: true,
     prowlarr: DEFAULT_PROWLARR_CONFIG,
-    useQbittorrent: false,
+    embeddedTorrentEnabled: true,
+    qbittorrentEnabled: true,
     qbittorrent: {
       baseUrl: 'http://127.0.0.1:8080',
       username: 'admin',
@@ -59,9 +74,12 @@ const App = () => {
           setSettings({
             apiKey: savedSettings.apiKey || '',
             language: savedSettings.language || 'tr',
+            defaultPage: savedSettings.defaultPage || 'home',
+            notificationsEnabled: savedSettings.notificationsEnabled !== false,
             prowlarr: savedSettings.prowlarr || DEFAULT_PROWLARR_CONFIG,
             torrentioEnabled: savedSettings.torrentioEnabled || false,
-            useQbittorrent: savedSettings.useQbittorrent || false,
+            embeddedTorrentEnabled: savedSettings.embeddedTorrentEnabled !== false,
+            qbittorrentEnabled: savedSettings.qbittorrentEnabled !== false,
             qbittorrent: savedSettings.qbittorrent || {
               baseUrl: 'http://127.0.0.1:8080',
               username: 'admin',
@@ -147,6 +165,7 @@ const App = () => {
   };
 
   if (loading) return <div className="loading">Loading...</div>;
+  const defaultRoute = DEFAULT_PAGE_ROUTE_MAP[settings.defaultPage] || '/';
 
   return (
     <Router>
@@ -154,7 +173,12 @@ const App = () => {
         <Sidebar settings={settings} />
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+            <Route
+              path="/"
+              element={defaultRoute === '/'
+                ? <HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />
+                : <Navigate to={defaultRoute} replace />}
+            />
             <Route path="/movies" element={<MoviesView settings={settings} myList={myList} onToggleMyList={toggleMyList} movieState={movieState} setMovieState={setMovieState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />

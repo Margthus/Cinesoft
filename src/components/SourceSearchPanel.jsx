@@ -88,6 +88,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
   const [filePickerFiles, setFilePickerFiles] = useState([]);
   const [selectedFileIndexes, setSelectedFileIndexes] = useState([]);
   const [sequentialDownload, setSequentialDownload] = useState(false);
+  const [autoStartDownload, setAutoStartDownload] = useState(true);
   const autoSearchDoneRef = useRef('');
 
   const prowlarrConfig = settings.prowlarr || DEFAULT_PROWLARR_CONFIG;
@@ -162,7 +163,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
           if (!mappedId && !tmdbMatchAttempted) {
             setTmdbMatchAttempted(true);
             const title = item.original_name || item.original_title || item.title || item.name;
-            const searchResults = await searchContent(settings.apiKey, 'en', title);
+            const searchResults = await searchContent(settings.apiKey, 'en', title, 1);
             const tvMatch = searchResults?.find(r => r.media_type === 'tv' || !r.media_type); // sometimes multi search misses media_type
 
             if (tvMatch) {
@@ -495,24 +496,6 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       const torrentUrl = source.torrentUrl || null;
       const displayTitle = source.title || item.title || item.name || 'Unknown';
 
-      if (settings.useQbittorrent) {
-        const result = await window.electronAPI?.qbittorrentAdd?.({
-          magnetOrHash,
-          torrentUrl,
-          mode: 'download',
-          title: displayTitle,
-        }, settings.qbittorrent || {});
-        if (!result || typeof result !== 'object' || !result?.ok) {
-          const rawMessage = result && typeof result === 'object'
-            ? (result.error || JSON.stringify(result))
-            : String(result || '');
-          alert(settings.language === 'en'
-            ? 'Failed to add torrent: ' + (rawMessage || 'Unknown error')
-            : 'Torrent eklenemedi: ' + (rawMessage || 'Bilinmeyen hata'));
-        }
-        return;
-      }
-
       setFilePickerLoading(true);
       const prepared = await window.electronAPI.torrentPrepare({
         magnetOrHash,
@@ -587,6 +570,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
     setFilePickerFiles([]);
     setSelectedFileIndexes([]);
     setSequentialDownload(false);
+    setAutoStartDownload(true);
   };
 
   const cancelPickerAndRemoveTorrent = async () => {
@@ -605,7 +589,21 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
     if (!filePickerTorrentId || !selectedFileIndexes.length) return;
     setFilePickerLoading(true);
     try {
-      const result = await window.electronAPI.torrentSelectFiles(filePickerTorrentId, selectedFileIndexes, true, sequentialDownload);
+      const selectedSizeBytes = filePickerFiles
+        .filter((file) => selectedFileIndexes.includes(file.index))
+        .reduce((total, file) => total + Math.max(0, Number(file.size) || 0), 0);
+      if (selectedSizeBytes > 0) {
+        const disk = await window.electronAPI?.getDownloadDirFreeSpace?.();
+        const freeBytes = Number(disk?.freeBytes || 0);
+        if (!disk?.ok || freeBytes < selectedSizeBytes) {
+          alert(settings.language === 'en'
+            ? 'Not enough disk space for this download.'
+            : 'Bu indirme için yeterli disk alanı yok.');
+          return;
+        }
+      }
+
+      const result = await window.electronAPI.torrentSelectFiles(filePickerTorrentId, selectedFileIndexes, autoStartDownload, sequentialDownload);
       if (!result?.ok) {
         throw new Error(result?.error || 'Select files failed');
       }
@@ -1078,6 +1076,17 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
               <span>
                 <strong>{settings.language === 'en' ? 'Download sequentially' : 'Sirayla indir'}</strong>
                 <small>{settings.language === 'en' ? 'Downloads selected files in playback order.' : 'Secilen dosyalari izleme sirasina gore indirir.'}</small>
+              </span>
+            </label>
+            <label className="torrent-file-picker-option">
+              <input
+                type="checkbox"
+                checked={autoStartDownload}
+                onChange={(event) => setAutoStartDownload(event.target.checked)}
+              />
+              <span>
+                <strong>{settings.language === 'en' ? 'Auto start after adding' : 'Torrent eklendiginde otomatik baslat'}</strong>
+                <small>{settings.language === 'en' ? 'Starts downloading immediately after confirmation.' : 'Onaydan sonra indirmeyi otomatik baslatir.'}</small>
               </span>
             </label>
             <div className="torrent-file-picker-list">

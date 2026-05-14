@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Download, Pause, Play, Trash2, FolderOpen, Loader2, CheckCircle2,
-  ArrowDown, ArrowUp, Users, Clock, HardDrive, Settings2, X, Save, ListChecks, ChevronUp, ChevronDown
+  Download, Pause, Play, Trash2, Loader2, CheckCircle2,
+  ArrowDown, ArrowUp, Users, Clock, Settings2, X, Save, ListChecks, ChevronUp, ChevronDown
 } from 'lucide-react';
 import '../styles/Downloads.css';
 
@@ -14,6 +14,9 @@ const DEFAULT_TORRENT_SETTINGS = {
   upnpEnabled: true,
   natPmpEnabled: true,
   announceToAllTrackers: true,
+  lowSpeedAlertEnabled: false,
+  lowSpeedThresholdKbps: 100,
+  lowSpeedDurationMinutes: 10,
 };
 
 const formatSize = (bytes) => {
@@ -66,7 +69,6 @@ const DownloadsView = ({ settings }) => {
   const isTr = settings.language === 'tr';
   const [torrents, setTorrents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [downloadDir, setDownloadDir] = useState('');
   const [speedLimitInput, setSpeedLimitInput] = useState('1024');
   const [speedLimitEnabled, setSpeedLimitEnabled] = useState(false);
   const [speedSaving, setSpeedSaving] = useState(false);
@@ -101,12 +103,10 @@ const DownloadsView = ({ settings }) => {
 
   useEffect(() => {
     const loadInitialData = async () => {
-      const [dir, speed, savedSettings] = await Promise.all([
-        window.electronAPI?.getDownloadDir?.(),
+      const [speed, savedSettings] = await Promise.all([
         window.electronAPI?.torrentGetSpeedLimit?.(),
         window.electronAPI?.torrentGetSettings?.(),
       ]);
-      if (dir) setDownloadDir(dir);
       if (speed?.ok) {
         const limit = Math.max(0, Number(speed.downloadRateLimitKbps) || 0);
         setSpeedLimitEnabled(limit > 0);
@@ -137,11 +137,6 @@ const DownloadsView = ({ settings }) => {
   const handleReorder = async (id, direction) => {
     await window.electronAPI?.torrentReorder?.(id, direction);
     fetchTorrents();
-  };
-
-  const handleChangeDir = async () => {
-    const dir = await window.electronAPI?.selectDownloadDir?.();
-    if (dir) setDownloadDir(dir);
   };
 
   const applySpeedLimit = async (nextValue, enabled) => {
@@ -249,15 +244,6 @@ const DownloadsView = ({ settings }) => {
     <div className="downloads-view">
       <div className="downloads-header">
         <h1>{t.title}</h1>
-        <div className="downloads-dir-info">
-          <HardDrive size={16} />
-          <span className="dir-label">{t.downloadDir}:</span>
-          <span className="dir-path">{downloadDir}</span>
-          <button className="dir-change-btn" onClick={handleChangeDir}>
-            <FolderOpen size={14} />
-            {t.changeDir}
-          </button>
-        </div>
       </div>
 
       {torrents.length === 0 ? (
@@ -344,6 +330,41 @@ const DownloadsView = ({ settings }) => {
                 </div>
               </label>
 
+              <label className="settings-number-row">
+                <div>
+                  <strong>{t.lowSpeedAlert}</strong>
+                  <span>{t.lowSpeedAlertDesc}</span>
+                </div>
+                <div className="inline-speed-setting">
+                  <button
+                    className={`speed-switch ${torrentSettings.lowSpeedAlertEnabled ? 'enabled' : ''}`}
+                    onClick={() => updateTorrentSetting({ lowSpeedAlertEnabled: !torrentSettings.lowSpeedAlertEnabled })}
+                    type="button"
+                    aria-label={torrentSettings.lowSpeedAlertEnabled ? t.disable : t.enable}
+                  >
+                    <span />
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100000"
+                    value={torrentSettings.lowSpeedThresholdKbps ?? 100}
+                    onChange={(event) => updateTorrentSetting({ lowSpeedThresholdKbps: Math.max(1, Number(event.target.value) || 100) })}
+                    disabled={!torrentSettings.lowSpeedAlertEnabled}
+                  />
+                  <span className="inline-speed-unit">{t.speedUnit}</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={torrentSettings.lowSpeedDurationMinutes ?? 10}
+                    onChange={(event) => updateTorrentSetting({ lowSpeedDurationMinutes: Math.max(1, Number(event.target.value) || 10) })}
+                    disabled={!torrentSettings.lowSpeedAlertEnabled}
+                  />
+                  <span className="inline-speed-unit">{t.minutes}</span>
+                </div>
+              </label>
+
               <SettingsRow title={t.seedAfterDownload} description={t.seedAfterDownloadDesc}>
                 <Toggle checked={torrentSettings.seedAfterDownload} onChange={(checked) => updateTorrentSetting({ seedAfterDownload: checked })} />
               </SettingsRow>
@@ -362,22 +383,6 @@ const DownloadsView = ({ settings }) => {
                 />
               </label>
 
-              <div className="modal-section-title">{t.network}</div>
-              <SettingsRow title="DHT" description={t.dhtDesc}>
-                <Toggle checked={torrentSettings.dhtEnabled} onChange={(checked) => updateTorrentSetting({ dhtEnabled: checked })} />
-              </SettingsRow>
-              <SettingsRow title="LSD" description={t.lsdDesc}>
-                <Toggle checked={torrentSettings.lsdEnabled} onChange={(checked) => updateTorrentSetting({ lsdEnabled: checked })} />
-              </SettingsRow>
-              <SettingsRow title="UPnP / NAT-PMP" description={t.portMapDesc}>
-                <Toggle
-                  checked={torrentSettings.upnpEnabled && torrentSettings.natPmpEnabled}
-                  onChange={(checked) => updateTorrentSetting({ upnpEnabled: checked, natPmpEnabled: checked })}
-                />
-              </SettingsRow>
-              <SettingsRow title={t.announceAllTrackers} description={t.announceAllTrackersDesc}>
-                <Toggle checked={torrentSettings.announceToAllTrackers} onChange={(checked) => updateTorrentSetting({ announceToAllTrackers: checked })} />
-              </SettingsRow>
               <div className="modal-section-title">{t.automation}</div>
               <SettingsRow title={t.shutdownOnComplete} description={t.shutdownOnCompleteDesc}>
                 <Toggle checked={torrentSettings.shutdownOnComplete} onChange={(checked) => updateTorrentSetting({ shutdownOnComplete: checked })} />
@@ -584,14 +589,15 @@ const getCopy = (isTr) => isTr ? {
   fileReady: 'Hazir',
   pause: 'Duraklat',
   resume: 'Devam Et',
-  downloadDir: 'Indirme Dizini',
-  changeDir: 'Degistir',
   speedLimit: 'Hiz Limiti',
   speedUnit: 'KB/s',
   speedLimitSection: 'Hiz',
   speedLimitDesc: 'Indirme hizini sinirlamak icin acip degeri belirle.',
+  lowSpeedAlert: 'Dusuk hiz uyarisi',
+  lowSpeedAlertDesc: 'Hiz bu degerin altina duserse ve belirtilen sure boyunca kalirsa uyar.',
   enable: 'Ac',
   disable: 'Kapat',
+  minutes: 'dakika',
   torrentSettings: 'Torrent Ayarlari',
   torrentSettingsHint: 'Kuyruk, seed ve baglanti ayarlarini yonet.',
   seedAfterDownload: 'Indirme bitince seed et',
@@ -626,16 +632,17 @@ const getCopy = (isTr) => isTr ? {
   fileReady: 'Ready',
   pause: 'Pause',
   resume: 'Resume',
-  downloadDir: 'Download Directory',
-  changeDir: 'Change',
   speedLimit: 'Speed Limit',
   speedUnit: 'KB/s',
   speedLimitSection: 'Speed',
   speedLimitDesc: 'Enable and set a download bandwidth cap.',
+  lowSpeedAlert: 'Low speed alert',
+  lowSpeedAlertDesc: 'Warn when speed stays below this threshold for the selected duration.',
   enable: 'Enable',
   disable: 'Disable',
+  minutes: 'minutes',
   torrentSettings: 'Torrent Settings',
-  torrentSettingsHint: 'Manage queueing, seeding, and network behavior.',
+  torrentSettingsHint: 'Manage queueing and seeding behavior.',
   seedAfterDownload: 'Seed after download completes',
   seedAfterDownloadDesc: 'When disabled, completed torrents are paused automatically.',
   shutdownOnComplete: 'Shut down computer when all torrents complete',

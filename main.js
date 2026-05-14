@@ -619,6 +619,7 @@ const cacheTorrentLibraryMetadata = (torrent) => {
 
 const notifyTorrentCompleted = (torrent) => {
   try {
+    if (store.get('notificationsEnabled') === false) return;
     if (!Notification.isSupported()) return;
     const language = store.get('language') || 'tr';
     const title = language === 'en' ? 'Download Completed' : 'Indirme Tamamlandi';
@@ -1058,6 +1059,18 @@ const getStoredAuthSession = () => store.get('authSession') || { authenticated: 
 // Initialize defaults
 if (!store.has('language')) {
   store.set('language', 'tr');
+}
+if (!store.has('defaultPage')) {
+  store.set('defaultPage', 'home');
+}
+if (!store.has('notificationsEnabled')) {
+  store.set('notificationsEnabled', true);
+}
+if (!store.has('embeddedTorrentEnabled')) {
+  store.set('embeddedTorrentEnabled', true);
+}
+if (!store.has('qbittorrentEnabled')) {
+  store.set('qbittorrentEnabled', true);
 }
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
@@ -1513,9 +1526,12 @@ ipcMain.handle('get-settings', () => {
   return {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
+    defaultPage: store.get('defaultPage') || 'home',
+    notificationsEnabled: store.get('notificationsEnabled') !== false,
     prowlarr: store.get('prowlarr'),
     torrentioEnabled: store.get('torrentioEnabled') || false,
-    useQbittorrent: store.get('useQbittorrent') || false,
+    embeddedTorrentEnabled: store.get('embeddedTorrentEnabled') !== false,
+    qbittorrentEnabled: store.get('qbittorrentEnabled') !== false,
     qbittorrent: store.get('qbittorrent') || {
       baseUrl: 'http://127.0.0.1:8080',
       username: 'admin',
@@ -1631,9 +1647,12 @@ ipcMain.handle('reset-password', (event, payload) => {
 ipcMain.handle('save-settings', (event, settings) => {
   store.set('apiKey', settings.apiKey);
   store.set('language', settings.language);
+  store.set('defaultPage', String(settings.defaultPage || 'home'));
+  store.set('notificationsEnabled', settings.notificationsEnabled !== false);
   store.set('prowlarr', settings.prowlarr || {});
   store.set('torrentioEnabled', settings.torrentioEnabled || false);
-  store.set('useQbittorrent', settings.useQbittorrent || false);
+  store.set('embeddedTorrentEnabled', settings.embeddedTorrentEnabled !== false);
+  store.set('qbittorrentEnabled', settings.qbittorrentEnabled !== false);
   store.set('qbittorrent', settings.qbittorrent || {
     baseUrl: 'http://127.0.0.1:8080',
     username: 'admin',
@@ -2024,6 +2043,25 @@ ipcMain.handle('radarr:deleteMovie', async (event, payload = {}) => {
   }
 });
 
+ipcMain.handle('radarr:updateMovie', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    return await radarrService.updateMovie(settings, payload?.movieId, payload?.movie || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:upsertQbittorrentClient', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const qbittorrent = payload?.qbittorrent || {};
+    return await radarrService.upsertQbittorrentDownloadClient(settings, qbittorrent);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('open-radarr-download-page', async () => {
   try {
     await shell.openExternal('https://github.com/Radarr/Radarr');
@@ -2330,6 +2368,17 @@ ipcMain.handle('select-download-dir', async () => {
 
 ipcMain.handle('get-download-dir', async () => {
   return getDownloadDir();
+});
+
+ipcMain.handle('get-download-dir-free-space', async () => {
+  try {
+    const dir = getDownloadDir();
+    const stat = fs.statfsSync(dir);
+    const freeBytes = Number(stat?.bavail || 0) * Number(stat?.bsize || 0);
+    return { ok: true, freeBytes: Number.isFinite(freeBytes) ? freeBytes : 0, dir };
+  } catch (err) {
+    return { ok: false, error: err.message, freeBytes: 0 };
+  }
 });
 
 ipcMain.handle('open-torrent-video', async (event, payload = {}) => {

@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   radarrLookupMovieByTmdbId: (payload) => ipcRenderer.invoke('radarr:lookupMovieByTmdbId', payload),
   radarrAddMovie: (payload) => ipcRenderer.invoke('radarr:addMovie', payload),
   radarrDeleteMovie: (payload) => ipcRenderer.invoke('radarr:deleteMovie', payload),
+  radarrUpdateMovie: (payload) => ipcRenderer.invoke('radarr:updateMovie', payload),
+  radarrUpsertQbittorrentClient: (payload) => ipcRenderer.invoke('radarr:upsertQbittorrentClient', payload),
   openRadarrDownloadPage: () => ipcRenderer.invoke('open-radarr-download-page'),
   openRadarrWebUI: (settings) => ipcRenderer.invoke('open-radarr-web-ui', settings),
 
@@ -68,5 +70,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   qbittorrentAdd: (opts, qbConfig) => ipcRenderer.invoke('qbittorrent-add', opts, qbConfig),
   selectDownloadDir: () => ipcRenderer.invoke('select-download-dir'),
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
+  getDownloadDirFreeSpace: () => ipcRenderer.invoke('get-download-dir-free-space'),
   isDev: process.env.NODE_ENV === 'development',
 });

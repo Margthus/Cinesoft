@@ -73,28 +73,35 @@ const fetchTmdbData = async (apiKey, endpoint, params = {}, fallback = null) => 
   }
 };
 
+const filterAdultResults = (items = []) => {
+  return (Array.isArray(items) ? items : []).filter((item) => item?.adult !== true);
+};
+
 export const fetchTrending = async (apiKey, language, type = 'all', page = 1) => {
   const data = await fetchTmdbData(apiKey, `/trending/${type}/day`, {
     page,
     language: languageCode(language),
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchMovies = async (apiKey, language, category = 'popular', page = 1) => {
   const data = await fetchTmdbData(apiKey, `/movie/${category}`, {
     page,
     language: languageCode(language),
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchTVShows = async (apiKey, language, category = 'popular', page = 1) => {
   const data = await fetchTmdbData(apiKey, `/tv/${category}`, {
     page,
     language: languageCode(language),
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchDetails = async (apiKey, language, type, id) => {
@@ -111,8 +118,9 @@ export const searchContent = async (apiKey, language, query, page = 1) => {
     page,
     language: languageCode(language),
     query,
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchPersonCredits = async (apiKey, language, personId, page = 1) => {
@@ -138,8 +146,9 @@ export const fetchByGenre = async (apiKey, language, type, genreId, page = 1) =>
     with_genres: genreId,
     sort_by: 'popularity.desc',
     page,
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchByKeyword = async (apiKey, language, type, keywordId, page = 1) => {
@@ -149,8 +158,9 @@ export const fetchByKeyword = async (apiKey, language, type, keywordId, page = 1
     with_keywords: keywordId,
     sort_by: 'popularity.desc',
     page,
+    include_adult: 'false',
   }, { results: [] });
-  return data.results || [];
+  return filterAdultResults(data.results || []);
 };
 
 export const fetchSeasonDetails = async (apiKey, language, tvShowId, seasonNumber) => {
