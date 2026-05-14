@@ -313,6 +313,11 @@
   min-width: min(760px, 100%);
 }
 
+.settings-row-control--compact {
+  min-width: min(280px, 100%);
+  max-width: 300px;
+}
+
 .segmented-control {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -937,6 +942,10 @@ select.settings-input:focus {
   }
 
   .settings-row-control--segmented {
+    max-width: none;
+  }
+
+  .settings-row-control--compact {
     max-width: none;
   }
 

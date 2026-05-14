@@ -1712,11 +1712,44 @@ ipcMain.handle('app-log', (event, payload = {}) => {
   return true;
 });
 
+const qbittorrentLogin = async (qbConfig = {}) => {
+  const baseUrl = String(qbConfig.baseUrl || 'http://127.0.0.1:8080').replace(/\/+$/, '');
+  const username = String(qbConfig.username || 'admin');
+  const password = String(qbConfig.password || 'adminadmin');
+
+  const commonHeaders = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Referer: `${baseUrl}/`,
+    Origin: baseUrl,
+  };
+
+  const loginResponse = await fetch(`${baseUrl}/api/v2/auth/login`, {
+    method: 'POST',
+    headers: commonHeaders,
+    body: new URLSearchParams({ username, password }).toString(),
+  });
+
+  const loginText = await loginResponse.text();
+  if (!loginResponse.ok || !String(loginText).toLowerCase().includes('ok')) {
+    return {
+      ok: false,
+      error: `qBittorrent login failed (${loginResponse.status}): ${loginText || 'Unknown error'}`,
+      baseUrl,
+      headers: commonHeaders,
+    };
+  }
+
+  const cookieHeader = loginResponse.headers.get('set-cookie') || '';
+  const sidMatch = cookieHeader.match(/SID=([^;]+)/i);
+  const sidCookie = sidMatch ? `SID=${sidMatch[1]}` : '';
+  const authHeaders = { ...commonHeaders };
+  if (sidCookie) authHeaders.Cookie = sidCookie;
+
+  return { ok: true, baseUrl, headers: authHeaders };
+};
+
 ipcMain.handle('qbittorrent-add', async (event, opts = {}, qbConfig = {}) => {
   try {
-    const baseUrl = String(qbConfig.baseUrl || 'http://127.0.0.1:8080').replace(/\/+$/, '');
-    const username = String(qbConfig.username || 'admin');
-    const password = String(qbConfig.password || 'adminadmin');
     const magnetOrHash = opts?.magnetOrHash || '';
     const torrentUrl = opts?.torrentUrl || '';
     const contentUrl = magnetOrHash || torrentUrl;
@@ -1726,35 +1759,15 @@ ipcMain.handle('qbittorrent-add', async (event, opts = {}, qbConfig = {}) => {
       return { ok: false, error: 'No torrent source provided' };
     }
 
-    const commonHeaders = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Referer: `${baseUrl}/`,
-      Origin: baseUrl,
-    };
-
-    const loginResponse = await fetch(`${baseUrl}/api/v2/auth/login`, {
-      method: 'POST',
-      headers: commonHeaders,
-      body: new URLSearchParams({ username, password }).toString(),
-    });
-
-    const loginText = await loginResponse.text();
-    if (!loginResponse.ok || !String(loginText).toLowerCase().includes('ok')) {
-      logEvent('qbittorrent', 'auth', 'qBittorrent login failed', { status: loginResponse.status });
-      return { ok: false, error: `qBittorrent login failed (${loginResponse.status}): ${loginText || 'Unknown error'}` };
+    const auth = await qbittorrentLogin(qbConfig || {});
+    if (!auth.ok) {
+      logEvent('qbittorrent', 'auth', 'qBittorrent login failed', {});
+      return { ok: false, error: auth.error };
     }
 
-    const cookieHeader = loginResponse.headers.get('set-cookie') || '';
-    const sidMatch = cookieHeader.match(/SID=([^;]+)/i);
-    const sidCookie = sidMatch ? `SID=${sidMatch[1]}` : '';
-    const addHeaders = { ...commonHeaders };
-    if (sidCookie) {
-      addHeaders.Cookie = sidCookie;
-    }
-
-    const addResponse = await fetch(`${baseUrl}/api/v2/torrents/add`, {
+    const addResponse = await fetch(`${auth.baseUrl}/api/v2/torrents/add`, {
       method: 'POST',
-      headers: addHeaders,
+      headers: auth.headers,
       body: new URLSearchParams({
         urls: contentUrl,
         savepath: getDownloadDir(),
@@ -1776,6 +1789,42 @@ ipcMain.handle('qbittorrent-add', async (event, opts = {}, qbConfig = {}) => {
   } catch (err) {
     logEvent('qbittorrent', classifyError(err.message), 'qBittorrent add exception', { error: err.message });
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('qbittorrent-get-torrents', async (event, qbConfig = {}) => {
+  try {
+    const auth = await qbittorrentLogin(qbConfig || {});
+    if (!auth.ok) {
+      return { ok: false, error: auth.error, items: [] };
+    }
+    const response = await fetch(`${auth.baseUrl}/api/v2/torrents/info`, {
+      method: 'GET',
+      headers: auth.headers,
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        ok: false,
+        error: `qBittorrent list failed (${response.status}): ${body || 'Unknown error'}`,
+        items: [],
+      };
+    }
+    const rows = await response.json();
+    const items = Array.isArray(rows)
+      ? rows.map((entry) => ({
+          hash: String(entry?.hash || ''),
+          name: String(entry?.name || ''),
+          progress: Math.max(0, Math.min(100, Number(entry?.progress || 0) * 100)),
+          state: String(entry?.state || ''),
+          downloadSpeed: Number(entry?.dlspeed || 0),
+          amountLeft: Number(entry?.amount_left || 0),
+          size: Number(entry?.size || 0),
+        }))
+      : [];
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
   }
 });
 
@@ -2059,6 +2108,16 @@ ipcMain.handle('radarr:upsertQbittorrentClient', async (event, payload = {}) => 
     return await radarrService.upsertQbittorrentDownloadClient(settings, qbittorrent);
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:checkQbittorrentClient', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const qbittorrent = payload?.qbittorrent || {};
+    return await radarrService.checkQbittorrentDownloadClient(settings, qbittorrent);
+  } catch (err) {
+    return { ok: false, error: err.message, exists: false, matches: false };
   }
 });
 

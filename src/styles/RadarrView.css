@@ -86,6 +86,37 @@
   padding: 0.75rem 0.8rem;
 }
 
+.radarr-progress-wrap {
+  padding: 0.45rem 0.8rem 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.radarr-progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.radarr-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.75), rgba(var(--accent-rgb), 1));
+  transition: width 0.3s ease;
+}
+
+.radarr-progress-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  min-width: 2.2rem;
+  text-align: right;
+  font-weight: 700;
+}
+
 .radarr-meta strong {
   font-size: 0.92rem;
   line-height: 1.3;

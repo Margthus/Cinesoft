@@ -876,94 +876,72 @@ const SettingsView = ({ settings, setSettings }) => {
               </div>
               <Toggle checked={embeddedTorrentSettings.announceToAllTrackers !== false} onChange={(checked) => updateEmbeddedTorrentSetting({ announceToAllTrackers: checked })} />
             </div>
-            <div className="settings-row-card settings-row-card--stacked-mobile">
-              <div className="settings-row-copy">
-                <strong>{t.lowSpeedAlert}</strong>
-                <span>{t.lowSpeedAlertDesc}</span>
-              </div>
-              <div className="panel-grid">
-                <label className="stacked-field compact">
-                  <span>{t.lowSpeedThreshold}</span>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    min="1"
-                    max="100000"
-                    value={embeddedTorrentSettings.lowSpeedThresholdKbps ?? 100}
-                    onChange={(event) => updateEmbeddedTorrentSetting({ lowSpeedThresholdKbps: Math.max(1, Number(event.target.value) || 100) })}
-                  />
-                </label>
-                <label className="stacked-field compact">
-                  <span>{t.lowSpeedDuration}</span>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    min="1"
-                    max="1440"
-                    value={embeddedTorrentSettings.lowSpeedDurationMinutes ?? 10}
-                    onChange={(event) => updateEmbeddedTorrentSetting({ lowSpeedDurationMinutes: Math.max(1, Number(event.target.value) || 10) })}
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="settings-row-card settings-row-card--stacked-mobile">
+            <div className="settings-row-card">
               <div className="settings-row-copy">
                 <strong>{t.globalConnectionLimit}</strong>
                 <span>{t.globalConnectionLimitDesc}</span>
               </div>
-              <input
-                className="settings-input"
-                type="number"
-                min="1"
-                max="5000"
-                value={embeddedTorrentSettings.globalConnectionLimit ?? 500}
-                onChange={(event) => updateEmbeddedTorrentSetting({ globalConnectionLimit: Math.max(1, Number(event.target.value) || 500) })}
-              />
+              <div className="settings-row-control settings-row-control--compact">
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="1"
+                  max="5000"
+                  value={embeddedTorrentSettings.globalConnectionLimit ?? 500}
+                  onChange={(event) => updateEmbeddedTorrentSetting({ globalConnectionLimit: Math.max(1, Number(event.target.value) || 500) })}
+                />
+              </div>
             </div>
-            <div className="settings-row-card settings-row-card--stacked-mobile">
+            <div className="settings-row-card">
               <div className="settings-row-copy">
                 <strong>{t.perTorrentConnectionLimit}</strong>
                 <span>{t.perTorrentConnectionLimitDesc}</span>
               </div>
-              <input
-                className="settings-input"
-                type="number"
-                min="1"
-                max="1000"
-                value={embeddedTorrentSettings.perTorrentConnectionLimit ?? 100}
-                onChange={(event) => updateEmbeddedTorrentSetting({ perTorrentConnectionLimit: Math.max(1, Number(event.target.value) || 100) })}
-              />
+              <div className="settings-row-control settings-row-control--compact">
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={embeddedTorrentSettings.perTorrentConnectionLimit ?? 100}
+                  onChange={(event) => updateEmbeddedTorrentSetting({ perTorrentConnectionLimit: Math.max(1, Number(event.target.value) || 100) })}
+                />
+              </div>
             </div>
-            <div className="settings-row-card settings-row-card--stacked-mobile">
+            <div className="settings-row-card">
               <div className="settings-row-copy">
                 <strong>{t.uploadSlots}</strong>
                 <span>{t.uploadSlotsDesc}</span>
               </div>
-              <input
-                className="settings-input"
-                type="number"
-                min="1"
-                max="128"
-                value={embeddedTorrentSettings.uploadSlots ?? 8}
-                onChange={(event) => updateEmbeddedTorrentSetting({ uploadSlots: Math.max(1, Number(event.target.value) || 8) })}
-              />
+              <div className="settings-row-control settings-row-control--compact">
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="1"
+                  max="128"
+                  value={embeddedTorrentSettings.uploadSlots ?? 8}
+                  onChange={(event) => updateEmbeddedTorrentSetting({ uploadSlots: Math.max(1, Number(event.target.value) || 8) })}
+                />
+              </div>
             </div>
-            <div className="settings-row-card settings-row-card--stacked-mobile">
+            <div className="settings-row-card">
               <div className="settings-row-copy">
                 <strong>{t.diskCacheSize}</strong>
                 <span>{t.diskCacheSizeDesc}</span>
               </div>
-              <CustomSelect
-                value={embeddedTorrentSettings.diskCacheSize || 'auto'}
-                onSelect={(value) => updateEmbeddedTorrentSetting({ diskCacheSize: value })}
-                options={[
-                  { value: 'auto', label: t.cacheAuto },
-                  { value: '64', label: '64 MB' },
-                  { value: '128', label: '128 MB' },
-                  { value: '256', label: '256 MB' },
-                  { value: '512', label: '512 MB' },
-                ]}
-              />
+              <div className="settings-row-control settings-row-control--compact">
+                <CustomSelect
+                  value={embeddedTorrentSettings.diskCacheSize || 'auto'}
+                  onSelect={(value) => updateEmbeddedTorrentSetting({ diskCacheSize: value })}
+                  options={[
+                    { value: 'auto', label: t.cacheAuto },
+                    { value: '64', label: '64 MB' },
+                    { value: '128', label: '128 MB' },
+                    { value: '256', label: '256 MB' },
+                    { value: '512', label: '512 MB' },
+                  ]}
+                />
+              </div>
             </div>
             <p className="settings-helper">{t.diskCacheWarning}</p>
           </div>
@@ -1046,6 +1024,42 @@ const SettingsView = ({ settings, setSettings }) => {
         <div className="draft-actions">
           <button
             type="button"
+            className="action-btn subtle"
+            onClick={async () => {
+              setQbRadarrState('checking');
+              const payload = {
+                settings: {
+                  radarrBaseUrl: formData.radarrBaseUrl,
+                  radarrApiKey: formData.radarrApiKey,
+                  radarrTimeout: formData.radarrTimeout || 10000,
+                },
+                qbittorrent: {
+                  baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                  username: formData.qbittorrent?.username || '',
+                  password: formData.qbittorrent?.password || '',
+                },
+              };
+              const result = await window.electronAPI?.radarrCheckQbittorrentClient?.(payload);
+              if (!result?.ok) {
+                setQbRadarrState(`failed:${result?.error || ''}`);
+                return;
+              }
+              if (!result?.exists) {
+                setQbRadarrState('check-missing');
+                return;
+              }
+              if (result?.matches) {
+                setQbRadarrState('check-exists');
+                return;
+              }
+              setQbRadarrState('check-different');
+            }}
+          >
+            <Shield size={16} />
+            {t.checkQbInRadarr}
+          </button>
+          <button
+            type="button"
             className="action-btn primary"
             onClick={async () => {
               if (formData.qbittorrentEnabled === false) {
@@ -1067,7 +1081,7 @@ const SettingsView = ({ settings, setSettings }) => {
               };
               const result = await window.electronAPI?.radarrUpsertQbittorrentClient?.(payload);
               if (result?.ok) {
-                setQbRadarrState('saved');
+                setQbRadarrState(result?.updated ? 'exists' : 'saved');
                 return;
               }
               setQbRadarrState(`failed:${result?.error || ''}`);
@@ -1922,8 +1936,13 @@ const renderAddStatus = (state, t) => {
 
 const renderQbRadarrState = (state, t) => {
   if (!state) return '';
+  if (state === 'checking') return t.qbToRadarrChecking;
+  if (state === 'check-exists') return t.qbToRadarrCheckExists;
+  if (state === 'check-missing') return t.qbToRadarrCheckMissing;
+  if (state === 'check-different') return t.qbToRadarrCheckDifferent;
   if (state === 'saving') return t.qbToRadarrSaving;
   if (state === 'saved') return t.qbToRadarrSaved;
+  if (state === 'exists') return t.qbToRadarrExists;
   if (state.startsWith('failed:')) return `${t.qbToRadarrFailed} ${state.slice(7)}`.trim();
   return '';
 };
@@ -1975,9 +1994,15 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Kullanici Adi',
     qbPassword: 'qBittorrent Sifre',
     qbNote: 'qBittorrent > Tools > Options > Web UI: Web User Interface secenegini ac, adres/port ayarla (or: http://127.0.0.1:8080) ve kullanici adi/sifre bilgilerini buraya gir.',
+    checkQbInRadarr: "Radarr'da Kontrol Et",
     addQbToRadarr: "qBittorrent'i Radarr'a Ekle",
+    qbToRadarrChecking: "Radarr'da qBittorrent kontrol ediliyor...",
+    qbToRadarrCheckExists: "qBittorrent Radarr'a zaten ekli ve ayarlar uyumlu.",
+    qbToRadarrCheckMissing: "qBittorrent Radarr'a henuz eklenmemis.",
+    qbToRadarrCheckDifferent: "qBittorrent Radarr'da var ama ayarlari farkli.",
     qbToRadarrSaving: "Radarr'a ekleniyor...",
     qbToRadarrSaved: "qBittorrent Radarr'a eklendi.",
+    qbToRadarrExists: "qBittorrent Radarr'da zaten vardi, ayarlar guncellendi.",
     qbToRadarrFailed: "qBittorrent Radarr'a eklenemedi.",
     defaultDownloadFolder: 'Varsayilan indirme klasoru',
     selectFolder: 'Klasor sec',
@@ -2144,9 +2169,15 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Username',
     qbPassword: 'qBittorrent Password',
     qbNote: 'In qBittorrent go to Tools > Options > Web UI, enable Web User Interface, set host/port (for example http://127.0.0.1:8080), then enter the same username and password here.',
+    checkQbInRadarr: 'Check in Radarr',
     addQbToRadarr: 'Add qBittorrent to Radarr',
+    qbToRadarrChecking: 'Checking qBittorrent in Radarr...',
+    qbToRadarrCheckExists: 'qBittorrent is already added to Radarr and matches these settings.',
+    qbToRadarrCheckMissing: 'qBittorrent is not added to Radarr yet.',
+    qbToRadarrCheckDifferent: 'qBittorrent exists in Radarr but settings are different.',
     qbToRadarrSaving: 'Adding to Radarr...',
     qbToRadarrSaved: 'qBittorrent added to Radarr.',
+    qbToRadarrExists: 'qBittorrent already existed in Radarr, settings were updated.',
     qbToRadarrFailed: 'Could not add qBittorrent to Radarr.',
     defaultDownloadFolder: 'Default download folder',
     selectFolder: 'Select folder',

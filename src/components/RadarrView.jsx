@@ -1,6 +1,40 @@
 import React, { useEffect, useState } from 'react';
 import '../styles/RadarrView.css';
 
+const normalizeMediaText = (value = '') => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const findBestQbTorrentForMovie = (movie, torrents = []) => {
+  const title = normalizeMediaText(movie?.title || movie?.sortTitle || '');
+  if (!title) return null;
+  const year = String(movie?.year || '').trim();
+  const titleTokens = title.split(' ').filter((token) => token.length >= 3);
+
+  let best = null;
+  let bestScore = 0;
+  for (const torrent of torrents) {
+    const name = normalizeMediaText(torrent?.name || '');
+    if (!name) continue;
+    let score = 0;
+    if (name.includes(title)) score += 5;
+    for (const token of titleTokens) {
+      if (name.includes(token)) score += 1;
+    }
+    if (year && name.includes(year)) score += 2;
+    if (String(torrent?.state || '').toLowerCase().includes('dl')) score += 1;
+    if (score > bestScore) {
+      best = torrent;
+      bestScore = score;
+    }
+  }
+
+  if (!best || bestScore < 4) return null;
+  return best;
+};
+
 const RadarrView = ({ settings }) => {
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState('loading');
@@ -12,6 +46,7 @@ const RadarrView = ({ settings }) => {
   const [editRootFolder, setEditRootFolder] = useState('');
   const [editQualityProfileId, setEditQualityProfileId] = useState('');
   const [editMonitored, setEditMonitored] = useState(true);
+  const [qbProgressByMovie, setQbProgressByMovie] = useState({});
 
   const getRadarrConnectionSettings = () => ({
     radarrEnabled: settings.radarrEnabled === true,
@@ -20,13 +55,13 @@ const RadarrView = ({ settings }) => {
     radarrTimeout: settings.radarrTimeout || 10000,
   });
 
-  const loadMovies = async () => {
+  const loadMovies = async ({ silent = false } = {}) => {
     if (!settings?.radarrEnabled || !settings?.radarrBaseUrl || !settings?.radarrApiKey) {
       setStatus('disabled');
       setItems([]);
       return;
     }
-    setStatus('loading');
+    if (!silent) setStatus('loading');
     try {
       const result = await window.electronAPI?.radarrGetMovies?.(getRadarrConnectionSettings());
       if (!result?.ok) {
@@ -34,8 +69,10 @@ const RadarrView = ({ settings }) => {
         setItems([]);
         return;
       }
-      setItems(Array.isArray(result.items) ? result.items : []);
+      const nextItems = Array.isArray(result.items) ? result.items : [];
+      setItems(nextItems);
       setStatus('ready');
+      refreshQbProgress(nextItems).catch(() => {});
     } catch {
       setStatus('error');
       setItems([]);
@@ -44,6 +81,53 @@ const RadarrView = ({ settings }) => {
 
   useEffect(() => {
     loadMovies();
+  }, [settings?.radarrEnabled, settings?.radarrBaseUrl, settings?.radarrApiKey]);
+
+  const refreshQbProgress = async (moviesArg) => {
+    const movies = Array.isArray(moviesArg) ? moviesArg : items;
+    if (!movies.length || settings?.qbittorrentEnabled === false) {
+      setQbProgressByMovie({});
+      return;
+    }
+    const qbConfig = settings?.qbittorrent || {
+      baseUrl: 'http://127.0.0.1:8080',
+      username: 'admin',
+      password: 'adminadmin',
+    };
+    const result = await window.electronAPI?.qbittorrentGetTorrents?.(qbConfig);
+    if (!result?.ok || !Array.isArray(result.items)) {
+      setQbProgressByMovie({});
+      return;
+    }
+
+    const map = {};
+    for (const movie of movies) {
+      const match = findBestQbTorrentForMovie(movie, result.items);
+      if (!match) continue;
+      const movieId = Number(movie?.id || 0);
+      if (!movieId) continue;
+      map[movieId] = {
+        progress: Math.max(0, Math.min(100, Number(match.progress || 0))),
+      };
+    }
+    setQbProgressByMovie(map);
+  };
+
+  useEffect(() => {
+    if (status !== 'ready' || !items.length) return undefined;
+    const timer = setInterval(() => {
+      refreshQbProgress(items).catch(() => {});
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [status, items, settings?.qbittorrentEnabled, settings?.qbittorrent?.baseUrl, settings?.qbittorrent?.username, settings?.qbittorrent?.password]);
+
+  useEffect(() => {
+    if (!settings?.radarrEnabled || !settings?.radarrBaseUrl || !settings?.radarrApiKey) return undefined;
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      loadMovies({ silent: true }).catch(() => {});
+    }, 7000);
+    return () => clearInterval(timer);
   }, [settings?.radarrEnabled, settings?.radarrBaseUrl, settings?.radarrApiKey]);
 
   const handleRemove = async (movie) => {
@@ -162,6 +246,7 @@ const RadarrView = ({ settings }) => {
         rootFolder: 'Root Folder',
         qualityProfile: 'Kalite Profili',
         monitoredEdit: 'Takipte',
+        downloadProgress: 'Indirme',
         loading: 'Yukleniyor...',
         selectRoot: 'Root folder sec',
         selectQuality: 'Kalite profili sec',
@@ -183,6 +268,7 @@ const RadarrView = ({ settings }) => {
         rootFolder: 'Root Folder',
         qualityProfile: 'Quality Profile',
         monitoredEdit: 'Monitored',
+        downloadProgress: 'Download',
         loading: 'Loading...',
         selectRoot: 'Select root folder',
         selectQuality: 'Select quality profile',
@@ -217,11 +303,21 @@ const RadarrView = ({ settings }) => {
             const poster = movie?.images?.find?.((img) => img.coverType === 'poster')?.remoteUrl || '';
             const monitored = movie?.monitored === true;
             const movieId = Number(movie?.id || 0);
+            const qbProgress = qbProgressByMovie[movieId];
+            const hasQbProgress = qbProgress && Number.isFinite(Number(qbProgress.progress));
             return (
               <article key={movieId || `${title}-${year}`} className="radarr-card">
                 <div className="radarr-poster-wrap">
                   {poster ? <img src={poster} alt={title} className="radarr-poster" /> : <div className="radarr-poster-fallback">{title.slice(0, 1)}</div>}
                 </div>
+                {hasQbProgress && (
+                  <div className="radarr-progress-wrap" aria-label={`${t.downloadProgress} ${Math.round(qbProgress.progress)}%`}>
+                    <div className="radarr-progress-track">
+                      <div className="radarr-progress-fill" style={{ width: `${qbProgress.progress}%` }} />
+                    </div>
+                    <span className="radarr-progress-text">{Math.round(qbProgress.progress)}%</span>
+                  </div>
+                )}
                 <div className="radarr-meta">
                   <strong>{title} {year}</strong>
                   <span className={monitored ? 'ok' : 'off'}>{monitored ? t.monitored : t.unmonitored}</span>

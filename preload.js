@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   radarrDeleteMovie: (payload) => ipcRenderer.invoke('radarr:deleteMovie', payload),
   radarrUpdateMovie: (payload) => ipcRenderer.invoke('radarr:updateMovie', payload),
   radarrUpsertQbittorrentClient: (payload) => ipcRenderer.invoke('radarr:upsertQbittorrentClient', payload),
+  radarrCheckQbittorrentClient: (payload) => ipcRenderer.invoke('radarr:checkQbittorrentClient', payload),
   openRadarrDownloadPage: () => ipcRenderer.invoke('open-radarr-download-page'),
   openRadarrWebUI: (settings) => ipcRenderer.invoke('open-radarr-web-ui', settings),
 
@@ -68,6 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLogs: () => ipcRenderer.invoke('logs-get'),
   clearLogs: () => ipcRenderer.invoke('logs-clear'),
   qbittorrentAdd: (opts, qbConfig) => ipcRenderer.invoke('qbittorrent-add', opts, qbConfig),
+  qbittorrentGetTorrents: (qbConfig) => ipcRenderer.invoke('qbittorrent-get-torrents', qbConfig),
   selectDownloadDir: () => ipcRenderer.invoke('select-download-dir'),
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
   getDownloadDirFreeSpace: () => ipcRenderer.invoke('get-download-dir-free-space'),

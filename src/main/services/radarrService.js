@@ -202,6 +202,12 @@ const setFieldValue = (fields = [], names = [], value) => {
   return true;
 };
 
+const getFieldValue = (fields = [], names = []) => {
+  const lowerNames = names.map((item) => String(item).toLowerCase());
+  const field = (Array.isArray(fields) ? fields : []).find((item) => lowerNames.includes(String(item?.name || '').toLowerCase()));
+  return field?.value;
+};
+
 const upsertQbittorrentDownloadClient = async (settings = {}, qbConfig = {}) => {
   const username = String(qbConfig.username || '').trim();
   const password = String(qbConfig.password || '').trim();
@@ -264,6 +270,40 @@ const upsertQbittorrentDownloadClient = async (settings = {}, qbConfig = {}) => 
   return { ok: true, client: created, updated: false };
 };
 
+const checkQbittorrentDownloadClient = async (settings = {}, qbConfig = {}) => {
+  const username = String(qbConfig.username || '').trim();
+  const { host, port, urlBase } = normalizeQbBaseUrlParts(String(qbConfig.baseUrl || ''));
+  const clients = await getDownloadClients(settings);
+  const existing = clients.find((client) => {
+    const impl = String(client?.implementationName || client?.implementation || '').toLowerCase();
+    return impl.includes('qbittorrent');
+  });
+
+  if (!existing) {
+    return { ok: true, exists: false, matches: false };
+  }
+
+  const fields = Array.isArray(existing.fields) ? existing.fields : [];
+  const configuredHost = String(getFieldValue(fields, ['host']) || '').trim().toLowerCase();
+  const configuredPort = Number(getFieldValue(fields, ['port']) || 0);
+  const configuredUrlBase = String(getFieldValue(fields, ['urlbase', 'basepath']) || '').trim().replace(/\/+$/, '');
+  const configuredUsername = String(getFieldValue(fields, ['username', 'user']) || '').trim();
+
+  const targetHost = String(host || '').trim().toLowerCase();
+  const targetPort = Number(port || 0);
+  const targetUrlBase = String(urlBase || '').trim().replace(/\/+$/, '');
+
+  const matches = Boolean(
+    configuredHost
+    && configuredHost === targetHost
+    && configuredPort === targetPort
+    && configuredUrlBase === targetUrlBase
+    && (!username || configuredUsername === username)
+  );
+
+  return { ok: true, exists: true, matches, client: existing };
+};
+
 module.exports = {
   normalizeBaseUrl,
   radarrRequest,
@@ -281,4 +321,5 @@ module.exports = {
   deleteMovie,
   updateMovie,
   upsertQbittorrentDownloadClient,
+  checkQbittorrentDownloadClient,
 };
