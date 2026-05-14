@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library } from 'lucide-react';
+import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
+import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library, ChevronUp, ChevronDown, Cog } from 'lucide-react';
 import HomeView from './components/HomeView';
 import MoviesView from './components/MoviesView';
 import TVShowsView from './components/TVShowsView';
@@ -220,73 +220,137 @@ const WelcomeOverlay = ({ language = 'tr', onClose }) => {
 };
 
 const Sidebar = ({ settings }) => {
-  const navigate = useNavigate();
-  const [searchQuery, setSearchQuery] = useState('');
+  const location = useLocation();
+  const [automationOpen, setAutomationOpen] = useState(true);
 
   const t = {
-    tr: { home: 'Ana Sayfa', movies: 'Filmler', tv: 'Diziler', anime: 'Anime', settings: 'Ayarlar', library: 'Kutuphanem', myList: 'Listem', downloads: 'Indirilenler', radarr: 'Radarr' },
-    en: { home: 'Home', movies: 'Movies', tv: 'TV Shows', anime: 'Anime', settings: 'Settings', library: 'Library', myList: 'My List', downloads: 'Downloads', radarr: 'Radarr' },
+    tr: {
+      discover: 'KESFET',
+      librarySection: 'KUTUPHANE',
+      toolsSection: 'ARACLAR',
+      systemSection: 'SISTEM',
+      home: 'Ana Sayfa',
+      search: 'Arama Yap',
+      movies: 'Filmler',
+      tv: 'Diziler',
+      anime: 'Anime',
+      library: 'Kutuphanem',
+      myList: 'Listem',
+      downloads: 'Indirilenler',
+      automation: 'Otomasyon',
+      radarr: 'Radarr',
+      settings: 'Ayarlar',
+    },
+    en: {
+      discover: 'DISCOVER',
+      librarySection: 'LIBRARY',
+      toolsSection: 'TOOLS',
+      systemSection: 'SYSTEM',
+      home: 'Home',
+      search: 'Search',
+      movies: 'Movies',
+      tv: 'TV Shows',
+      anime: 'Anime',
+      library: 'Library',
+      myList: 'My List',
+      downloads: 'Downloads',
+      automation: 'Automation',
+      radarr: 'Radarr',
+      settings: 'Settings',
+    },
   }[settings.language];
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-    }
-  };
+  const automationActive = location.pathname.startsWith('/radarr');
 
   return (
     <nav className="sidebar">
       <div className="logo">
         <span className="logo-text">CINE<span>SOFT</span></span>
       </div>
-      <div className="nav-links">
-        <NavLink to="/" end className="nav-item">
-          <Home size={20} />
-          <span>{t.home}</span>
-        </NavLink>
-        <NavLink to="/search" className="nav-item">
-          <Search size={20} />
-          <span>{settings.language === 'tr' ? 'Arama Yap' : 'Search'}</span>
-        </NavLink>
-        <NavLink to="/movies" className="nav-item">
-          <Film size={20} />
-          <span>{t.movies}</span>
-        </NavLink>
-        <NavLink to="/tv" className="nav-item">
-          <Tv size={20} />
-          <span>{t.tv}</span>
-        </NavLink>
-        <NavLink to="/anime" className="nav-item">
-          <Sparkles size={20} />
-          <span>{t.anime}</span>
-        </NavLink>
+      <div className="sidebar-scroll">
+        <section className="sidebar-group">
+          <h4 className="sidebar-group-title">{t.discover}</h4>
+          <div className="nav-links">
+            <NavLink to="/" end className="nav-item">
+              <Home size={18} />
+              <span>{t.home}</span>
+            </NavLink>
+            <NavLink to="/search" className="nav-item">
+              <Search size={18} />
+              <span>{t.search}</span>
+            </NavLink>
+            <NavLink to="/movies" className="nav-item">
+              <Film size={18} />
+              <span>{t.movies}</span>
+            </NavLink>
+            <NavLink to="/tv" className="nav-item">
+              <Tv size={18} />
+              <span>{t.tv}</span>
+            </NavLink>
+            <NavLink to="/anime" className="nav-item">
+              <Sparkles size={18} />
+              <span>{t.anime}</span>
+            </NavLink>
+          </div>
+        </section>
 
-        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-          <NavLink to="/library" className="nav-item">
-            <Library size={20} />
-            <span>{t.library}</span>
-          </NavLink>
-          <NavLink to="/mylist" className="nav-item">
-            <Bookmark size={20} />
-            <span>{t.myList}</span>
-          </NavLink>
-          <NavLink to="/downloads" className="nav-item">
-            <Download size={20} />
-            <span>{t.downloads}</span>
-          </NavLink>
-          <NavLink to="/radarr" className="nav-item">
-            <Film size={20} />
-            <span>{t.radarr}</span>
-          </NavLink>
-        </div>
+        <section className="sidebar-group">
+          <h4 className="sidebar-group-title">{t.librarySection}</h4>
+          <div className="nav-links">
+            <NavLink to="/library" className="nav-item">
+              <Library size={18} />
+              <span>{t.library}</span>
+            </NavLink>
+            <NavLink to="/mylist" className="nav-item">
+              <Bookmark size={18} />
+              <span>{t.myList}</span>
+            </NavLink>
+            <NavLink to="/downloads" className="nav-item">
+              <Download size={18} />
+              <span>{t.downloads}</span>
+            </NavLink>
+          </div>
+        </section>
+
+        <section className="sidebar-group">
+          <h4 className="sidebar-group-title">{t.toolsSection}</h4>
+          <div className="automation-wrap">
+            <button
+              type="button"
+              className={`automation-toggle ${automationActive ? 'active' : ''}`}
+              onClick={() => setAutomationOpen((prev) => !prev)}
+              aria-expanded={automationOpen}
+            >
+              <span className="automation-label">
+                <Cog size={16} />
+                {t.automation}
+              </span>
+              {automationOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+            {automationOpen && (
+              <div className="automation-submenu">
+                <NavLink to="/radarr" className="automation-item">
+                  <span className="automation-dot" />
+                  <span>{t.radarr}</span>
+                </NavLink>
+              </div>
+            )}
+          </div>
+        </section>
+
       </div>
+
       <div className="nav-footer">
-        <NavLink to="/settings" className="nav-item">
-          <SettingsIcon size={20} />
-          <span>{t.settings}</span>
-        </NavLink>
+        <section className="sidebar-group sidebar-group-system">
+          <h4 className="sidebar-group-title">{t.systemSection}</h4>
+          <div className="nav-links">
+            <NavLink to="/settings" className="nav-item">
+              <SettingsIcon size={18} />
+              <span>{t.settings}</span>
+            </NavLink>
+          </div>
+        </section>
       </div>
+
     </nav>
   );
 };
