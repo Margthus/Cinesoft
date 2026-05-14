@@ -47,7 +47,7 @@ const SonarrView = ({ settings }) => {
   const [editQualityProfileId, setEditQualityProfileId] = useState('');
   const [editMonitored, setEditMonitored] = useState(true);
   const [qbProgressBySeries, setQbProgressBySeries] = useState({});
-  const [expandedSeriesId, setExpandedSeriesId] = useState(null);
+  const [activeSeriesId, setActiveSeriesId] = useState(null);
   const [episodesBySeries, setEpisodesBySeries] = useState({});
   const [episodesLoadingBySeries, setEpisodesLoadingBySeries] = useState({});
   const [selectedSeasonBySeries, setSelectedSeasonBySeries] = useState({});
@@ -272,14 +272,10 @@ const SonarrView = ({ settings }) => {
     }
   };
 
-  const toggleSeriesExpand = async (seriesId) => {
+  const openSeriesPage = async (seriesId) => {
     const id = Number(seriesId || 0);
     if (!id) return;
-    if (expandedSeriesId === id) {
-      setExpandedSeriesId(null);
-      return;
-    }
-    setExpandedSeriesId(id);
+    setActiveSeriesId(id);
     if (!Array.isArray(episodesBySeries[id])) {
       await loadEpisodes(id);
     }
@@ -322,6 +318,7 @@ const SonarrView = ({ settings }) => {
         fileReady: 'Dosya var',
         fileMissing: 'Eksik',
         loading: 'Yukleniyor...',
+        backToSeries: 'Dizilere Don',
         selectRoot: 'Root folder sec',
         selectQuality: 'Kalite profili sec',
         disabled: 'Sonarr etkin degil veya baglanti ayarlari eksik.',
@@ -352,6 +349,7 @@ const SonarrView = ({ settings }) => {
         fileReady: 'File',
         fileMissing: 'Missing',
         loading: 'Loading...',
+        backToSeries: 'Back to Series',
         selectRoot: 'Select root folder',
         selectQuality: 'Select quality profile',
         disabled: 'Sonarr is disabled or connection settings are missing.',
@@ -360,6 +358,95 @@ const SonarrView = ({ settings }) => {
         monitored: 'Monitored',
         unmonitored: 'Unmonitored',
       };
+
+  const activeSeries = items.find((entry) => Number(entry?.id || 0) === Number(activeSeriesId || 0)) || null;
+
+  const renderSeriesDetailPage = () => {
+    if (!activeSeries) return null;
+    const seriesId = Number(activeSeries?.id || 0);
+    const title = activeSeries?.title || activeSeries?.sortTitle || 'Unknown';
+    const year = activeSeries?.year ? `(${activeSeries.year})` : '';
+    const poster = activeSeries?.images?.find?.((img) => img.coverType === 'poster')?.remoteUrl || '';
+    const allEpisodes = Array.isArray(episodesBySeries[seriesId]) ? episodesBySeries[seriesId] : [];
+    const seasons = [...new Set(allEpisodes.map((ep) => Number(ep?.seasonNumber || 0)).filter((n) => n > 0))].sort((a, b) => a - b);
+    const selectedSeason = Number(selectedSeasonBySeries[seriesId] || seasons[0] || 0);
+    const seasonEpisodes = allEpisodes.filter((ep) => Number(ep?.seasonNumber || 0) === selectedSeason);
+    const selectedIds = Array.isArray(selectedEpisodeIdsBySeries[seriesId]) ? selectedEpisodeIdsBySeries[seriesId] : [];
+
+    return (
+      <section className="sonarr-series-page">
+        <header className="sonarr-series-page-header">
+          <button
+            type="button"
+            className="radarr-refresh-btn"
+            onClick={() => setActiveSeriesId(null)}
+          >
+            {t.backToSeries}
+          </button>
+        </header>
+
+        <div className="sonarr-series-page-card">
+          <div className="sonarr-series-page-poster">
+            {poster ? <img src={poster} alt={title} className="radarr-poster" /> : <div className="radarr-poster-fallback">{title.slice(0, 1)}</div>}
+          </div>
+          <div className="sonarr-series-page-body">
+            <h2>{title} {year}</h2>
+            <div className="sonarr-season-bar">
+              <span>{t.seasons}</span>
+              <div className="sonarr-season-chips">
+                {seasons.map((seasonNo) => (
+                  <button
+                    key={`${seriesId}-detail-s-${seasonNo}`}
+                    type="button"
+                    className={`sonarr-season-chip ${selectedSeason === seasonNo ? 'active' : ''}`}
+                    onClick={() => setSelectedSeasonBySeries((prev) => ({ ...prev, [seriesId]: seasonNo }))}
+                  >
+                    S{seasonNo}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {episodesLoadingBySeries[seriesId] ? (
+              <div className="sonarr-episodes-loading">{t.episodeListLoading}</div>
+            ) : (
+              <>
+                {seasons.length > 0 ? (
+                  <>
+                    <div className="sonarr-episode-list sonarr-episode-list-wide">
+                      {seasonEpisodes.map((ep) => {
+                        const epId = Number(ep?.id || 0);
+                        const epNo = Number(ep?.episodeNumber || 0);
+                        const epTitle = ep?.title || `Episode ${epNo}`;
+                        const isSelected = selectedIds.includes(epId);
+                        return (
+                          <label key={epId || `${seriesId}-${selectedSeason}-${epNo}`} className="sonarr-episode-row">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleEpisodeSelection(seriesId, epId)}
+                            />
+                            <span className="code">E{String(epNo).padStart(2, '0')}</span>
+                            <span className="title">{epTitle}</span>
+                            <span className={`state ${ep?.hasFile ? 'ok' : 'off'}`}>{ep?.hasFile ? t.fileReady : t.fileMissing}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="sonarr-episode-footer">
+                      <span>{selectedIds.length} {t.selectedCount}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="sonarr-episodes-empty">{t.noEpisodes}</div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
 
   return (
     <div className="radarr-view">
@@ -378,7 +465,11 @@ const SonarrView = ({ settings }) => {
       {status === 'ready' && items.length === 0 && <div className="radarr-note">{t.empty}</div>}
 
       {status === 'ready' && items.length > 0 && (
-        <section className="radarr-grid">
+        <>
+          {activeSeries ? (
+            renderSeriesDetailPage()
+          ) : (
+            <section className="radarr-grid">
           {items.map((series) => {
             const title = series?.title || series?.sortTitle || 'Unknown';
             const year = series?.year ? `(${series.year})` : '';
@@ -387,23 +478,17 @@ const SonarrView = ({ settings }) => {
             const seriesId = Number(series?.id || 0);
             const qbProgress = qbProgressBySeries[seriesId];
             const hasQbProgress = qbProgress && Number.isFinite(Number(qbProgress.progress));
-            const isExpanded = expandedSeriesId === seriesId;
-            const allEpisodes = Array.isArray(episodesBySeries[seriesId]) ? episodesBySeries[seriesId] : [];
-            const seasons = [...new Set(allEpisodes.map((ep) => Number(ep?.seasonNumber || 0)).filter((n) => n > 0))].sort((a, b) => a - b);
-            const selectedSeason = Number(selectedSeasonBySeries[seriesId] || seasons[0] || 0);
-            const seasonEpisodes = allEpisodes.filter((ep) => Number(ep?.seasonNumber || 0) === selectedSeason);
-            const selectedIds = Array.isArray(selectedEpisodeIdsBySeries[seriesId]) ? selectedEpisodeIdsBySeries[seriesId] : [];
             return (
               <article
                 key={seriesId || `${title}-${year}`}
-                className={`radarr-card sonarr-card ${isExpanded ? 'expanded' : ''}`}
-                onClick={() => toggleSeriesExpand(seriesId)}
+                className="radarr-card sonarr-card"
+                onClick={() => openSeriesPage(seriesId)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    toggleSeriesExpand(seriesId);
+                    openSeriesPage(seriesId);
                   }
                 }}
               >
@@ -441,64 +526,12 @@ const SonarrView = ({ settings }) => {
                   </button>
                 </div>
 
-                {isExpanded && (
-                  <div className="sonarr-episodes-panel" onClick={(event) => event.stopPropagation()}>
-                    {episodesLoadingBySeries[seriesId] ? (
-                      <div className="sonarr-episodes-loading">{t.episodeListLoading}</div>
-                    ) : (
-                      <>
-                        {seasons.length > 0 ? (
-                          <>
-                            <div className="sonarr-season-bar">
-                              <span>{t.seasons}</span>
-                              <div className="sonarr-season-chips">
-                                {seasons.map((seasonNo) => (
-                                  <button
-                                    key={`${seriesId}-s-${seasonNo}`}
-                                    type="button"
-                                    className={`sonarr-season-chip ${selectedSeason === seasonNo ? 'active' : ''}`}
-                                    onClick={() => setSelectedSeasonBySeries((prev) => ({ ...prev, [seriesId]: seasonNo }))}
-                                  >
-                                    S{seasonNo}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="sonarr-episode-list">
-                              {seasonEpisodes.map((ep) => {
-                                const epId = Number(ep?.id || 0);
-                                const epNo = Number(ep?.episodeNumber || 0);
-                                const epTitle = ep?.title || `Episode ${epNo}`;
-                                const isSelected = selectedIds.includes(epId);
-                                return (
-                                  <label key={epId || `${seriesId}-${selectedSeason}-${epNo}`} className="sonarr-episode-row">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleEpisodeSelection(seriesId, epId)}
-                                    />
-                                    <span className="code">E{String(epNo).padStart(2, '0')}</span>
-                                    <span className="title">{epTitle}</span>
-                                    <span className={`state ${ep?.hasFile ? 'ok' : 'off'}`}>{ep?.hasFile ? t.fileReady : t.fileMissing}</span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                            <div className="sonarr-episode-footer">
-                              <span>{selectedIds.length} {t.selectedCount}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="sonarr-episodes-empty">{t.noEpisodes}</div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
               </article>
             );
           })}
-        </section>
+            </section>
+          )}
+        </>
       )}
 
       {editingSeries && (
