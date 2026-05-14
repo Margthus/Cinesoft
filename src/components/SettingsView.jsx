@@ -1,5 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Eye, EyeOff, Film, FolderOpen, Globe, Key, Radar, Play, RefreshCcw, Save, Square, Search, Trash2, Shield, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
+  Film,
+  FolderOpen,
+  Globe,
+  Key,
+  Play,
+  Radar,
+  RefreshCcw,
+  Save,
+  Search,
+  Shield,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { DEFAULT_PROWLARR_CONFIG, normalizeProwlarrConfig } from '../sources/index.mjs';
 import { TORRENTIO_SITE_OPTIONS, normalizeTorrentioConfig } from '../utils/torrentio';
 import '../styles/SettingsView.css';
@@ -37,6 +55,21 @@ const SettingsView = ({ settings, setSettings }) => {
     message: '',
   });
   const [radarrProwlarrSyncBusy, setRadarrProwlarrSyncBusy] = useState(false);
+  const [activeSection, setActiveSection] = useState('general');
+  const [navGroupsOpen, setNavGroupsOpen] = useState({
+    general: true,
+    account: true,
+    download: true,
+    sources: true,
+  });
+
+  useEffect(() => {
+    setFormData({
+      ...settings,
+      prowlarr: normalizeProwlarrConfig(settings.prowlarr || DEFAULT_PROWLARR_CONFIG),
+      torrentio: normalizeTorrentioConfig(settings.torrentio || {}),
+    });
+  }, [settings]);
 
   useEffect(() => {
     refreshIndexers();
@@ -470,8 +503,6 @@ const SettingsView = ({ settings, setSettings }) => {
   }).sort((a, b) => {
     const aName = (a.name || a.definitionName || '').toLowerCase();
     const bName = (b.name || b.definitionName || '').toLowerCase();
-
-    // Check if exact match
     const isAStarred = starredNames.includes(aName);
     const isBStarred = starredNames.includes(bName);
 
@@ -516,792 +547,933 @@ const SettingsView = ({ settings, setSettings }) => {
     });
   };
 
-  return (
-    <div className="settings-view">
-      <div className="settings-topbar">
-        <div>
-          <h1>{t.title}</h1>
-          <p>{t.subtitle}</p>
+  const navGroups = useMemo(() => ([
+    {
+      id: 'general',
+      label: t.navGeneral,
+      items: [
+        { id: 'general', label: t.generalSettings, icon: Globe },
+      ],
+    },
+    {
+      id: 'account',
+      label: t.navAccount,
+      items: [
+        { id: 'tmdb', label: t.tmdbNav, icon: Key },
+      ],
+    },
+    {
+      id: 'download',
+      label: t.navDownload,
+      items: [
+        { id: 'download', label: t.downloadEngine, icon: Save },
+      ],
+    },
+    {
+      id: 'sources',
+      label: t.navSources,
+      items: [
+        { id: 'torrentio', label: 'Torrentio', icon: Globe },
+        { id: 'prowlarr', label: t.prowlarr, icon: Radar },
+        { id: 'radarr', label: t.radarr, icon: Film },
+      ],
+    },
+  ]), [t]);
+
+  const statusTone = saveState === 'saved' ? 'saved' : saveState === 'saving' ? 'saving' : 'idle';
+  const statusLabel = saveState === 'saved' ? t.allChangesSaved : saveState === 'saving' ? t.savingNow : t.unsavedChanges;
+
+  const renderGeneralSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Globe size={18} />
+          <div>
+            <h2>{t.generalSettings}</h2>
+            <p>{t.generalSettingsHint}</p>
+          </div>
         </div>
-        <button className="settings-save-btn" onClick={handleSave} disabled={saveState === 'saving'}>
-          {saveState === 'saving' ? <RefreshCcw className="spin" size={18} /> : <Save size={18} />}
-          {saveState === 'saved' ? t.saved : t.save}
-        </button>
+      </header>
+
+      <div className="settings-row-list">
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.language}</strong>
+            <span>{t.languageHint}</span>
+          </div>
+          <div className="settings-row-control settings-row-control--segmented">
+            <div className="segmented-control">
+              <button className={formData.language === 'tr' ? 'active' : ''} onClick={() => updateRoot({ language: 'tr' })}>Turkce</button>
+              <button className={formData.language === 'en' ? 'active' : ''} onClick={() => updateRoot({ language: 'en' })}>English</button>
+            </div>
+          </div>
+        </div>
       </div>
+    </section>
+  );
 
-      <div className="settings-grid">
-        <section className="settings-card language-card">
-          <header className="settings-card-header">
-            <Globe size={18} />
-            <div>
-              <h2>{t.language}</h2>
-              <p>{t.languageHint}</p>
-            </div>
-          </header>
-          <div className="segmented-control">
-            <button className={formData.language === 'tr' ? 'active' : ''} onClick={() => updateRoot({ language: 'tr' })}>Turkce</button>
-            <button className={formData.language === 'en' ? 'active' : ''} onClick={() => updateRoot({ language: 'en' })}>English</button>
+  const renderTmdbSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Key size={18} />
+          <div>
+            <h2>{t.tmdb}</h2>
+            <p>{t.tmdbHint}</p>
           </div>
-        </section>
+        </div>
+      </header>
 
-
-        <section className="settings-card">
-          <header className="settings-card-header">
-            <Key size={18} />
-            <div>
-              <h2>{t.tmdb}</h2>
-              <p>{t.tmdbHint}</p>
-            </div>
-          </header>
-          <div className="input-action-row">
-            <input
-              className="settings-input"
-              type={tmdbApiKeyVisible ? 'text' : 'password'}
-              value={formData.apiKey}
-              onChange={(event) => updateRoot({ apiKey: event.target.value })}
-              placeholder={t.tmdb}
-            />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => setTmdbApiKeyVisible((current) => !current)}
-              aria-label={tmdbApiKeyVisible ? 'Hide TMDB API key' : 'Show TMDB API key'}
-              title={tmdbApiKeyVisible ? 'Hide' : 'Show'}
-            >
-              {tmdbApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
-            </button>
+      <div className="settings-row-list">
+        <div className="settings-row-card settings-row-card--stacked-mobile">
+          <div className="settings-row-copy">
+            <strong>{t.tmdbKeyLabel}</strong>
+            <span>{t.tmdbKeyDesc}</span>
           </div>
-        </section>
-
-        <section className="settings-card settings-card-full">
-          <header className="settings-card-header">
-            <Globe size={18} />
-            <div>
-              <h2>{t.downloadEngine}</h2>
-              <p>{t.downloadEngineHint}</p>
-            </div>
-            <div className="settings-card-actions">
+          <div className="settings-row-control">
+            <div className="input-action-row">
+              <input
+                className="settings-input"
+                type={tmdbApiKeyVisible ? 'text' : 'password'}
+                value={formData.apiKey}
+                onChange={(event) => updateRoot({ apiKey: event.target.value })}
+                placeholder={t.tmdb}
+              />
               <button
                 type="button"
-                className="settings-collapse-btn"
-                aria-expanded={downloadEngineConfigOpen}
-                aria-controls="download-engine-config-panel"
-                onClick={() => setDownloadEngineConfigOpen((current) => !current)}
+                className="icon-btn"
+                onClick={() => setTmdbApiKeyVisible((current) => !current)}
+                aria-label={tmdbApiKeyVisible ? 'Hide TMDB API key' : 'Show TMDB API key'}
+                title={tmdbApiKeyVisible ? 'Hide' : 'Show'}
               >
-                {downloadEngineConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                <span>{downloadEngineConfigOpen ? t.hideConfig : t.showConfig}</span>
+                {tmdbApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
             </div>
-          </header>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 
-          <div
-            id="download-engine-config-panel"
-            className={`settings-collapsible ${downloadEngineConfigOpen ? 'open' : 'closed'}`}
-            hidden={!downloadEngineConfigOpen}
+  const renderDownloadSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Save size={18} />
+          <div>
+            <h2>{t.downloadEngine}</h2>
+            <p>{t.downloadEngineHint}</p>
+          </div>
+        </div>
+        <div className="settings-card-actions">
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            aria-expanded={downloadEngineConfigOpen}
+            aria-controls="download-engine-config-panel"
+            onClick={() => setDownloadEngineConfigOpen((current) => !current)}
           >
-            <div className="panel-grid">
-              <label className="toggle-field">
-                <span>{t.embeddedTorrent}</span>
-                <Toggle
-                  checked={!formData.useQbittorrent}
-                  onChange={(checked) => {
-                    updateRoot({ useQbittorrent: !checked });
-                  }}
-                />
-              </label>
+            {downloadEngineConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>{downloadEngineConfigOpen ? t.hideConfig : t.showConfig}</span>
+          </button>
+        </div>
+      </header>
 
-              <label className="toggle-field">
-                <span>{t.qbittorrent}</span>
-                <Toggle
-                  checked={Boolean(formData.useQbittorrent)}
-                  onChange={(checked) => {
-                    updateRoot({ useQbittorrent: checked });
-                  }}
-                />
-              </label>
-
-              <label className="stacked-field">
-                <span>{t.qbBaseUrl}</span>
-                <input
-                  className="settings-input"
-                  value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
-                  onChange={(event) => updateRoot({
-                    qbittorrent: {
-                      ...(formData.qbittorrent || {}),
-                      baseUrl: event.target.value,
-                    },
-                  })}
-                />
-              </label>
-              <label className="stacked-field">
-                <span>{t.qbUsername}</span>
-                <input
-                  className="settings-input"
-                  value={formData.qbittorrent?.username || 'admin'}
-                  onChange={(event) => updateRoot({
-                    qbittorrent: {
-                      ...(formData.qbittorrent || {}),
-                      username: event.target.value,
-                    },
-                  })}
-                />
-              </label>
-              <label className="stacked-field">
-                <span>{t.qbPassword}</span>
-                <input
-                  className="settings-input"
-                  type="password"
-                  value={formData.qbittorrent?.password || 'adminadmin'}
-                  onChange={(event) => updateRoot({
-                    qbittorrent: {
-                      ...(formData.qbittorrent || {}),
-                      password: event.target.value,
-                    },
-                  })}
-                />
-              </label>
+      <div
+        id="download-engine-config-panel"
+        className={`settings-collapsible ${downloadEngineConfigOpen ? 'open' : 'closed'}`}
+        hidden={!downloadEngineConfigOpen}
+      >
+        <div className="settings-row-list">
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.embeddedTorrent}</strong>
+              <span>{t.embeddedTorrentDesc}</span>
             </div>
-            <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.qbNote}</p>
+            <Toggle
+              checked={!formData.useQbittorrent}
+              onChange={(checked) => {
+                updateRoot({ useQbittorrent: !checked });
+              }}
+            />
           </div>
-        </section>
 
-        <section className="settings-card settings-card-full">
-          <header className="settings-card-header">
-            <Globe size={18} />
-            <div>
-              <h2>Torrentio</h2>
-              <p>{settings.language === 'tr' ? 'Torrentio eklentisini kaynak olarak kullan.' : 'Use Torrentio addon as source.'}</p>
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.qbittorrent}</strong>
+              <span>{t.qbittorrentDesc}</span>
             </div>
-            <div className="settings-card-actions">
+            <Toggle
+              checked={Boolean(formData.useQbittorrent)}
+              onChange={(checked) => {
+                updateRoot({ useQbittorrent: checked });
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="settings-form-card">
+          <div className="panel-grid">
+            <label className="stacked-field">
+              <span>{t.qbBaseUrl}</span>
+              <input
+                className="settings-input"
+                value={formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080'}
+                onChange={(event) => updateRoot({
+                  qbittorrent: {
+                    ...(formData.qbittorrent || {}),
+                    baseUrl: event.target.value,
+                  },
+                })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>{t.qbUsername}</span>
+              <input
+                className="settings-input"
+                value={formData.qbittorrent?.username || 'admin'}
+                onChange={(event) => updateRoot({
+                  qbittorrent: {
+                    ...(formData.qbittorrent || {}),
+                    username: event.target.value,
+                  },
+                })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>{t.qbPassword}</span>
+              <input
+                className="settings-input"
+                type="password"
+                value={formData.qbittorrent?.password || 'adminadmin'}
+                onChange={(event) => updateRoot({
+                  qbittorrent: {
+                    ...(formData.qbittorrent || {}),
+                    password: event.target.value,
+                  },
+                })}
+              />
+            </label>
+          </div>
+          <p className="settings-helper">{t.qbNote}</p>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderTorrentioSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Globe size={18} />
+          <div>
+            <h2>Torrentio</h2>
+            <p>{formData.language === 'tr' ? 'Torrentio eklentisini kaynak olarak kullan.' : 'Use Torrentio addon as source.'}</p>
+          </div>
+        </div>
+        <div className="settings-card-actions">
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            aria-expanded={torrentioConfigOpen}
+            aria-controls="torrentio-config-panel"
+            onClick={() => setTorrentioConfigOpen((current) => !current)}
+          >
+            {torrentioConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>{torrentioConfigOpen ? t.hideConfig : t.showConfig}</span>
+          </button>
+          <Toggle
+            checked={formData.torrentioEnabled || false}
+            onChange={async (checked) => {
+              updateRoot({ torrentioEnabled: checked });
+              if (checked) {
+                updateProwlarr({ enabled: false, managed: false });
+                await handleStopProwlarr();
+              }
+            }}
+          />
+        </div>
+      </header>
+
+      <div
+        id="torrentio-config-panel"
+        className={`settings-collapsible ${torrentioConfigOpen ? 'open' : 'closed'}`}
+        hidden={!torrentioConfigOpen}
+      >
+        <div className="settings-form-card">
+          <div className="panel-grid">
+            <label className="stacked-field">
+              <span>{t.torrentioBaseUrl}</span>
+              <input
+                className="settings-input"
+                value={formData.torrentio?.baseUrl || 'https://torrentio.strem.fun'}
+                onChange={(event) => updateRoot({
+                  torrentio: {
+                    ...(formData.torrentio || {}),
+                    baseUrl: event.target.value,
+                  },
+                })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>{t.torrentioMaxResults}</span>
+              <input
+                className="settings-input"
+                type="number"
+                min="10"
+                max="250"
+                value={formData.torrentio?.maxResults || 80}
+                onChange={(event) => updateRoot({
+                  torrentio: {
+                    ...(formData.torrentio || {}),
+                    maxResults: Math.max(10, Number(event.target.value) || 80),
+                  },
+                })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>{t.torrentioExcludeKeywords}</span>
+              <input
+                className="settings-input"
+                value={formData.torrentio?.excludeKeywords || ''}
+                onChange={(event) => updateRoot({
+                  torrentio: {
+                    ...(formData.torrentio || {}),
+                    excludeKeywords: event.target.value,
+                  },
+                })}
+              />
+            </label>
+            <label className="stacked-field">
+              <span>{t.torrentioSortBy}</span>
+              <select
+                className="settings-input"
+                value={formData.torrentio?.sortBy || 'seeders'}
+                onChange={(event) => updateRoot({
+                  torrentio: normalizeTorrentioConfig({
+                    ...(formData.torrentio || {}),
+                    sortBy: event.target.value,
+                  }),
+                })}
+              >
+                <option value="seeders">{t.seeders}</option>
+                <option value="size">{t.size}</option>
+                <option value="name">{t.name}</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="stacked-field settings-site-block">
+            <span>{t.torrentioSites}</span>
+            <div className="torrentio-site-grid">
+              {TORRENTIO_SITE_OPTIONS.map((site) => {
+                const enabled = site.key === 'all'
+                  ? TORRENTIO_SITE_OPTIONS
+                    .filter((option) => option.key !== 'all')
+                    .every((option) => formData.torrentio?.enabledSites?.[option.key] !== false)
+                  : formData.torrentio?.enabledSites?.[site.key] !== false;
+                const siteLabel = site.key === 'all'
+                  ? (formData.language === 'tr' ? 'Hepsi' : 'All')
+                  : site.label;
+                return (
+                  <button
+                    key={site.key}
+                    type="button"
+                    className={`torrentio-site-btn ${enabled ? 'active' : ''}`}
+                    onClick={() => toggleTorrentioSite(site.key)}
+                  >
+                    {siteLabel}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p className="settings-helper">{t.torrentioHint}</p>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderRadarrSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Film size={18} />
+          <div>
+            <h2>{t.radarr}</h2>
+            <p>{t.radarrHint}</p>
+          </div>
+        </div>
+        <div className="settings-card-actions settings-card-actions--wrap">
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrDownload}>
+            <span>{t.downloadRadarr}</span>
+          </button>
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrWebUI}>
+            <span>{t.openRadarrWebUI}</span>
+          </button>
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            aria-expanded={radarrConfigOpen}
+            aria-controls="radarr-config-panel"
+            onClick={() => setRadarrConfigOpen((current) => !current)}
+          >
+            {radarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>{radarrConfigOpen ? t.hideConfig : t.showConfig}</span>
+          </button>
+        </div>
+      </header>
+
+      <div
+        id="radarr-config-panel"
+        className={`settings-collapsible ${radarrConfigOpen ? 'open' : 'closed'}`}
+        hidden={!radarrConfigOpen}
+      >
+        <div className="prowlarr-layout">
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.engine}</h3>
+              <Toggle
+                checked={formData.radarrManaged === true}
+                onChange={async (checked) => {
+                  updateRoot({ radarrManaged: checked });
+                  if (checked) {
+                    await handleStartRadarr({ ...getRadarrSettings(), radarrManaged: true });
+                  } else {
+                    await handleStopRadarr();
+                  }
+                }}
+              />
+            </div>
+            <p className="settings-helper">{t.radarrEngineHint}</p>
+
+            <div className="input-action-row">
+              <input
+                className="settings-input"
+                value={formData.radarrExecutablePath || ''}
+                onChange={(event) => updateRoot({ radarrExecutablePath: event.target.value })}
+                placeholder={t.radarrExecutable}
+              />
+              <button className="icon-btn" onClick={handleSelectRadarrExecutable}><FolderOpen size={18} /></button>
+            </div>
+
+            <div className="inline-fields">
+              <label className="stacked-field compact">
+                <span>{t.port}</span>
+                <input
+                  className="settings-input"
+                  type="number"
+                  value={formData.radarrPort || 7878}
+                  onChange={(event) => updateRoot({ radarrPort: Number(event.target.value) || 7878 })}
+                />
+              </label>
+              <div className="action-cluster">
+                <button className="action-btn start" onClick={handleStartRadarr} disabled={radarrManagedStatus === 'starting'}>
+                  {radarrManagedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
+                  {t.start}
+                </button>
+                <button className="action-btn stop" onClick={handleStopRadarr}>
+                  <Square size={16} />
+                  {t.stop}
+                </button>
+              </div>
+            </div>
+            <div className="status-line">{renderManagedStatus(radarrManagedStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.connection}</h3>
+              <Toggle
+                checked={formData.radarrEnabled === true}
+                onChange={async (checked) => {
+                  updateRoot({ radarrEnabled: checked });
+                  if (checked && (!formData.radarrManaged || radarrManagedStatus !== 'running')) {
+                    updateRoot({ radarrManaged: true });
+                    await handleStartRadarr({ ...getRadarrSettings(), radarrEnabled: true, radarrManaged: true });
+                  }
+                }}
+              />
+            </div>
+            <div className="panel-grid">
+              <label className="stacked-field">
+                <span>{t.radarrBaseUrl}</span>
+                <input
+                  className="settings-input"
+                  value={formData.radarrBaseUrl || ''}
+                  onChange={(event) => updateRoot({ radarrBaseUrl: event.target.value })}
+                  placeholder="http://127.0.0.1:7878"
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.radarrApiKey}</span>
+                <div className="input-action-row">
+                  <input
+                    className="settings-input"
+                    type={radarrApiKeyVisible ? 'text' : 'password'}
+                    value={formData.radarrApiKey || ''}
+                    onChange={(event) => updateRoot({ radarrApiKey: event.target.value })}
+                  />
+                  <button type="button" className="icon-btn" onClick={() => setRadarrApiKeyVisible((current) => !current)}>
+                    {radarrApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </label>
+              <label className="stacked-field">
+                <span>{t.timeout}</span>
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="1000"
+                  step="500"
+                  value={formData.radarrTimeout || 10000}
+                  onChange={(event) => updateRoot({ radarrTimeout: Number(event.target.value || 10000) })}
+                />
+              </label>
+              <button className="action-btn subtle full-height" onClick={handleTestRadarr} disabled={radarrStatus === 'testing'}>
+                {radarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
+                {t.test}
+              </button>
+            </div>
+            <div className="status-line">{renderRadarrStatus(radarrStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.radarrDefaults}</h3>
+            </div>
+            <div className="panel-grid">
+              <label className="stacked-field">
+                <span>{t.radarrRootFolder}</span>
+                <select
+                  className="settings-input"
+                  value={formData.radarrDefaultRootFolder || ''}
+                  onChange={(event) => updateRoot({ radarrDefaultRootFolder: event.target.value })}
+                >
+                  <option value="">{t.selectRootFolder}</option>
+                  {radarrRootFolders.map((folder) => (
+                    <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
+                  ))}
+                </select>
+              </label>
+              {!radarrRootFolders.length && (
+                <div className="radarr-warning-box" role="status">
+                  <strong>{t.radarrNoRootFoldersTitle}</strong>
+                  <span>{t.radarrNoRootFoldersHint}</span>
+                </div>
+              )}
+              <label className="stacked-field">
+                <span>{t.radarrQualityProfile}</span>
+                <select
+                  className="settings-input"
+                  value={String(formData.radarrDefaultQualityProfileId ?? '')}
+                  onChange={(event) => updateRoot({ radarrDefaultQualityProfileId: event.target.value })}
+                >
+                  <option value="">{t.selectQualityProfile}</option>
+                  {radarrQualityProfiles.map((profile) => (
+                    <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="toggle-field">
+                <span>{t.radarrSearchAfterAdd}</span>
+                <Toggle checked={formData.radarrSearchAfterAdd !== false} onChange={(checked) => updateRoot({ radarrSearchAfterAdd: checked })} />
+              </label>
+            </div>
+          </div>
+
+          <div className="prowlarr-panel prowlarr-panel-wide">
+            <div className="prowlarr-panel-header">
+              <h3>{t.prowlarrSync}</h3>
+            </div>
+            <p className="settings-helper">{t.prowlarrSyncHint}</p>
+            <div className="sync-status-grid">
+              <div className="sync-status-item">
+                <span>{t.prowlarrLabel}</span>
+                <strong className={`sync-badge ${radarrProwlarrSyncStatus.prowlarr === 'connected' ? 'ok' : 'off'}`}>
+                  {radarrProwlarrSyncStatus.prowlarr === 'connected' ? t.connected : t.disconnected}
+                </strong>
+              </div>
+              <div className="sync-status-item">
+                <span>{t.radarrLabel}</span>
+                <strong className={`sync-badge ${radarrProwlarrSyncStatus.radarr === 'connected' ? 'ok' : 'off'}`}>
+                  {radarrProwlarrSyncStatus.radarr === 'connected' ? t.connected : t.disconnected}
+                </strong>
+              </div>
+              <div className="sync-status-item">
+                <span>{t.syncStatusLabel}</span>
+                <strong className={`sync-badge ${
+                  radarrProwlarrSyncStatus.sync === 'configured'
+                    ? 'ok'
+                    : (radarrProwlarrSyncStatus.sync === 'partial' ? 'warn' : 'off')
+                }`}>
+                  {radarrProwlarrSyncStatus.sync === 'configured'
+                    ? t.syncConfiguredShort
+                    : (radarrProwlarrSyncStatus.sync === 'partial' ? t.syncPartial : t.notConfigured)}
+                </strong>
+              </div>
+            </div>
+            {radarrProwlarrSyncStatus.message ? (
+              <div className="status-line sync-message">{radarrProwlarrSyncStatus.message}</div>
+            ) : null}
+            <div className="draft-actions">
               <button
                 type="button"
-                className="settings-collapse-btn"
-                aria-expanded={torrentioConfigOpen}
-                aria-controls="torrentio-config-panel"
-                onClick={() => setTorrentioConfigOpen((current) => !current)}
+                className="action-btn subtle"
+                onClick={handleConnectRadarrToProwlarr}
+                disabled={radarrProwlarrSyncBusy}
               >
-                {torrentioConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                <span>{torrentioConfigOpen ? t.hideConfig : t.showConfig}</span>
+                {t.connectRadarrToProwlarr}
               </button>
+              <button
+                type="button"
+                className="action-btn subtle"
+                onClick={handleSyncRadarrNow}
+                disabled={radarrProwlarrSyncBusy}
+              >
+                {t.syncNow}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderProwlarrSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Radar size={18} />
+          <div>
+            <h2>{t.prowlarr}</h2>
+            <p>{t.prowlarrHint}</p>
+          </div>
+        </div>
+        <div className="settings-card-actions settings-card-actions--wrap">
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenProwlarrDownload}>
+            <span>{t.downloadProwlarr}</span>
+          </button>
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenProwlarrWebUI}>
+            <span>{t.openProwlarrWebUI}</span>
+          </button>
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            aria-expanded={prowlarrConfigOpen}
+            aria-controls="prowlarr-config-panel"
+            onClick={() => setProwlarrConfigOpen((current) => !current)}
+          >
+            {prowlarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>{prowlarrConfigOpen ? t.hideConfig : t.showConfig}</span>
+          </button>
+        </div>
+      </header>
+
+      <div
+        id="prowlarr-config-panel"
+        className={`settings-collapsible ${prowlarrConfigOpen ? 'open' : 'closed'}`}
+        hidden={!prowlarrConfigOpen}
+      >
+        <div className="prowlarr-layout">
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.engine}</h3>
               <Toggle
-                checked={formData.torrentioEnabled || false}
+                checked={formData.prowlarr.managed}
                 onChange={async (checked) => {
-                  updateRoot({ torrentioEnabled: checked });
+                  updateProwlarr({ managed: checked });
                   if (checked) {
-                    updateProwlarr({ enabled: false, managed: false });
+                    updateRoot({ torrentioEnabled: false });
+                    await handleStartProwlarr({ ...formData.prowlarr, managed: true });
+                  } else {
                     await handleStopProwlarr();
                   }
                 }}
               />
             </div>
-          </header>
-          <div
-            id="torrentio-config-panel"
-            className={`settings-collapsible ${torrentioConfigOpen ? 'open' : 'closed'}`}
-            hidden={!torrentioConfigOpen}
-          >
-            <div className="panel-grid">
-              <label className="stacked-field">
-                <span>{t.torrentioBaseUrl}</span>
-                <input
-                  className="settings-input"
-                  value={formData.torrentio?.baseUrl || 'https://torrentio.strem.fun'}
-                  onChange={(event) => updateRoot({
-                    torrentio: {
-                      ...(formData.torrentio || {}),
-                      baseUrl: event.target.value,
-                    },
-                  })}
-                />
-              </label>
-              <label className="stacked-field">
-                <span>{t.torrentioMaxResults}</span>
+            <p className="settings-helper">{t.managed}</p>
+
+            <div className="input-action-row">
+              <input
+                className="settings-input"
+                value={formData.prowlarr.executablePath || ''}
+                onChange={(event) => updateProwlarr({ executablePath: event.target.value })}
+                placeholder={t.executable}
+              />
+              <button className="icon-btn" onClick={handleSelectExecutable}><FolderOpen size={18} /></button>
+            </div>
+
+            <div className="inline-fields">
+              <label className="stacked-field compact">
+                <span>{t.port}</span>
                 <input
                   className="settings-input"
                   type="number"
-                  min="10"
-                  max="250"
-                  value={formData.torrentio?.maxResults || 80}
-                  onChange={(event) => updateRoot({
-                    torrentio: {
-                      ...(formData.torrentio || {}),
-                      maxResults: Math.max(10, Number(event.target.value) || 80),
-                    },
-                  })}
+                  value={formData.prowlarr.port}
+                  onChange={(event) => updateProwlarr({ port: Number(event.target.value) || 9696 })}
                 />
               </label>
+              <div className="action-cluster">
+                <button className="action-btn start" onClick={handleStartProwlarr} disabled={managedStatus === 'starting'}>
+                  {managedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
+                  {t.start}
+                </button>
+                <button className="action-btn stop" onClick={handleStopProwlarr}>
+                  <Square size={16} />
+                  {t.stop}
+                </button>
+              </div>
+            </div>
+
+            <div className="status-line">{renderManagedStatus(managedStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.connection}</h3>
+              <Toggle
+                checked={formData.prowlarr.enabled}
+                onChange={async (checked) => {
+                  updateProwlarr({ enabled: checked });
+                  if (checked) {
+                    updateRoot({ torrentioEnabled: false });
+                    if (!formData.prowlarr.managed || managedStatus !== 'running') {
+                      updateProwlarr({ managed: true });
+                      await handleStartProwlarr({ ...formData.prowlarr, enabled: true, managed: true });
+                    }
+                    await refreshIndexers();
+                  }
+                }}
+              />
+            </div>
+            <div className="panel-grid">
               <label className="stacked-field">
-                <span>{t.torrentioExcludeKeywords}</span>
-                <input
-                  className="settings-input"
-                  value={formData.torrentio?.excludeKeywords || ''}
-                  onChange={(event) => updateRoot({
-                    torrentio: {
-                      ...(formData.torrentio || {}),
-                      excludeKeywords: event.target.value,
-                    },
-                  })}
-                />
+                <span>{t.baseUrl}</span>
+                <input className="settings-input" value={formData.prowlarr.baseUrl} onChange={(event) => updateProwlarr({ baseUrl: event.target.value })} />
               </label>
               <label className="stacked-field">
-                <span>{t.torrentioSortBy}</span>
-                <select
-                  className="settings-input"
-                  value={formData.torrentio?.sortBy || 'seeders'}
-                  onChange={(event) => updateRoot({
-                    torrentio: normalizeTorrentioConfig({
-                      ...(formData.torrentio || {}),
-                      sortBy: event.target.value,
-                    }),
-                  })}
-                >
-                  <option value="seeders">{t.seeders}</option>
-                  <option value="size">{t.size}</option>
-                  <option value="name">{t.name}</option>
-                </select>
+                <span>{t.prowlarrApiKey}</span>
+                <input className="settings-input" type="password" value={formData.prowlarr.apiKey} onChange={(event) => updateProwlarr({ apiKey: event.target.value })} />
+              </label>
+              <label className="stacked-field">
+                <span>{t.timeout}</span>
+                <input className="settings-input" type="number" value={formData.prowlarr.timeout} onChange={(event) => updateProwlarr({ timeout: Number(event.target.value) || 10000 })} />
+              </label>
+              <button className="action-btn subtle full-height" onClick={handleTestProwlarr} disabled={prowlarrStatus === 'testing'}>
+                {prowlarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
+                {t.test}
+              </button>
+            </div>
+            <div className="status-line">{renderConnectionStatus(prowlarrStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.filters}</h3>
+            </div>
+            <div className="panel-grid single-column">
+              <label className="stacked-field">
+                <span>{t.movieCategories}</span>
+                <input className="settings-input" value={formData.prowlarr.movieCategories} onChange={(event) => updateProwlarr({ movieCategories: event.target.value })} />
+              </label>
+              <label className="stacked-field">
+                <span>{t.tvCategories}</span>
+                <input className="settings-input" value={formData.prowlarr.tvCategories} onChange={(event) => updateProwlarr({ tvCategories: event.target.value })} />
               </label>
             </div>
-            <div className="stacked-field" style={{ marginTop: '0.9rem' }}>
-              <span>{t.torrentioSites}</span>
-              <div className="torrentio-site-grid">
-                {TORRENTIO_SITE_OPTIONS.map((site) => {
-                  const enabled = site.key === 'all'
-                    ? TORRENTIO_SITE_OPTIONS
-                      .filter((option) => option.key !== 'all')
-                      .every((option) => formData.torrentio?.enabledSites?.[option.key] !== false)
-                    : formData.torrentio?.enabledSites?.[site.key] !== false;
-                  const siteLabel = site.key === 'all'
-                    ? (formData.language === 'tr' ? 'Hepsi' : 'All')
-                    : site.label;
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.indexers}</h3>
+              <button className="icon-btn" onClick={refreshIndexers}><RefreshCcw className={indexerStatus === 'loading' ? 'spin' : ''} size={16} /></button>
+            </div>
+            <p className="settings-helper">{t.allIndexers}</p>
+            <div className="indexer-grid">
+              {indexers.map((indexer) => (
+                <article key={indexer.id} className={`indexer-card ${(formData.prowlarr.selectedIndexerIds || []).includes(indexer.id) ? 'active' : ''}`} onClick={() => toggleIndexerSelection(indexer.id)}>
+                  <div>
+                    <strong>{indexer.name}</strong>
+                    <span>{indexer.protocol}</span>
+                  </div>
+                  <button className="icon-btn danger" onClick={(event) => { event.stopPropagation(); handleDeleteIndexer(indexer.id); }}>
+                    <Trash2 size={14} />
+                  </button>
+                </article>
+              ))}
+            </div>
+            {!indexers.length && <div className="empty-box">{indexerStatus === 'failed' ? t.indexerFailed : t.noIndexers}</div>}
+          </div>
+
+          <div className="prowlarr-panel prowlarr-panel-wide">
+            <div className="prowlarr-panel-header">
+              <h3>{t.addIndexer}</h3>
+            </div>
+
+            <div className="schema-search-row single-flow">
+              <div className="search-shell">
+                <Search size={16} />
+                <input
+                  value={schemaQuery}
+                  onFocus={loadSchemas}
+                  onChange={(event) => {
+                    setSchemaQuery(event.target.value);
+                    setSchemaVisibleCount(80);
+                  }}
+                  placeholder={t.searchIndexer}
+                />
+              </div>
+            </div>
+
+            {filteredSchemas.length > 0 && !indexerDraft && (
+              <div className="schema-result-list">
+                {visibleSchemas.map((schema) => {
+                  const schemaName = schema.name || schema.implementationName || schema.definitionName;
+                  const schemaNameLower = (schemaName || '').toLowerCase();
+                  const isStarred = starredNames.includes(schemaNameLower);
+
                   return (
                     <button
-                      key={site.key}
-                      type="button"
-                      className={`torrentio-site-btn ${enabled ? 'active' : ''}`}
-                      onClick={() => toggleTorrentioSite(site.key)}
+                      key={schema.schemaId}
+                      className="schema-result-item"
+                      onClick={() => handleSelectSchema(schema.schemaId)}
                     >
-                      {siteLabel}
+                      <strong className="schema-title-line">
+                        {schemaName}
+                        {isStarred && <span className="schema-star">★</span>}
+                      </strong>
+                      <span className="schema-subtitle">{schema.implementation || schema.definitionName || schema.schemaId}</span>
                     </button>
                   );
                 })}
-              </div>
-            </div>
-            <p className="settings-helper" style={{ marginTop: '0.75rem' }}>{t.torrentioHint}</p>
-          </div>
-        </section>
-
-        <section className="settings-card settings-card-full prowlarr-card-shell">
-          <header className="settings-card-header">
-            <Radar size={18} />
-            <div>
-              <h2>{t.prowlarr}</h2>
-              <p>{t.prowlarrHint}</p>
-            </div>
-            <div className="settings-card-actions">
-              <button
-                type="button"
-                className="settings-collapse-btn"
-                onClick={handleOpenProwlarrDownload}
-              >
-                <span>{t.downloadProwlarr}</span>
-              </button>
-              <button
-                type="button"
-                className="settings-collapse-btn"
-                onClick={handleOpenProwlarrWebUI}
-              >
-                <span>{t.openProwlarrWebUI}</span>
-              </button>
-              <button
-                type="button"
-                className="settings-collapse-btn"
-                aria-expanded={prowlarrConfigOpen}
-                aria-controls="prowlarr-config-panel"
-                onClick={() => setProwlarrConfigOpen((current) => !current)}
-              >
-                {prowlarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                <span>{prowlarrConfigOpen ? t.hideConfig : t.showConfig}</span>
-              </button>
-            </div>
-          </header>
-
-          <div
-            id="prowlarr-config-panel"
-            className={`settings-collapsible ${prowlarrConfigOpen ? 'open' : 'closed'}`}
-            hidden={!prowlarrConfigOpen}
-          >
-            <div className="prowlarr-layout">
-            <div className="prowlarr-panel">
-              <div className="prowlarr-panel-header">
-                <h3>{t.engine}</h3>
-                <Toggle
-                  checked={formData.prowlarr.managed}
-                  onChange={async (checked) => {
-                    updateProwlarr({ managed: checked });
-                    if (checked) {
-                      updateRoot({ torrentioEnabled: false });
-                      await handleStartProwlarr({ ...formData.prowlarr, managed: true });
-                    } else {
-                      await handleStopProwlarr();
-                    }
-                  }}
-                />
-              </div>
-              <p className="settings-helper">{t.managed}</p>
-
-              <div className="input-action-row">
-                <input
-                  className="settings-input"
-                  value={formData.prowlarr.executablePath || ''}
-                  onChange={(event) => updateProwlarr({ executablePath: event.target.value })}
-                  placeholder={t.executable}
-                />
-                <button className="icon-btn" onClick={handleSelectExecutable}><FolderOpen size={18} /></button>
-              </div>
-
-              <div className="inline-fields">
-                <label className="stacked-field compact">
-                  <span>{t.port}</span>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    value={formData.prowlarr.port}
-                    onChange={(event) => updateProwlarr({ port: Number(event.target.value) || 9696 })}
-                  />
-                </label>
-                <div className="action-cluster">
-                  <button className="action-btn start" onClick={handleStartProwlarr} disabled={managedStatus === 'starting'}>
-                    {managedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
-                    {t.start}
+                {visibleSchemas.length < filteredSchemas.length && (
+                  <button
+                    className="schema-load-more"
+                    onClick={() => setSchemaVisibleCount((current) => current + 80)}
+                  >
+                    {t.loadMore}
                   </button>
-                  <button className="action-btn stop" onClick={handleStopProwlarr}>
-                    <Square size={16} />
-                    {t.stop}
+                )}
+              </div>
+            )}
+
+            {indexerDraft && (
+              <div className="draft-card">
+                <div className="draft-card-header">
+                  <h4>{t.indexerConfig}</h4>
+                  <button className="icon-btn" onClick={closeIndexerDraft} aria-label={t.closeIndexerConfig}>
+                    <X size={16} />
                   </button>
                 </div>
-              </div>
-
-              <div className="status-line">{renderManagedStatus(managedStatus, t)}</div>
-            </div>
-
-            <div className="prowlarr-panel">
-              <div className="prowlarr-panel-header">
-                <h3>{t.connection}</h3>
-                <Toggle
-                  checked={formData.prowlarr.enabled}
-                  onChange={async (checked) => {
-                    updateProwlarr({ enabled: checked });
-                    if (checked) {
-                      updateRoot({ torrentioEnabled: false });
-                      if (!formData.prowlarr.managed || managedStatus !== 'running') {
-                        updateProwlarr({ managed: true });
-                        await handleStartProwlarr({ ...formData.prowlarr, enabled: true, managed: true });
-                      }
-                      await refreshIndexers();
-                    }
-                  }}
-                />
-              </div>
-              <div className="panel-grid">
-                <label className="stacked-field">
-                  <span>{t.baseUrl}</span>
-                  <input className="settings-input" value={formData.prowlarr.baseUrl} onChange={(event) => updateProwlarr({ baseUrl: event.target.value })} />
-                </label>
-                <label className="stacked-field">
-                  <span>{t.prowlarrApiKey}</span>
-                  <input className="settings-input" type="password" value={formData.prowlarr.apiKey} onChange={(event) => updateProwlarr({ apiKey: event.target.value })} />
-                </label>
-                <label className="stacked-field">
-                  <span>{t.timeout}</span>
-                  <input className="settings-input" type="number" value={formData.prowlarr.timeout} onChange={(event) => updateProwlarr({ timeout: Number(event.target.value) || 10000 })} />
-                </label>
-                <button className="action-btn subtle full-height" onClick={handleTestProwlarr} disabled={prowlarrStatus === 'testing'}>
-                  {prowlarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
-                  {t.test}
-                </button>
-              </div>
-              <div className="status-line">{renderConnectionStatus(prowlarrStatus, t)}</div>
-            </div>
-
-            <div className="prowlarr-panel">
-              <div className="prowlarr-panel-header">
-                <h3>{t.filters}</h3>
-              </div>
-              <div className="panel-grid single-column">
-                <label className="stacked-field">
-                  <span>{t.movieCategories}</span>
-                  <input className="settings-input" value={formData.prowlarr.movieCategories} onChange={(event) => updateProwlarr({ movieCategories: event.target.value })} />
-                </label>
-                <label className="stacked-field">
-                  <span>{t.tvCategories}</span>
-                  <input className="settings-input" value={formData.prowlarr.tvCategories} onChange={(event) => updateProwlarr({ tvCategories: event.target.value })} />
-                </label>
-              </div>
-            </div>
-
-            <div className="prowlarr-panel">
-              <div className="prowlarr-panel-header">
-                <h3>{t.indexers}</h3>
-                <button className="icon-btn" onClick={refreshIndexers}><RefreshCcw className={indexerStatus === 'loading' ? 'spin' : ''} size={16} /></button>
-              </div>
-              <p className="settings-helper">{t.allIndexers}</p>
-              <div className="indexer-grid">
-                {indexers.map((indexer) => (
-                  <article key={indexer.id} className={`indexer-card ${(formData.prowlarr.selectedIndexerIds || []).includes(indexer.id) ? 'active' : ''}`} onClick={() => toggleIndexerSelection(indexer.id)}>
-                    <div>
-                      <strong>{indexer.name}</strong>
-                      <span>{indexer.protocol}</span>
-                    </div>
-                    <button className="icon-btn danger" onClick={(event) => { event.stopPropagation(); handleDeleteIndexer(indexer.id); }}>
-                      <Trash2 size={14} />
-                    </button>
-                  </article>
-                ))}
-              </div>
-              {!indexers.length && <div className="empty-box">{indexerStatus === 'failed' ? t.indexerFailed : t.noIndexers}</div>}
-            </div>
-
-              <div className="prowlarr-panel prowlarr-panel-wide">
-              <div className="prowlarr-panel-header">
-                <h3>{t.addIndexer}</h3>
-              </div>
-
-              <div className="schema-search-row single-flow">
-                <div className="search-shell">
-                  <Search size={16} />
-                  <input
-                    value={schemaQuery}
-                    onFocus={loadSchemas}
-                    onChange={(event) => {
-                      setSchemaQuery(event.target.value);
-                      setSchemaVisibleCount(80);
-                    }}
-                    placeholder={t.searchIndexer}
-                  />
-                </div>
-              </div>
-
-              {filteredSchemas.length > 0 && !indexerDraft && (
-                <div className="schema-result-list">
-                  {visibleSchemas.map((schema) => {
-                    const schemaName = schema.name || schema.implementationName || schema.definitionName;
-                    const schemaNameLower = (schemaName || '').toLowerCase();
-                    const isStarred = starredNames.includes(schemaNameLower);
-
-                    return (
-                      <button
-                        key={schema.schemaId}
-                        className="schema-result-item"
-                        onClick={() => handleSelectSchema(schema.schemaId)}
-                      >
-                        <strong className="schema-title-line">
-                          {schemaName}
-                          {isStarred && <span className="schema-star">★</span>}
-                        </strong>
-                        <span className="schema-subtitle">{schema.implementation || schema.definitionName || schema.schemaId}</span>
-                      </button>
-                    );
-                  })}
-                  {visibleSchemas.length < filteredSchemas.length && (
-                    <button
-                      className="schema-load-more"
-                      onClick={() => setSchemaVisibleCount((current) => current + 80)}
-                    >
-                      {t.loadMore}
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {indexerDraft && (
-                <div className="draft-card">
-                  <div className="draft-card-header">
-                    <h4>{t.indexerConfig}</h4>
-                    <button className="icon-btn" onClick={closeIndexerDraft} aria-label={t.closeIndexerConfig}>
-                      <X size={16} />
-                    </button>
-                  </div>
-                  <div className="panel-grid">
-                    <label className="stacked-field">
-                      <span>{t.indexerName}</span>
-                      <input className="settings-input" value={indexerDraft.name || ''} onChange={(event) => updateDraft({ name: event.target.value })} />
-                    </label>
-                    <label className="stacked-field compact">
-                      <span>{t.priority}</span>
-                      <input className="settings-input" type="number" value={indexerDraft.priority || 25} onChange={(event) => updateDraft({ priority: Number(event.target.value) || 25 })} />
-                    </label>
-                  </div>
-
-                  <div className="dynamic-grid">
-                    {(indexerDraft.fields || [])
-                      .filter((field) => !field.hidden && field.type !== 'info')
-                      .map((field) => (
-                        <DynamicField key={field.name} field={field} onChange={(value) => updateDraftField(field.name, value)} />
-                      ))}
-                  </div>
-
-                  <div className="draft-actions">
-                    <button className="action-btn subtle" onClick={handleTestIndexer} disabled={addState === 'testingIndexer'}>
-                      {addState === 'testingIndexer' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
-                      {t.testIndexer}
-                    </button>
-                    <button className="action-btn primary" onClick={handleAddIndexer} disabled={addState === 'addingIndexer'}>
-                      {addState === 'addingIndexer' ? <RefreshCcw className="spin" size={16} /> : <Save size={16} />}
-                      {t.saveIndexer}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-                <div className="status-line">{renderAddStatus(addState, t)}</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="settings-card settings-card-full prowlarr-card-shell">
-          <header className="settings-card-header">
-            <Film size={18} />
-            <div>
-              <h2>{t.radarr}</h2>
-              <p>{t.radarrHint}</p>
-            </div>
-            <div className="settings-card-actions">
-              <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrDownload}>
-                <span>{t.downloadRadarr}</span>
-              </button>
-              <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrWebUI}>
-                <span>{t.openRadarrWebUI}</span>
-              </button>
-              <button
-                type="button"
-                className="settings-collapse-btn"
-                aria-expanded={radarrConfigOpen}
-                aria-controls="radarr-config-panel"
-                onClick={() => setRadarrConfigOpen((current) => !current)}
-              >
-                {radarrConfigOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                <span>{radarrConfigOpen ? t.hideConfig : t.showConfig}</span>
-              </button>
-            </div>
-          </header>
-
-          <div
-            id="radarr-config-panel"
-            className={`settings-collapsible ${radarrConfigOpen ? 'open' : 'closed'}`}
-            hidden={!radarrConfigOpen}
-          >
-            <div className="prowlarr-layout">
-              <div className="prowlarr-panel">
-                <div className="prowlarr-panel-header">
-                  <h3>{t.engine}</h3>
-                  <Toggle
-                    checked={formData.radarrManaged === true}
-                    onChange={async (checked) => {
-                      updateRoot({ radarrManaged: checked });
-                      if (checked) {
-                        await handleStartRadarr({ ...getRadarrSettings(), radarrManaged: true });
-                      } else {
-                        await handleStopRadarr();
-                      }
-                    }}
-                  />
-                </div>
-                <p className="settings-helper">{t.radarrEngineHint}</p>
-
-                <div className="input-action-row">
-                  <input
-                    className="settings-input"
-                    value={formData.radarrExecutablePath || ''}
-                    onChange={(event) => updateRoot({ radarrExecutablePath: event.target.value })}
-                    placeholder={t.radarrExecutable}
-                  />
-                  <button className="icon-btn" onClick={handleSelectRadarrExecutable}><FolderOpen size={18} /></button>
-                </div>
-
-                <div className="inline-fields">
+                <div className="panel-grid">
+                  <label className="stacked-field">
+                    <span>{t.indexerName}</span>
+                    <input className="settings-input" value={indexerDraft.name || ''} onChange={(event) => updateDraft({ name: event.target.value })} />
+                  </label>
                   <label className="stacked-field compact">
-                    <span>{t.port}</span>
-                    <input
-                      className="settings-input"
-                      type="number"
-                      value={formData.radarrPort || 7878}
-                      onChange={(event) => updateRoot({ radarrPort: Number(event.target.value) || 7878 })}
-                    />
+                    <span>{t.priority}</span>
+                    <input className="settings-input" type="number" value={indexerDraft.priority || 25} onChange={(event) => updateDraft({ priority: Number(event.target.value) || 25 })} />
                   </label>
-                  <div className="action-cluster">
-                    <button className="action-btn start" onClick={handleStartRadarr} disabled={radarrManagedStatus === 'starting'}>
-                      {radarrManagedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
-                      {t.start}
-                    </button>
-                    <button className="action-btn stop" onClick={handleStopRadarr}>
-                      <Square size={16} />
-                      {t.stop}
-                    </button>
-                  </div>
                 </div>
-                <div className="status-line">{renderManagedStatus(radarrManagedStatus, t)}</div>
-              </div>
 
-              <div className="prowlarr-panel">
-                <div className="prowlarr-panel-header">
-                  <h3>{t.connection}</h3>
-                  <Toggle
-                    checked={formData.radarrEnabled === true}
-                    onChange={async (checked) => {
-                      updateRoot({ radarrEnabled: checked });
-                      if (checked) {
-                        if (!formData.radarrManaged || radarrManagedStatus !== 'running') {
-                          updateRoot({ radarrManaged: true });
-                          await handleStartRadarr({ ...getRadarrSettings(), radarrEnabled: true, radarrManaged: true });
-                        }
-                      }
-                    }}
-                  />
+                <div className="dynamic-grid">
+                  {(indexerDraft.fields || [])
+                    .filter((field) => !field.hidden && field.type !== 'info')
+                    .map((field) => (
+                      <DynamicField key={field.name} field={field} onChange={(value) => updateDraftField(field.name, value)} />
+                    ))}
                 </div>
-                <div className="panel-grid">
-                  <label className="stacked-field">
-                    <span>{t.radarrBaseUrl}</span>
-                    <input
-                      className="settings-input"
-                      value={formData.radarrBaseUrl || ''}
-                      onChange={(event) => updateRoot({ radarrBaseUrl: event.target.value })}
-                      placeholder="http://127.0.0.1:7878"
-                    />
-                  </label>
-                  <label className="stacked-field">
-                    <span>{t.radarrApiKey}</span>
-                    <div className="input-action-row">
-                      <input
-                        className="settings-input"
-                        type={radarrApiKeyVisible ? 'text' : 'password'}
-                        value={formData.radarrApiKey || ''}
-                        onChange={(event) => updateRoot({ radarrApiKey: event.target.value })}
-                      />
-                      <button type="button" className="icon-btn" onClick={() => setRadarrApiKeyVisible((v) => !v)}>
-                        {radarrApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
-                      </button>
-                    </div>
-                  </label>
-                  <label className="stacked-field">
-                    <span>{t.timeout}</span>
-                    <input
-                      className="settings-input"
-                      type="number"
-                      min="1000"
-                      step="500"
-                      value={formData.radarrTimeout || 10000}
-                      onChange={(event) => updateRoot({ radarrTimeout: Number(event.target.value || 10000) })}
-                    />
-                  </label>
-                  <button className="action-btn subtle full-height" onClick={handleTestRadarr} disabled={radarrStatus === 'testing'}>
-                    {radarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
-                    {t.test}
+
+                <div className="draft-actions">
+                  <button className="action-btn subtle" onClick={handleTestIndexer} disabled={addState === 'testingIndexer'}>
+                    {addState === 'testingIndexer' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
+                    {t.testIndexer}
                   </button>
-                </div>
-                <div className="status-line">{renderRadarrStatus(radarrStatus, t)}</div>
-              </div>
-
-              <div className="prowlarr-panel">
-                <div className="prowlarr-panel-header">
-                  <h3>{t.radarrDefaults}</h3>
-                </div>
-                <div className="panel-grid">
-                  <label className="stacked-field">
-                    <span>{t.radarrRootFolder}</span>
-                    <select
-                      className="settings-input"
-                      value={formData.radarrDefaultRootFolder || ''}
-                      onChange={(event) => updateRoot({ radarrDefaultRootFolder: event.target.value })}
-                    >
-                      <option value="">{t.selectRootFolder}</option>
-                      {radarrRootFolders.map((folder) => (
-                        <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {!radarrRootFolders.length && (
-                    <div className="radarr-warning-box" role="status">
-                      <strong>{t.radarrNoRootFoldersTitle}</strong>
-                      <span>{t.radarrNoRootFoldersHint}</span>
-                    </div>
-                  )}
-                  <label className="stacked-field">
-                    <span>{t.radarrQualityProfile}</span>
-                    <select
-                      className="settings-input"
-                      value={String(formData.radarrDefaultQualityProfileId ?? '')}
-                      onChange={(event) => updateRoot({ radarrDefaultQualityProfileId: event.target.value })}
-                    >
-                      <option value="">{t.selectQualityProfile}</option>
-                      {radarrQualityProfiles.map((profile) => (
-                        <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="toggle-field">
-                    <span>{t.radarrSearchAfterAdd}</span>
-                    <Toggle checked={formData.radarrSearchAfterAdd !== false} onChange={(checked) => updateRoot({ radarrSearchAfterAdd: checked })} />
-                  </label>
-                </div>
-              </div>
-
-              <div className="prowlarr-panel prowlarr-panel-wide">
-                <div className="prowlarr-panel-header">
-                  <h3>{t.prowlarrSync}</h3>
-                </div>
-                <p className="settings-helper">{t.prowlarrSyncHint}</p>
-                <div className="sync-status-grid">
-                  <div className="sync-status-item">
-                    <span>{t.prowlarrLabel}</span>
-                    <strong className={`sync-badge ${radarrProwlarrSyncStatus.prowlarr === 'connected' ? 'ok' : 'off'}`}>
-                      {radarrProwlarrSyncStatus.prowlarr === 'connected' ? t.connected : t.disconnected}
-                    </strong>
-                  </div>
-                  <div className="sync-status-item">
-                    <span>{t.radarrLabel}</span>
-                    <strong className={`sync-badge ${radarrProwlarrSyncStatus.radarr === 'connected' ? 'ok' : 'off'}`}>
-                      {radarrProwlarrSyncStatus.radarr === 'connected' ? t.connected : t.disconnected}
-                    </strong>
-                  </div>
-                  <div className="sync-status-item">
-                    <span>{t.syncStatusLabel}</span>
-                    <strong className={`sync-badge ${
-                      radarrProwlarrSyncStatus.sync === 'configured'
-                        ? 'ok'
-                        : (radarrProwlarrSyncStatus.sync === 'partial' ? 'warn' : 'off')
-                    }`}>
-                      {radarrProwlarrSyncStatus.sync === 'configured'
-                        ? t.syncConfiguredShort
-                        : (radarrProwlarrSyncStatus.sync === 'partial' ? t.syncPartial : t.notConfigured)}
-                    </strong>
-                  </div>
-                </div>
-                {radarrProwlarrSyncStatus.message ? (
-                  <div className="status-line sync-message">{radarrProwlarrSyncStatus.message}</div>
-                ) : null}
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="action-btn subtle"
-                    onClick={handleConnectRadarrToProwlarr}
-                    disabled={radarrProwlarrSyncBusy}
-                  >
-                    {t.connectRadarrToProwlarr}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-btn subtle"
-                    onClick={handleSyncRadarrNow}
-                    disabled={radarrProwlarrSyncBusy}
-                  >
-                    {t.syncNow}
+                  <button className="action-btn primary" onClick={handleAddIndexer} disabled={addState === 'addingIndexer'}>
+                    {addState === 'addingIndexer' ? <RefreshCcw className="spin" size={16} /> : <Save size={16} />}
+                    {t.saveIndexer}
                   </button>
                 </div>
               </div>
-            </div>
+            )}
+
+            <div className="status-line">{renderAddStatus(addState, t)}</div>
           </div>
-        </section>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderActiveSection = () => {
+    if (activeSection === 'general') return renderGeneralSection();
+    if (activeSection === 'tmdb') return renderTmdbSection();
+    if (activeSection === 'download') return renderDownloadSection();
+    if (activeSection === 'torrentio') return renderTorrentioSection();
+    if (activeSection === 'radarr') return renderRadarrSection();
+    if (activeSection === 'prowlarr') return renderProwlarrSection();
+    return renderGeneralSection();
+  };
+
+  return (
+    <div className="settings-view settings-view-redesign">
+      <div className="settings-topbar">
+        <div>
+          <h1>{t.title}</h1>
+          <p>{t.subtitle}</p>
+        </div>
+        <div className="settings-topbar-actions">
+          <div className={`settings-status-pill settings-status-pill--${statusTone}`}>
+            <span className="settings-status-dot" />
+            <span>{statusLabel}</span>
+          </div>
+          <button className="settings-save-btn" onClick={handleSave} disabled={saveState === 'saving'}>
+            {saveState === 'saving' ? <RefreshCcw className="spin" size={18} /> : <Save size={18} />}
+            {saveState === 'saved' ? t.saved : t.save}
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-layout">
+        <aside className="settings-sidebar">
+          {navGroups.map((group) => {
+            const isOpen = navGroupsOpen[group.id];
+            return (
+              <div key={group.id} className="settings-nav-group">
+                <button
+                  type="button"
+                  className="settings-nav-group-toggle"
+                  onClick={() => setNavGroupsOpen((current) => ({ ...current, [group.id]: !current[group.id] }))}
+                >
+                  <span>{group.label}</span>
+                  {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                {isOpen && (
+                  <div className="settings-nav-items">
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`settings-nav-item ${activeSection === item.id ? 'active' : ''}`}
+                          onClick={() => setActiveSection(item.id)}
+                        >
+                          <Icon size={16} />
+                          <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </aside>
+
+        <div className="settings-content-panel">
+          {renderActiveSection()}
+        </div>
       </div>
     </div>
   );
@@ -1397,19 +1569,33 @@ const renderAddStatus = (state, t) => {
 const getCopy = (language) => ({
   tr: {
     title: 'Ayarlar',
-    subtitle: 'Hesap, metadata ve Prowlarr kontrolu tek yerden yonetiliyor.',
+    subtitle: 'Hesap, kaynaklar ve indirme ayarlarini yonet.',
     save: 'Kaydet',
     saved: 'Kaydedildi',
+    savingNow: 'Degisiklikler kaydediliyor',
+    allChangesSaved: 'Tum degisiklikler kaydedildi',
+    unsavedChanges: 'Degisiklikler hazir',
+    navGeneral: 'GENEL',
+    navAccount: 'HESAP & API',
+    navDownload: 'INDIRME',
+    navSources: 'KAYNAKLAR',
+    generalSettings: 'Genel Ayarlar',
+    generalSettingsHint: 'Uygulamanin temel ayarlarini yapilandirin.',
     language: 'Dil',
     languageHint: 'Arayuz dilini aninda degistir.',
     tmdb: 'TMDB API Anahtari',
+    tmdbNav: 'TMDB API',
     tmdbHint: 'Metadata ve afis aramalari burada calisir.',
+    tmdbKeyLabel: 'API anahtari',
+    tmdbKeyDesc: 'TMDB uzerinden veri cekmek icin kullanilir.',
     prowlarr: 'Prowlarr',
     radarr: 'Radarr',
     downloadEngine: 'Indirme Motoru',
     downloadEngineHint: 'Gomulu torrent veya qBittorrent sec.',
     embeddedTorrent: 'Gomulu Torrent',
+    embeddedTorrentDesc: 'Uygulama icindeki torrent motorunu kullan.',
     qbittorrent: 'qBittorrent',
+    qbittorrentDesc: 'Harici qBittorrent istemcisine gecis yap.',
     qbBaseUrl: 'qBittorrent Web UI URL',
     qbUsername: 'qBittorrent Kullanici Adi',
     qbPassword: 'qBittorrent Sifre',
@@ -1506,19 +1692,33 @@ const getCopy = (language) => ({
   },
   en: {
     title: 'Settings',
-    subtitle: 'Account, metadata and Prowlarr control live in one place.',
+    subtitle: 'Manage account, sources, and download settings.',
     save: 'Save',
     saved: 'Saved',
+    savingNow: 'Saving changes',
+    allChangesSaved: 'All changes saved',
+    unsavedChanges: 'Changes ready',
+    navGeneral: 'GENERAL',
+    navAccount: 'ACCOUNT & API',
+    navDownload: 'DOWNLOAD',
+    navSources: 'SOURCES',
+    generalSettings: 'General Settings',
+    generalSettingsHint: 'Configure the app basics.',
     language: 'Language',
     languageHint: 'Switch the interface language instantly.',
     tmdb: 'TMDB API Key',
+    tmdbNav: 'TMDB API',
     tmdbHint: 'Metadata and artwork lookups run here.',
+    tmdbKeyLabel: 'API key',
+    tmdbKeyDesc: 'Used for fetching TMDB data.',
     prowlarr: 'Prowlarr',
     radarr: 'Radarr',
     downloadEngine: 'Download Engine',
     downloadEngineHint: 'Choose embedded torrent or qBittorrent.',
     embeddedTorrent: 'Embedded Torrent',
+    embeddedTorrentDesc: 'Use the built-in torrent engine.',
     qbittorrent: 'qBittorrent',
+    qbittorrentDesc: 'Switch to an external qBittorrent client.',
     qbBaseUrl: 'qBittorrent Web UI URL',
     qbUsername: 'qBittorrent Username',
     qbPassword: 'qBittorrent Password',
