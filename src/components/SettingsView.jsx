@@ -56,6 +56,7 @@ const SettingsView = ({ settings, setSettings }) => {
   });
   const [saveState, setSaveState] = useState('');
   const [qbRadarrState, setQbRadarrState] = useState('');
+  const [qbSonarrState, setQbSonarrState] = useState('');
   const [embeddedDownloadDir, setEmbeddedDownloadDir] = useState('');
   const [prowlarrStatus, setProwlarrStatus] = useState('');
   const [managedStatus, setManagedStatus] = useState('');
@@ -72,10 +73,15 @@ const SettingsView = ({ settings, setSettings }) => {
   const [radarrConfigOpen] = useState(true);
   const [tmdbApiKeyVisible, setTmdbApiKeyVisible] = useState(false);
   const [radarrApiKeyVisible, setRadarrApiKeyVisible] = useState(false);
+  const [sonarrApiKeyVisible, setSonarrApiKeyVisible] = useState(false);
   const [radarrManagedStatus, setRadarrManagedStatus] = useState('');
+  const [sonarrManagedStatus, setSonarrManagedStatus] = useState('');
   const [radarrStatus, setRadarrStatus] = useState('');
   const [radarrRootFolders, setRadarrRootFolders] = useState([]);
   const [radarrQualityProfiles, setRadarrQualityProfiles] = useState([]);
+  const [sonarrStatus, setSonarrStatus] = useState('');
+  const [sonarrRootFolders, setSonarrRootFolders] = useState([]);
+  const [sonarrQualityProfiles, setSonarrQualityProfiles] = useState([]);
   const [radarrProwlarrSyncStatus, setRadarrProwlarrSyncStatus] = useState({
     prowlarr: 'disconnected',
     radarr: 'disconnected',
@@ -83,6 +89,13 @@ const SettingsView = ({ settings, setSettings }) => {
     message: '',
   });
   const [radarrProwlarrSyncBusy, setRadarrProwlarrSyncBusy] = useState(false);
+  const [sonarrProwlarrSyncStatus, setSonarrProwlarrSyncStatus] = useState({
+    prowlarr: 'disconnected',
+    sonarr: 'disconnected',
+    sync: 'notConfigured',
+    message: '',
+  });
+  const [sonarrProwlarrSyncBusy, setSonarrProwlarrSyncBusy] = useState(false);
   const [activeSection, setActiveSection] = useState('general');
   const [embeddedTorrentSettings, setEmbeddedTorrentSettings] = useState(DEFAULT_EMBEDDED_TORRENT_SETTINGS);
   const [embeddedAdvancedOpen, setEmbeddedAdvancedOpen] = useState(false);
@@ -143,6 +156,36 @@ const SettingsView = ({ settings, setSettings }) => {
   }, [formData.radarrEnabled, formData.radarrBaseUrl, formData.radarrApiKey]);
 
   useEffect(() => {
+    if (!formData.sonarrEnabled) return;
+    if (!formData.sonarrBaseUrl || !formData.sonarrApiKey) return;
+    loadSonarrLists().catch(() => {});
+  }, [formData.sonarrEnabled, formData.sonarrBaseUrl, formData.sonarrApiKey]);
+
+  useEffect(() => {
+    if (activeSection !== 'sonarr') return undefined;
+    if (!formData.sonarrEnabled) return undefined;
+    if (!formData.sonarrBaseUrl || !formData.sonarrApiKey) return undefined;
+
+    const refresh = () => {
+      loadSonarrLists().catch(() => {});
+    };
+
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    const handleVisibility = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [activeSection, formData.sonarrEnabled, formData.sonarrBaseUrl, formData.sonarrApiKey]);
+
+  useEffect(() => {
     if (!radarrConfigOpen) return;
     if (!formData.radarrEnabled) return;
     if (!formData.radarrBaseUrl || !formData.radarrApiKey) return;
@@ -155,6 +198,23 @@ const SettingsView = ({ settings, setSettings }) => {
     formData.radarrEnabled,
     formData.radarrBaseUrl,
     formData.radarrApiKey,
+    formData.prowlarr?.baseUrl,
+    formData.prowlarr?.apiKey,
+  ]);
+
+  useEffect(() => {
+    if (activeSection !== 'sonarr') return;
+    if (!formData.sonarrEnabled) return;
+    if (!formData.sonarrBaseUrl || !formData.sonarrApiKey) return;
+    if (!formData.prowlarr?.baseUrl || !formData.prowlarr?.apiKey) return;
+    if (sonarrProwlarrSyncBusy) return;
+    if (sonarrProwlarrSyncStatus.sync === 'configured') return;
+    handleSyncSonarrNow();
+  }, [
+    activeSection,
+    formData.sonarrEnabled,
+    formData.sonarrBaseUrl,
+    formData.sonarrApiKey,
     formData.prowlarr?.baseUrl,
     formData.prowlarr?.apiKey,
   ]);
@@ -199,7 +259,17 @@ const SettingsView = ({ settings, setSettings }) => {
         || 'radarrTimeout' in changes
         || 'radarrDefaultRootFolder' in changes
         || 'radarrDefaultQualityProfileId' in changes
-        || 'radarrSearchAfterAdd' in changes) {
+        || 'radarrSearchAfterAdd' in changes
+        || 'sonarrEnabled' in changes
+        || 'sonarrManaged' in changes
+        || 'sonarrBaseUrl' in changes
+        || 'sonarrApiKey' in changes
+        || 'sonarrExecutablePath' in changes
+        || 'sonarrPort' in changes
+        || 'sonarrTimeout' in changes
+        || 'sonarrDefaultRootFolder' in changes
+        || 'sonarrDefaultQualityProfileId' in changes
+        || 'sonarrSearchAfterAdd' in changes) {
         window.electronAPI?.saveSettings?.(next).then(() => setSettings(next));
       }
       return next;
@@ -217,6 +287,20 @@ const SettingsView = ({ settings, setSettings }) => {
     radarrDefaultRootFolder: String(formData.radarrDefaultRootFolder || ''),
     radarrDefaultQualityProfileId: formData.radarrDefaultQualityProfileId ?? '',
     radarrSearchAfterAdd: formData.radarrSearchAfterAdd !== false,
+    ...override,
+  });
+
+  const getSonarrSettings = (override = {}) => ({
+    sonarrEnabled: formData.sonarrEnabled === true,
+    sonarrManaged: formData.sonarrManaged === true,
+    sonarrBaseUrl: String(formData.sonarrBaseUrl || ''),
+    sonarrApiKey: String(formData.sonarrApiKey || ''),
+    sonarrExecutablePath: String(formData.sonarrExecutablePath || ''),
+    sonarrPort: Number(formData.sonarrPort || 8989),
+    sonarrTimeout: Number(formData.sonarrTimeout || 10000),
+    sonarrDefaultRootFolder: String(formData.sonarrDefaultRootFolder || ''),
+    sonarrDefaultQualityProfileId: formData.sonarrDefaultQualityProfileId ?? '',
+    sonarrSearchAfterAdd: formData.sonarrSearchAfterAdd !== false,
     ...override,
   });
 
@@ -275,10 +359,28 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
+  const handleOpenSonarrDownload = async () => {
+    await window.electronAPI?.openSonarrDownloadPage?.();
+  };
+
+  const handleOpenSonarrWebUI = async () => {
+    const result = await window.electronAPI?.openSonarrWebUI?.(getSonarrSettings());
+    if (!result?.ok) {
+      alert(result?.error || 'Sonarr URL could not be opened');
+    }
+  };
+
   const handleSelectRadarrExecutable = async () => {
     const executablePath = await window.electronAPI?.selectRadarrExecutable?.();
     if (executablePath) {
       updateRoot({ radarrExecutablePath: executablePath });
+    }
+  };
+
+  const handleSelectSonarrExecutable = async () => {
+    const executablePath = await window.electronAPI?.selectSonarrExecutable?.();
+    if (executablePath) {
+      updateRoot({ sonarrExecutablePath: executablePath });
     }
   };
 
@@ -305,6 +407,47 @@ const SettingsView = ({ settings, setSettings }) => {
     await window.electronAPI?.stopManagedRadarr?.();
     updateRoot({ radarrEnabled: false });
     setRadarrManagedStatus('stopped');
+  };
+
+  const handleStartSonarr = async (configOverride) => {
+    setSonarrManagedStatus('starting');
+    const configToStart = configOverride || getSonarrSettings();
+    const result = await window.electronAPI?.startManagedSonarr?.(configToStart);
+    if (result?.ok) {
+      updateRoot({
+        sonarrManaged: true,
+        sonarrEnabled: true,
+        sonarrBaseUrl: result.sonarrBaseUrl || configToStart.sonarrBaseUrl,
+        sonarrApiKey: result.sonarrApiKey || configToStart.sonarrApiKey,
+        sonarrExecutablePath: result.sonarrExecutablePath || configToStart.sonarrExecutablePath,
+        sonarrPort: Number(result.sonarrPort || configToStart.sonarrPort || 8989),
+      });
+      setSonarrManagedStatus(result.externalProcessStopped ? 'restarted' : 'running');
+      return;
+    }
+    setSonarrManagedStatus('missing');
+  };
+
+  const handleStopSonarr = async () => {
+    await window.electronAPI?.stopManagedSonarr?.();
+    updateRoot({ sonarrEnabled: false });
+    setSonarrManagedStatus('stopped');
+  };
+
+  const handleEnableSonarrConnection = async () => {
+    updateRoot({ sonarrEnabled: true });
+    if (!formData.sonarrManaged || sonarrManagedStatus !== 'running') {
+      updateRoot({ sonarrManaged: true });
+      await handleStartSonarr({ ...getSonarrSettings(), sonarrEnabled: true, sonarrManaged: true });
+    }
+    await loadSonarrLists().catch(() => {});
+  };
+
+  const handleDisableSonarrConnection = async () => {
+    updateRoot({ sonarrEnabled: false });
+    if (formData.sonarrManaged) {
+      await handleStopSonarr();
+    }
   };
 
   const loadRadarrLists = async (custom = null) => {
@@ -354,6 +497,30 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
+  const handleTestSonarr = async () => {
+    setSonarrStatus('testing');
+    try {
+      const current = getSonarrSettings();
+      if (!current.sonarrEnabled) {
+        setSonarrStatus('disabled');
+        return;
+      }
+      if (!current.sonarrBaseUrl || !current.sonarrApiKey) {
+        setSonarrStatus('missing');
+        return;
+      }
+      const result = await window.electronAPI?.sonarrTestConnection?.(current);
+      if (!result?.ok) {
+        setSonarrStatus(`failed:${result?.error || ''}`);
+        return;
+      }
+      await loadSonarrLists(current);
+      setSonarrStatus(`ok:${result.version || ''}`);
+    } catch (err) {
+      setSonarrStatus(`failed:${err?.message || ''}`);
+    }
+  };
+
   const handleConnectRadarrToProwlarr = async () => {
     setRadarrProwlarrSyncBusy(true);
     try {
@@ -395,6 +562,50 @@ const SettingsView = ({ settings, setSettings }) => {
       });
     } finally {
       setRadarrProwlarrSyncBusy(false);
+    }
+  };
+
+  const handleConnectSonarrToProwlarr = async () => {
+    setSonarrProwlarrSyncBusy(true);
+    try {
+      const result = await window.electronAPI?.prowlarrConnectSonarr?.();
+      setSonarrProwlarrSyncStatus({
+        prowlarr: result?.prowlarr || (result?.ok ? 'connected' : 'disconnected'),
+        sonarr: result?.sonarr || (result?.ok ? 'connected' : 'disconnected'),
+        sync: result?.sync || (result?.ok ? 'configured' : 'notConfigured'),
+        message: result?.ok ? (result?.message || t.syncConfigured) : (result?.error || t.syncFailed),
+      });
+    } catch (err) {
+      setSonarrProwlarrSyncStatus({
+        prowlarr: 'disconnected',
+        sonarr: 'disconnected',
+        sync: 'notConfigured',
+        message: err?.message || t.syncFailed,
+      });
+    } finally {
+      setSonarrProwlarrSyncBusy(false);
+    }
+  };
+
+  const handleSyncSonarrNow = async () => {
+    setSonarrProwlarrSyncBusy(true);
+    try {
+      const result = await window.electronAPI?.prowlarrSyncSonarr?.();
+      setSonarrProwlarrSyncStatus({
+        prowlarr: result?.prowlarr || (result?.ok ? 'connected' : 'disconnected'),
+        sonarr: result?.sonarr || (result?.ok ? 'connected' : 'disconnected'),
+        sync: result?.sync || (result?.ok ? 'configured' : 'notConfigured'),
+        message: result?.ok ? (result?.message || t.syncConfigured) : (result?.error || t.syncFailed),
+      });
+    } catch (err) {
+      setSonarrProwlarrSyncStatus({
+        prowlarr: 'disconnected',
+        sonarr: 'disconnected',
+        sync: 'notConfigured',
+        message: err?.message || t.syncFailed,
+      });
+    } finally {
+      setSonarrProwlarrSyncBusy(false);
     }
   };
 
@@ -449,6 +660,29 @@ const SettingsView = ({ settings, setSettings }) => {
     updateProwlarr({ enabled: false });
     if (formData.prowlarr.managed) {
       await handleStopProwlarr();
+    }
+  };
+
+  const loadSonarrLists = async (custom = null) => {
+    const sonarrSettings = custom || getSonarrSettings();
+    if (!sonarrSettings.sonarrBaseUrl || !sonarrSettings.sonarrApiKey) return;
+    const [rootRes, qualityRes] = await Promise.all([
+      window.electronAPI?.sonarrGetRootFolders?.(sonarrSettings),
+      window.electronAPI?.sonarrGetQualityProfiles?.(sonarrSettings),
+    ]);
+    if (rootRes?.ok) {
+      const items = Array.isArray(rootRes.items) ? rootRes.items : [];
+      setSonarrRootFolders(items);
+      if (!sonarrSettings.sonarrDefaultRootFolder && items[0]?.path) {
+        updateRoot({ sonarrDefaultRootFolder: items[0].path });
+      }
+    }
+    if (qualityRes?.ok) {
+      const items = Array.isArray(qualityRes.items) ? qualityRes.items : [];
+      setSonarrQualityProfiles(items);
+      if ((sonarrSettings.sonarrDefaultQualityProfileId === '' || sonarrSettings.sonarrDefaultQualityProfileId === null) && items[0]?.id != null) {
+        updateRoot({ sonarrDefaultQualityProfileId: items[0].id });
+      }
     }
   };
 
@@ -584,6 +818,7 @@ const SettingsView = ({ settings, setSettings }) => {
     { value: 'downloads', label: t.pageDownloads, icon: Download },
     { value: 'search', label: t.pageSearch, icon: Search },
     { value: 'radarr', label: 'Radarr', icon: Radar },
+    { value: 'sonarr', label: 'Sonarr', icon: Tv },
     { value: 'settings', label: t.pageSettings, icon: SettingsIcon },
   ]), [t]);
   const starredNames = ['yts', 'the pirate bay', 'nyaa.si'];
@@ -669,6 +904,7 @@ const SettingsView = ({ settings, setSettings }) => {
         { id: 'torrentio', label: 'Torrentio', icon: Globe },
         { id: 'prowlarr', label: t.prowlarr, icon: Radar },
         { id: 'radarr', label: t.radarr, icon: Film },
+        { id: 'sonarr', label: t.sonarr, icon: Tv },
       ],
     },
     {
@@ -1208,76 +1444,168 @@ const SettingsView = ({ settings, setSettings }) => {
           </label>
         </div>
         <p className="settings-helper">{t.qbNote}</p>
-        <div className="draft-actions">
-          <button
-            type="button"
-            className="action-btn subtle"
-            onClick={async () => {
-              setQbRadarrState('checking');
-              const payload = {
-                settings: {
-                  radarrBaseUrl: formData.radarrBaseUrl,
-                  radarrApiKey: formData.radarrApiKey,
-                  radarrTimeout: formData.radarrTimeout || 10000,
-                },
-                qbittorrent: {
-                  baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
-                  username: formData.qbittorrent?.username || '',
-                  password: formData.qbittorrent?.password || '',
-                },
-              };
-              const result = await window.electronAPI?.radarrCheckQbittorrentClient?.(payload);
-              if (!result?.ok) {
-                setQbRadarrState(`failed:${result?.error || ''}`);
-                return;
-              }
-              if (!result?.exists) {
-                setQbRadarrState('check-missing');
-                return;
-              }
-              if (result?.matches) {
-                setQbRadarrState('check-exists');
-                return;
-              }
-              setQbRadarrState('check-different');
-            }}
-          >
-            <Shield size={16} />
-            {t.checkQbInRadarr}
-          </button>
-          <button
-            type="button"
-            className="action-btn primary"
-            onClick={async () => {
-              if (formData.qbittorrentEnabled === false) {
-                setQbRadarrState(`failed:${formData.language === 'tr' ? 'qBittorrent kapali.' : 'qBittorrent is disabled.'}`);
-                return;
-              }
-              setQbRadarrState('saving');
-              const payload = {
-                settings: {
-                  radarrBaseUrl: formData.radarrBaseUrl,
-                  radarrApiKey: formData.radarrApiKey,
-                  radarrTimeout: formData.radarrTimeout || 10000,
-                },
-                qbittorrent: {
-                  baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
-                  username: formData.qbittorrent?.username || '',
-                  password: formData.qbittorrent?.password || '',
-                },
-              };
-              const result = await window.electronAPI?.radarrUpsertQbittorrentClient?.(payload);
-              if (result?.ok) {
-                setQbRadarrState(result?.updated ? 'exists' : 'saved');
-                return;
-              }
-              setQbRadarrState(`failed:${result?.error || ''}`);
-            }}
-          >
-            <Save size={16} />
-            {t.addQbToRadarr}
-          </button>
-          <span className="status-line">{renderQbRadarrState(qbRadarrState, t)}</span>
+        <div className="automation-client-grid">
+          <article className="automation-client-card">
+            <div className="automation-client-header">
+              <div className="automation-client-title">
+                <Film size={16} />
+                <strong>Radarr</strong>
+              </div>
+              <span className="automation-client-hint">{t.qbRadarrTargetHint}</span>
+            </div>
+            <div className="draft-actions">
+              <button
+                type="button"
+                className="action-btn subtle"
+                onClick={async () => {
+                  setQbRadarrState('checking');
+                  const payload = {
+                    settings: {
+                      radarrBaseUrl: formData.radarrBaseUrl,
+                      radarrApiKey: formData.radarrApiKey,
+                      radarrTimeout: formData.radarrTimeout || 10000,
+                    },
+                    qbittorrent: {
+                      baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                      username: formData.qbittorrent?.username || '',
+                      password: formData.qbittorrent?.password || '',
+                    },
+                  };
+                  const result = await window.electronAPI?.radarrCheckQbittorrentClient?.(payload);
+                  if (!result?.ok) {
+                    setQbRadarrState(`failed:${result?.error || ''}`);
+                    return;
+                  }
+                  if (!result?.exists) {
+                    setQbRadarrState('check-missing');
+                    return;
+                  }
+                  if (result?.matches) {
+                    setQbRadarrState('check-exists');
+                    return;
+                  }
+                  setQbRadarrState('check-different');
+                }}
+              >
+                <Shield size={16} />
+                {t.checkQbInRadarr}
+              </button>
+              <button
+                type="button"
+                className="action-btn primary"
+                onClick={async () => {
+                  if (formData.qbittorrentEnabled === false) {
+                    setQbRadarrState(`failed:${formData.language === 'tr' ? 'qBittorrent kapali.' : 'qBittorrent is disabled.'}`);
+                    return;
+                  }
+                  setQbRadarrState('saving');
+                  const payload = {
+                    settings: {
+                      radarrBaseUrl: formData.radarrBaseUrl,
+                      radarrApiKey: formData.radarrApiKey,
+                      radarrTimeout: formData.radarrTimeout || 10000,
+                    },
+                    qbittorrent: {
+                      baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                      username: formData.qbittorrent?.username || '',
+                      password: formData.qbittorrent?.password || '',
+                    },
+                  };
+                  const result = await window.electronAPI?.radarrUpsertQbittorrentClient?.(payload);
+                  if (result?.ok) {
+                    setQbRadarrState(result?.updated ? 'exists' : 'saved');
+                    return;
+                  }
+                  setQbRadarrState(`failed:${result?.error || ''}`);
+                }}
+              >
+                <Save size={16} />
+                {t.addQbToRadarr}
+              </button>
+            </div>
+            <span className="status-line">{renderQbRadarrState(qbRadarrState, t)}</span>
+          </article>
+
+          <article className="automation-client-card">
+            <div className="automation-client-header">
+              <div className="automation-client-title">
+                <Tv size={16} />
+                <strong>Sonarr</strong>
+              </div>
+              <span className="automation-client-hint">{t.qbSonarrTargetHint}</span>
+            </div>
+            <div className="draft-actions">
+              <button
+                type="button"
+                className="action-btn subtle"
+                onClick={async () => {
+                  setQbSonarrState('checking');
+                  const payload = {
+                    settings: {
+                      sonarrBaseUrl: formData.sonarrBaseUrl,
+                      sonarrApiKey: formData.sonarrApiKey,
+                      sonarrTimeout: formData.sonarrTimeout || 10000,
+                    },
+                    qbittorrent: {
+                      baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                      username: formData.qbittorrent?.username || '',
+                      password: formData.qbittorrent?.password || '',
+                    },
+                  };
+                  const result = await window.electronAPI?.sonarrCheckQbittorrentClient?.(payload);
+                  if (!result?.ok) {
+                    setQbSonarrState(`failed:${result?.error || ''}`);
+                    return;
+                  }
+                  if (!result?.exists) {
+                    setQbSonarrState('check-missing');
+                    return;
+                  }
+                  if (result?.matches) {
+                    setQbSonarrState('check-exists');
+                    return;
+                  }
+                  setQbSonarrState('check-different');
+                }}
+              >
+                <Shield size={16} />
+                {t.checkQbInSonarr}
+              </button>
+              <button
+                type="button"
+                className="action-btn primary"
+                onClick={async () => {
+                  if (formData.qbittorrentEnabled === false) {
+                    setQbSonarrState(`failed:${formData.language === 'tr' ? 'qBittorrent kapali.' : 'qBittorrent is disabled.'}`);
+                    return;
+                  }
+                  setQbSonarrState('saving');
+                  const payload = {
+                    settings: {
+                      sonarrBaseUrl: formData.sonarrBaseUrl,
+                      sonarrApiKey: formData.sonarrApiKey,
+                      sonarrTimeout: formData.sonarrTimeout || 10000,
+                    },
+                    qbittorrent: {
+                      baseUrl: formData.qbittorrent?.baseUrl || 'http://127.0.0.1:8080',
+                      username: formData.qbittorrent?.username || '',
+                      password: formData.qbittorrent?.password || '',
+                    },
+                  };
+                  const result = await window.electronAPI?.sonarrUpsertQbittorrentClient?.(payload);
+                  if (result?.ok) {
+                    setQbSonarrState(result?.updated ? 'exists' : 'saved');
+                    return;
+                  }
+                  setQbSonarrState(`failed:${result?.error || ''}`);
+                }}
+              >
+                <Save size={16} />
+                {t.addQbToSonarr}
+              </button>
+            </div>
+            <span className="status-line">{renderQbSonarrState(qbSonarrState, t)}</span>
+          </article>
         </div>
       </div>
     </section>
@@ -1636,6 +1964,240 @@ const SettingsView = ({ settings, setSettings }) => {
     </section>
   );
 
+  const renderSonarrSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Tv size={18} />
+          <div>
+            <h2>{t.sonarr}</h2>
+            <p>{t.sonarrHint}</p>
+          </div>
+        </div>
+        <div className="settings-card-actions settings-card-actions--wrap">
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenSonarrDownload}>
+            <span>{t.downloadSonarr}</span>
+          </button>
+          <button type="button" className="settings-collapse-btn" onClick={handleOpenSonarrWebUI}>
+            <span>{t.openSonarrWebUI}</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="settings-collapsible open">
+        <div className="prowlarr-layout">
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.engine}</h3>
+              <Toggle
+                checked={formData.sonarrManaged === true}
+                onChange={async (checked) => {
+                  updateRoot({ sonarrManaged: checked });
+                  if (checked) {
+                    await handleStartSonarr({ ...getSonarrSettings(), sonarrManaged: true });
+                  } else {
+                    await handleStopSonarr();
+                  }
+                }}
+              />
+            </div>
+            <p className="settings-helper">{t.sonarrEngineHint}</p>
+
+            <div className="input-action-row">
+              <input
+                className="settings-input"
+                value={formData.sonarrExecutablePath || ''}
+                onChange={(event) => updateRoot({ sonarrExecutablePath: event.target.value })}
+                placeholder={t.sonarrExecutable}
+              />
+              <button className="icon-btn" onClick={handleSelectSonarrExecutable}><FolderOpen size={18} /></button>
+            </div>
+
+            <div className="inline-fields">
+              <label className="stacked-field compact">
+                <span>{t.port}</span>
+                <input
+                  className="settings-input"
+                  type="number"
+                  value={formData.sonarrPort || 8989}
+                  onChange={(event) => updateRoot({ sonarrPort: Number(event.target.value) || 8989 })}
+                />
+              </label>
+              <div className="action-cluster">
+                <button className="action-btn start" onClick={handleEnableSonarrConnection} disabled={sonarrManagedStatus === 'starting'}>
+                  {sonarrManagedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
+                  {t.start}
+                </button>
+                <button className="action-btn stop" onClick={handleDisableSonarrConnection}>
+                  <Square size={16} />
+                  {t.stop}
+                </button>
+              </div>
+            </div>
+            <div className="status-line">{renderSonarrManagedStatus(sonarrManagedStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.connection}</h3>
+              <Toggle
+                checked={formData.sonarrEnabled === true}
+                onChange={async (checked) => {
+                  if (checked) {
+                    await handleEnableSonarrConnection();
+                  } else {
+                    await handleDisableSonarrConnection();
+                  }
+                }}
+              />
+            </div>
+            <div className="panel-grid">
+              <label className="stacked-field">
+                <span>{t.sonarrBaseUrl}</span>
+                <input
+                  className="settings-input"
+                  value={formData.sonarrBaseUrl || ''}
+                  onChange={(event) => updateRoot({ sonarrBaseUrl: event.target.value })}
+                  placeholder="http://127.0.0.1:8989"
+                />
+              </label>
+              <label className="stacked-field">
+                <span>{t.sonarrApiKey}</span>
+                <div className="input-action-row">
+                  <input
+                    className="settings-input"
+                    type={sonarrApiKeyVisible ? 'text' : 'password'}
+                    value={formData.sonarrApiKey || ''}
+                    onChange={(event) => updateRoot({ sonarrApiKey: event.target.value })}
+                  />
+                  <button type="button" className="icon-btn" onClick={() => setSonarrApiKeyVisible((current) => !current)}>
+                    {sonarrApiKeyVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </label>
+              <label className="stacked-field">
+                <span>{t.timeout}</span>
+                <input
+                  className="settings-input"
+                  type="number"
+                  min="1000"
+                  step="500"
+                  value={formData.sonarrTimeout || 10000}
+                  onChange={(event) => updateRoot({ sonarrTimeout: Number(event.target.value || 10000) })}
+                />
+              </label>
+              <button className="action-btn subtle full-height" onClick={handleTestSonarr} disabled={sonarrStatus === 'testing'}>
+                {sonarrStatus === 'testing' ? <RefreshCcw className="spin" size={16} /> : <Shield size={16} />}
+                {t.test}
+              </button>
+            </div>
+            <div className="status-line">{renderSonarrStatus(sonarrStatus, t)}</div>
+          </div>
+
+          <div className="prowlarr-panel">
+            <div className="prowlarr-panel-header">
+              <h3>{t.sonarrDefaults}</h3>
+            </div>
+            <div className="panel-grid">
+              <label className="stacked-field">
+                <span>{t.sonarrRootFolder}</span>
+                <CustomSelect
+                  value={formData.sonarrDefaultRootFolder || ''}
+                  onSelect={(value) => updateRoot({ sonarrDefaultRootFolder: value })}
+                  options={[
+                    { value: '', label: t.selectRootFolder },
+                    ...sonarrRootFolders.map((folder) => ({
+                      value: folder.path,
+                      label: folder.path,
+                    })),
+                  ]}
+                />
+              </label>
+              {!sonarrRootFolders.length && (
+                <div className="radarr-warning-box" role="status">
+                  <strong>{t.sonarrNoRootFoldersTitle}</strong>
+                  <span>{t.sonarrNoRootFoldersHint}</span>
+                </div>
+              )}
+              <label className="stacked-field">
+                <span>{t.sonarrQualityProfile}</span>
+                <CustomSelect
+                  value={String(formData.sonarrDefaultQualityProfileId ?? '')}
+                  onSelect={(value) => updateRoot({ sonarrDefaultQualityProfileId: value })}
+                  options={[
+                    { value: '', label: t.selectQualityProfile },
+                    ...sonarrQualityProfiles.map((profile) => ({
+                      value: String(profile.id),
+                      label: profile.name,
+                    })),
+                  ]}
+                />
+              </label>
+              <label className="toggle-field">
+                <span>{t.sonarrSearchAfterAdd}</span>
+                <Toggle checked={formData.sonarrSearchAfterAdd !== false} onChange={(checked) => updateRoot({ sonarrSearchAfterAdd: checked })} />
+              </label>
+            </div>
+          </div>
+
+          <div className="prowlarr-panel prowlarr-panel-wide">
+            <div className="prowlarr-panel-header">
+              <h3>{t.prowlarrSync}</h3>
+            </div>
+            <p className="settings-helper">{t.prowlarrSyncHintSonarr}</p>
+            <div className="sync-status-grid">
+              <div className="sync-status-item">
+                <span>{t.prowlarrLabel}</span>
+                <strong className={`sync-badge ${sonarrProwlarrSyncStatus.prowlarr === 'connected' ? 'ok' : 'off'}`}>
+                  {sonarrProwlarrSyncStatus.prowlarr === 'connected' ? t.connected : t.disconnected}
+                </strong>
+              </div>
+              <div className="sync-status-item">
+                <span>{t.sonarrLabel}</span>
+                <strong className={`sync-badge ${sonarrProwlarrSyncStatus.sonarr === 'connected' ? 'ok' : 'off'}`}>
+                  {sonarrProwlarrSyncStatus.sonarr === 'connected' ? t.connected : t.disconnected}
+                </strong>
+              </div>
+              <div className="sync-status-item">
+                <span>{t.syncStatusLabel}</span>
+                <strong className={`sync-badge ${
+                  sonarrProwlarrSyncStatus.sync === 'configured'
+                    ? 'ok'
+                    : (sonarrProwlarrSyncStatus.sync === 'partial' ? 'warn' : 'off')
+                }`}>
+                  {sonarrProwlarrSyncStatus.sync === 'configured'
+                    ? t.syncConfiguredShort
+                    : (sonarrProwlarrSyncStatus.sync === 'partial' ? t.syncPartial : t.notConfigured)}
+                </strong>
+              </div>
+            </div>
+            {sonarrProwlarrSyncStatus.message ? (
+              <div className="status-line sync-message">{sonarrProwlarrSyncStatus.message}</div>
+            ) : null}
+            <div className="draft-actions">
+              <button
+                type="button"
+                className="action-btn subtle"
+                onClick={handleConnectSonarrToProwlarr}
+                disabled={sonarrProwlarrSyncBusy}
+              >
+                {t.connectSonarrToProwlarr}
+              </button>
+              <button
+                type="button"
+                className="action-btn subtle"
+                onClick={handleSyncSonarrNow}
+                disabled={sonarrProwlarrSyncBusy}
+              >
+                {t.syncNow}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
   const renderProwlarrSection = () => (
     <section className="settings-section-shell">
       <header className="settings-panel-header">
@@ -1891,6 +2453,7 @@ const SettingsView = ({ settings, setSettings }) => {
     if (activeSection === 'downloadQbittorrent') return renderQbittorrentSection();
     if (activeSection === 'torrentio') return renderTorrentioSection();
     if (activeSection === 'radarr') return renderRadarrSection();
+    if (activeSection === 'sonarr') return renderSonarrSection();
     if (activeSection === 'prowlarr') return renderProwlarrSection();
     return renderGeneralSection();
   };
@@ -2090,6 +2653,16 @@ const renderRadarrManagedStatus = (state, t) => {
   return '';
 };
 
+const renderSonarrManagedStatus = (state, t) => {
+  if (!state) return '';
+  if (state === 'running') return t.sonarrRunning;
+  if (state === 'restarted') return t.sonarrRestarted;
+  if (state === 'starting') return t.sonarrStarting;
+  if (state === 'stopped') return t.sonarrStopped;
+  if (state === 'missing') return t.sonarrProcessMissing;
+  return '';
+};
+
 const renderConnectionStatus = (state, t) => {
   if (!state) return '';
   if (state === 'testing') return t.testing;
@@ -2117,6 +2690,22 @@ const renderRadarrStatus = (state, t) => {
   return t.testFailed;
 };
 
+const renderSonarrStatus = (state, t) => {
+  if (!state) return '';
+  if (state === 'testing') return t.testing;
+  if (state === 'disabled') return t.sonarrDisabled;
+  if (state === 'missing') return t.sonarrMissing;
+  if (state.startsWith('ok:')) {
+    const [, version] = state.split(':');
+    return `${t.testOk}${version ? ` (${version})` : ''}`;
+  }
+  if (state.startsWith('failed:')) {
+    const [, message] = state.split(':');
+    return message || t.testFailed;
+  }
+  return t.testFailed;
+};
+
 const renderAddStatus = (state, t) => {
   if (!state) return '';
   return t[state] || '';
@@ -2132,6 +2721,19 @@ const renderQbRadarrState = (state, t) => {
   if (state === 'saved') return t.qbToRadarrSaved;
   if (state === 'exists') return t.qbToRadarrExists;
   if (state.startsWith('failed:')) return `${t.qbToRadarrFailed} ${state.slice(7)}`.trim();
+  return '';
+};
+
+const renderQbSonarrState = (state, t) => {
+  if (!state) return '';
+  if (state === 'checking') return t.qbToSonarrChecking;
+  if (state === 'check-exists') return t.qbToSonarrCheckExists;
+  if (state === 'check-missing') return t.qbToSonarrCheckMissing;
+  if (state === 'check-different') return t.qbToSonarrCheckDifferent;
+  if (state === 'saving') return t.qbToSonarrSaving;
+  if (state === 'saved') return t.qbToSonarrSaved;
+  if (state === 'exists') return t.qbToSonarrExists;
+  if (state.startsWith('failed:')) return `${t.qbToSonarrFailed} ${state.slice(7)}`.trim();
   return '';
 };
 
@@ -2229,6 +2831,7 @@ const getCopy = (language) => ({
     tmdbKeyDesc: 'TMDB uzerinden veri cekmek icin kullanilir.',
     prowlarr: 'Prowlarr',
     radarr: 'Radarr',
+    sonarr: 'Sonarr',
     downloadEngine: 'Indirme Motoru',
     downloadEngineHint: 'Gomulu torrent veya qBittorrent sec.',
     embeddedTorrent: 'Gomulu Torrent',
@@ -2239,6 +2842,8 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Kullanici Adi',
     qbPassword: 'qBittorrent Sifre',
     qbNote: 'qBittorrent > Tools > Options > Web UI: Web User Interface secenegini ac, adres/port ayarla (or: http://127.0.0.1:8080) ve kullanici adi/sifre bilgilerini buraya gir.',
+    qbRadarrTargetHint: "Radarr film otomasyonu icin istemci baglantisi.",
+    qbSonarrTargetHint: "Sonarr dizi otomasyonu icin istemci baglantisi.",
     checkQbInRadarr: "Radarr'da Kontrol Et",
     addQbToRadarr: "qBittorrent'i Radarr'a Ekle",
     qbToRadarrChecking: "Radarr'da qBittorrent kontrol ediliyor...",
@@ -2249,6 +2854,16 @@ const getCopy = (language) => ({
     qbToRadarrSaved: "qBittorrent Radarr'a eklendi.",
     qbToRadarrExists: "qBittorrent Radarr'da zaten vardi, ayarlar guncellendi.",
     qbToRadarrFailed: "qBittorrent Radarr'a eklenemedi.",
+    checkQbInSonarr: "Sonarr'da Kontrol Et",
+    addQbToSonarr: "qBittorrent'i Sonarr'a Ekle",
+    qbToSonarrChecking: "Sonarr'da qBittorrent kontrol ediliyor...",
+    qbToSonarrCheckExists: "qBittorrent Sonarr'a zaten ekli ve ayarlar uyumlu.",
+    qbToSonarrCheckMissing: "qBittorrent Sonarr'a henuz eklenmemis.",
+    qbToSonarrCheckDifferent: "qBittorrent Sonarr'da var ama ayarlari farkli.",
+    qbToSonarrSaving: "Sonarr'a ekleniyor...",
+    qbToSonarrSaved: "qBittorrent Sonarr'a eklendi.",
+    qbToSonarrExists: "qBittorrent Sonarr'da zaten vardi, ayarlar guncellendi.",
+    qbToSonarrFailed: "qBittorrent Sonarr'a eklenemedi.",
     defaultDownloadFolder: 'Varsayilan indirme klasoru',
     selectFolder: 'Klasor sec',
     completedToFolderHint: 'Tamamlanan indirmeler bu klasore kaydedilir.',
@@ -2286,8 +2901,11 @@ const getCopy = (language) => ({
     name: 'Isme gore',
     prowlarrHint: 'Motor baslatma, baglanti ve indexer yonetimi.',
     radarrHint: 'Film ekleme ve varsayilan Radarr ayarlari.',
+    sonarrHint: 'Dizi ekleme ve varsayilan Sonarr ayarlari.',
     radarrEngineHint: 'CineSoft, Radarr surecini devralir ve kendi ayarlariyla yeniden baslatir.',
     radarrExecutable: 'Radarr.exe yolu',
+    sonarrEngineHint: 'CineSoft, Sonarr surecini devralir ve kendi ayarlariyla yeniden baslatir.',
+    sonarrExecutable: 'Sonarr.exe yolu',
     downloadRadarr: 'Download Radarr',
     openRadarrWebUI: 'Open Radarr Web UI',
     radarrBaseUrl: 'Radarr Base URL',
@@ -2296,12 +2914,23 @@ const getCopy = (language) => ({
     radarrRootFolder: 'Default Root Folder',
     radarrQualityProfile: 'Default Quality Profile',
     radarrSearchAfterAdd: 'Search After Add',
+    downloadSonarr: 'Download Sonarr',
+    openSonarrWebUI: 'Open Sonarr Web UI',
+    sonarrBaseUrl: 'Sonarr Base URL',
+    sonarrApiKey: 'Sonarr API Key',
+    sonarrDefaults: 'Varsayilanlar',
+    sonarrRootFolder: 'Default Root Folder',
+    sonarrQualityProfile: 'Default Quality Profile',
+    sonarrSearchAfterAdd: 'Search After Add',
     prowlarrSync: 'Prowlarr Sync',
     prowlarrSyncHint: "Use Prowlarr as Radarr's indexer source.",
+    prowlarrSyncHintSonarr: "Use Prowlarr as Sonarr's indexer source.",
     prowlarrLabel: 'Prowlarr',
     radarrLabel: 'Radarr',
+    sonarrLabel: 'Sonarr',
     syncStatusLabel: 'Sync status',
     connectRadarrToProwlarr: 'Connect Radarr to Prowlarr',
+    connectSonarrToProwlarr: 'Connect Sonarr to Prowlarr',
     syncNow: 'Sync Now',
     connected: 'Connected',
     disconnected: 'Disconnected',
@@ -2312,15 +2941,24 @@ const getCopy = (language) => ({
     syncFailed: 'Sync failed.',
     radarrNoRootFoldersTitle: 'No root folders found in Radarr.',
     radarrNoRootFoldersHint: 'Open Radarr Web UI and add a root folder first.',
+    sonarrNoRootFoldersTitle: 'No root folders found in Sonarr.',
+    sonarrNoRootFoldersHint: 'Open Sonarr Web UI and add a root folder first.',
     selectRootFolder: 'Root folder sec',
     selectQualityProfile: 'Kalite profili sec',
     radarrDisabled: 'Radarr devre disi.',
     radarrMissing: 'Radarr Base URL ve API key gerekli.',
+    sonarrDisabled: 'Sonarr devre disi.',
+    sonarrMissing: 'Sonarr Base URL ve API key gerekli.',
     radarrStarting: 'Radarr baslatiliyor...',
     radarrRunning: 'Radarr CineSoft kontrolunde calisiyor.',
     radarrRestarted: 'Sistemde acik Radarr kapatildi ve CineSoft ayarlariyla yeniden baslatildi.',
     radarrStopped: 'Radarr durduruldu.',
     radarrProcessMissing: 'Radarr binary bulunamadi.',
+    sonarrStarting: 'Sonarr baslatiliyor...',
+    sonarrRunning: 'Sonarr CineSoft kontrolunde calisiyor.',
+    sonarrRestarted: 'Sistemde acik Sonarr kapatildi ve CineSoft ayarlariyla yeniden baslatildi.',
+    sonarrStopped: 'Sonarr durduruldu.',
+    sonarrProcessMissing: 'Sonarr binary bulunamadi.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Motor Kontrolu',
@@ -2461,6 +3099,7 @@ const getCopy = (language) => ({
     tmdbKeyDesc: 'Used for fetching TMDB data.',
     prowlarr: 'Prowlarr',
     radarr: 'Radarr',
+    sonarr: 'Sonarr',
     downloadEngine: 'Download Engine',
     downloadEngineHint: 'Choose embedded torrent or qBittorrent.',
     embeddedTorrent: 'Embedded Torrent',
@@ -2471,6 +3110,8 @@ const getCopy = (language) => ({
     qbUsername: 'qBittorrent Username',
     qbPassword: 'qBittorrent Password',
     qbNote: 'In qBittorrent go to Tools > Options > Web UI, enable Web User Interface, set host/port (for example http://127.0.0.1:8080), then enter the same username and password here.',
+    qbRadarrTargetHint: 'Download client mapping for Radarr movie automation.',
+    qbSonarrTargetHint: 'Download client mapping for Sonarr TV automation.',
     checkQbInRadarr: 'Check in Radarr',
     addQbToRadarr: 'Add qBittorrent to Radarr',
     qbToRadarrChecking: 'Checking qBittorrent in Radarr...',
@@ -2481,6 +3122,16 @@ const getCopy = (language) => ({
     qbToRadarrSaved: 'qBittorrent added to Radarr.',
     qbToRadarrExists: 'qBittorrent already existed in Radarr, settings were updated.',
     qbToRadarrFailed: 'Could not add qBittorrent to Radarr.',
+    checkQbInSonarr: 'Check in Sonarr',
+    addQbToSonarr: 'Add qBittorrent to Sonarr',
+    qbToSonarrChecking: 'Checking qBittorrent in Sonarr...',
+    qbToSonarrCheckExists: 'qBittorrent is already added to Sonarr and matches these settings.',
+    qbToSonarrCheckMissing: 'qBittorrent is not added to Sonarr yet.',
+    qbToSonarrCheckDifferent: 'qBittorrent exists in Sonarr but settings are different.',
+    qbToSonarrSaving: 'Adding to Sonarr...',
+    qbToSonarrSaved: 'qBittorrent added to Sonarr.',
+    qbToSonarrExists: 'qBittorrent already existed in Sonarr, settings were updated.',
+    qbToSonarrFailed: 'Could not add qBittorrent to Sonarr.',
     defaultDownloadFolder: 'Default download folder',
     selectFolder: 'Select folder',
     completedToFolderHint: 'Completed downloads are saved to this folder.',
@@ -2518,8 +3169,11 @@ const getCopy = (language) => ({
     name: 'By name',
     prowlarrHint: 'Engine start, connection, and indexer management.',
     radarrHint: 'Movie add flow and default Radarr settings.',
+    sonarrHint: 'Series add flow and default Sonarr settings.',
     radarrEngineHint: 'CineSoft takes over the Radarr process and restarts it with its own settings.',
     radarrExecutable: 'Radarr executable path',
+    sonarrEngineHint: 'CineSoft takes over the Sonarr process and restarts it with its own settings.',
+    sonarrExecutable: 'Sonarr executable path',
     downloadRadarr: 'Download Radarr',
     openRadarrWebUI: 'Open Radarr Web UI',
     radarrBaseUrl: 'Radarr Base URL',
@@ -2528,12 +3182,23 @@ const getCopy = (language) => ({
     radarrRootFolder: 'Default Root Folder',
     radarrQualityProfile: 'Default Quality Profile',
     radarrSearchAfterAdd: 'Search After Add',
+    downloadSonarr: 'Download Sonarr',
+    openSonarrWebUI: 'Open Sonarr Web UI',
+    sonarrBaseUrl: 'Sonarr Base URL',
+    sonarrApiKey: 'Sonarr API Key',
+    sonarrDefaults: 'Defaults',
+    sonarrRootFolder: 'Default Root Folder',
+    sonarrQualityProfile: 'Default Quality Profile',
+    sonarrSearchAfterAdd: 'Search After Add',
     prowlarrSync: 'Prowlarr Sync',
     prowlarrSyncHint: "Use Prowlarr as Radarr's indexer source.",
+    prowlarrSyncHintSonarr: "Use Prowlarr as Sonarr's indexer source.",
     prowlarrLabel: 'Prowlarr',
     radarrLabel: 'Radarr',
+    sonarrLabel: 'Sonarr',
     syncStatusLabel: 'Sync status',
     connectRadarrToProwlarr: 'Connect Radarr to Prowlarr',
+    connectSonarrToProwlarr: 'Connect Sonarr to Prowlarr',
     syncNow: 'Sync Now',
     connected: 'Connected',
     disconnected: 'Disconnected',
@@ -2544,15 +3209,24 @@ const getCopy = (language) => ({
     syncFailed: 'Sync failed.',
     radarrNoRootFoldersTitle: 'No root folders found in Radarr.',
     radarrNoRootFoldersHint: 'Open Radarr Web UI and add a root folder first.',
+    sonarrNoRootFoldersTitle: 'No root folders found in Sonarr.',
+    sonarrNoRootFoldersHint: 'Open Sonarr Web UI and add a root folder first.',
     selectRootFolder: 'Select root folder',
     selectQualityProfile: 'Select quality profile',
     radarrDisabled: 'Radarr is disabled.',
     radarrMissing: 'Radarr Base URL and API key are required.',
+    sonarrDisabled: 'Sonarr is disabled.',
+    sonarrMissing: 'Sonarr Base URL and API key are required.',
     radarrStarting: 'Starting Radarr...',
     radarrRunning: 'Radarr is running under CineSoft control.',
     radarrRestarted: 'A running Radarr instance was stopped and restarted with CineSoft settings.',
     radarrStopped: 'Radarr stopped.',
     radarrProcessMissing: 'Radarr binary was not found.',
+    sonarrStarting: 'Starting Sonarr...',
+    sonarrRunning: 'Sonarr is running under CineSoft control.',
+    sonarrRestarted: 'A running Sonarr instance was stopped and restarted with CineSoft settings.',
+    sonarrStopped: 'Sonarr stopped.',
+    sonarrProcessMissing: 'Sonarr binary was not found.',
     downloadProwlarr: 'Download Prowlarr',
     openProwlarrWebUI: 'Open Prowlarr Web UI',
     engine: 'Engine Control',

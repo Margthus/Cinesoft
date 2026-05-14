@@ -12,6 +12,7 @@ import DownloadsView from './components/DownloadsView';
 import SearchView from './components/SearchView';
 import LibraryView from './components/LibraryView';
 import RadarrView from './components/RadarrView';
+import SonarrView from './components/SonarrView';
 import { DEFAULT_PROWLARR_CONFIG } from './sources/index.mjs';
 import { normalizeTorrentioConfig } from './utils/torrentio';
 import { WATCH_STATUS_STORAGE_KEY, buildWatchStatusKey } from './utils/watchStatus';
@@ -28,6 +29,7 @@ const DEFAULT_PAGE_ROUTE_MAP = {
   downloads: '/downloads',
   search: '/search',
   radarr: '/radarr',
+  sonarr: '/sonarr',
   settings: '/settings',
 };
 
@@ -56,6 +58,16 @@ const App = () => {
     radarrDefaultRootFolder: '',
     radarrDefaultQualityProfileId: '',
     radarrSearchAfterAdd: true,
+    sonarrEnabled: false,
+    sonarrManaged: false,
+    sonarrBaseUrl: 'http://127.0.0.1:8989',
+    sonarrApiKey: '',
+    sonarrExecutablePath: '',
+    sonarrPort: 8989,
+    sonarrTimeout: 10000,
+    sonarrDefaultRootFolder: '',
+    sonarrDefaultQualityProfileId: '',
+    sonarrSearchAfterAdd: true,
   });
   const [loading, setLoading] = useState(true);
   const [myList, setMyList] = useState([]);
@@ -96,6 +108,16 @@ const App = () => {
             radarrDefaultRootFolder: savedSettings.radarrDefaultRootFolder || '',
             radarrDefaultQualityProfileId: savedSettings.radarrDefaultQualityProfileId ?? '',
             radarrSearchAfterAdd: savedSettings.radarrSearchAfterAdd !== false,
+            sonarrEnabled: savedSettings.sonarrEnabled === true,
+            sonarrManaged: savedSettings.sonarrManaged === true,
+            sonarrBaseUrl: savedSettings.sonarrBaseUrl || 'http://127.0.0.1:8989',
+            sonarrApiKey: savedSettings.sonarrApiKey || '',
+            sonarrExecutablePath: savedSettings.sonarrExecutablePath || '',
+            sonarrPort: Number(savedSettings.sonarrPort || 8989),
+            sonarrTimeout: Number(savedSettings.sonarrTimeout || 10000),
+            sonarrDefaultRootFolder: savedSettings.sonarrDefaultRootFolder || '',
+            sonarrDefaultQualityProfileId: savedSettings.sonarrDefaultQualityProfileId ?? '',
+            sonarrSearchAfterAdd: savedSettings.sonarrSearchAfterAdd !== false,
           });
 
           if (savedSettings.prowlarr?.managed && savedSettings.prowlarr?.enabled && !savedSettings.torrentioEnabled) {
@@ -103,6 +125,9 @@ const App = () => {
           }
           if (savedSettings.radarrManaged === true && savedSettings.radarrEnabled === true) {
             window.electronAPI?.startManagedRadarr?.(savedSettings);
+          }
+          if (savedSettings.sonarrManaged === true && savedSettings.sonarrEnabled === true) {
+            window.electronAPI?.startManagedSonarr?.(savedSettings);
           }
         }
       }
@@ -184,6 +209,7 @@ const App = () => {
             <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/downloads" element={<DownloadsView settings={settings} />} />
             <Route path="/radarr" element={<RadarrView settings={settings} />} />
+            <Route path="/sonarr" element={<SonarrView settings={settings} />} />
             <Route path="/library" element={<LibraryView settings={settings} />} />
             <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
@@ -239,6 +265,7 @@ const Sidebar = ({ settings }) => {
       downloads: 'Indirilenler',
       automation: 'Otomasyon',
       radarr: 'Radarr',
+      sonarr: 'Sonarr',
       settings: 'Ayarlar',
     },
     en: {
@@ -256,10 +283,11 @@ const Sidebar = ({ settings }) => {
       downloads: 'Downloads',
       automation: 'Automation',
       radarr: 'Radarr',
+      sonarr: 'Sonarr',
       settings: 'Settings',
     },
   }[settings.language];
-  const automationActive = location.pathname.startsWith('/radarr');
+  const automationActive = location.pathname.startsWith('/radarr') || location.pathname.startsWith('/sonarr');
 
   return (
     <nav className="sidebar">
@@ -331,6 +359,10 @@ const Sidebar = ({ settings }) => {
                 <NavLink to="/radarr" className="automation-item">
                   <span className="automation-dot" />
                   <span>{t.radarr}</span>
+                </NavLink>
+                <NavLink to="/sonarr" className="automation-item">
+                  <span className="automation-dot" />
+                  <span>{t.sonarr}</span>
                 </NavLink>
               </div>
             )}

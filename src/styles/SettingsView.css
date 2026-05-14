@@ -723,6 +723,42 @@ select.settings-input:focus {
   display: block;
 }
 
+.automation-client-grid {
+  margin-top: 0.95rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 0.85rem;
+}
+
+.automation-client-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.01));
+}
+
+.automation-client-header {
+  margin-bottom: 0.7rem;
+}
+
+.automation-client-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+}
+
+.automation-client-title svg {
+  color: var(--accent);
+}
+
+.automation-client-hint {
+  display: block;
+  margin-top: 0.28rem;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
 .search-shell {
   display: flex;
   align-items: center;
@@ -993,7 +1029,8 @@ select.settings-input:focus {
 
   .prowlarr-layout,
   .panel-grid,
-  .dynamic-grid {
+  .dynamic-grid,
+  .automation-client-grid {
     grid-template-columns: 1fr;
   }
 }

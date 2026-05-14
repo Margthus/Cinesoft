@@ -30,6 +30,23 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   const [radarrRootFolder, setRadarrRootFolder] = useState('');
   const [radarrQualityProfileId, setRadarrQualityProfileId] = useState('');
   const [radarrMonitored, setRadarrMonitored] = useState(true);
+  const [sonarrModalOpen, setSonarrModalOpen] = useState(false);
+  const [sonarrModalLoading, setSonarrModalLoading] = useState(false);
+  const [sonarrAddLoading, setSonarrAddLoading] = useState(false);
+  const [sonarrStatusMessage, setSonarrStatusMessage] = useState('');
+  const [sonarrErrorMessage, setSonarrErrorMessage] = useState('');
+  const [sonarrPresence, setSonarrPresence] = useState({
+    loading: false,
+    exists: false,
+    monitored: false,
+    qualityName: '-',
+    hasFile: false,
+  });
+  const [sonarrRootFolders, setSonarrRootFolders] = useState([]);
+  const [sonarrQualityProfiles, setSonarrQualityProfiles] = useState([]);
+  const [sonarrRootFolder, setSonarrRootFolder] = useState('');
+  const [sonarrQualityProfileId, setSonarrQualityProfileId] = useState('');
+  const [sonarrMonitored, setSonarrMonitored] = useState(true);
 
   const castScrollRef = useRef(null);
   const imageScrollRef = useRef(null);
@@ -300,6 +317,44 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
         cancel: 'Cancel',
         adding: 'Adding...',
       };
+  const sonarrEnabled = settings.sonarrEnabled === true;
+  const sonarrT = isTr
+    ? {
+        add: "Sonarr'a Ekle",
+        checking: 'Sonarr kontrol ediliyor...',
+        exists: "Sonarr'da var",
+        missing: "Sonarr'da yok",
+        monitored: 'Takip ediliyor',
+        unmonitored: 'Takip edilmiyor',
+        quality: 'Kalite',
+        file: 'Dosya',
+        present: 'mevcut',
+        absent: 'yok',
+        modalTitle: "Sonarr'a Ekle",
+        loadingDefaults: 'Sonarr varsayilanlari yukleniyor...',
+        selectRoot: 'Root folder sec',
+        selectQuality: 'Kalite profili sec',
+        cancel: 'Iptal',
+        adding: 'Ekleniyor...',
+      }
+    : {
+        add: 'Add to Sonarr',
+        checking: 'Checking Sonarr...',
+        exists: 'Already in Sonarr',
+        missing: 'Not in Sonarr',
+        monitored: 'Monitored',
+        unmonitored: 'Unmonitored',
+        quality: 'Quality',
+        file: 'File',
+        present: 'present',
+        absent: 'missing',
+        modalTitle: 'Add to Sonarr',
+        loadingDefaults: 'Loading Sonarr defaults...',
+        selectRoot: 'Select root folder',
+        selectQuality: 'Select quality profile',
+        cancel: 'Cancel',
+        adding: 'Adding...',
+      };
 
   const getRadarrSettings = () => ({
     radarrEnabled: settings.radarrEnabled === true,
@@ -308,6 +363,14 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
     radarrDefaultRootFolder: String(settings.radarrDefaultRootFolder || ''),
     radarrDefaultQualityProfileId: settings.radarrDefaultQualityProfileId ?? '',
     radarrSearchAfterAdd: settings.radarrSearchAfterAdd !== false,
+  });
+  const getSonarrSettings = () => ({
+    sonarrEnabled: settings.sonarrEnabled === true,
+    sonarrBaseUrl: String(settings.sonarrBaseUrl || ''),
+    sonarrApiKey: String(settings.sonarrApiKey || ''),
+    sonarrDefaultRootFolder: String(settings.sonarrDefaultRootFolder || ''),
+    sonarrDefaultQualityProfileId: settings.sonarrDefaultQualityProfileId ?? '',
+    sonarrSearchAfterAdd: settings.sonarrSearchAfterAdd !== false,
   });
 
   const refreshRadarrPresence = async () => {
@@ -350,6 +413,47 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   useEffect(() => {
     refreshRadarrPresence().catch(() => {});
   }, [type, radarrEnabled, data?.id, settings.radarrBaseUrl, settings.radarrApiKey]);
+
+  const refreshSonarrPresence = async () => {
+    if (type !== 'tv') return;
+    if (!sonarrEnabled) return;
+    const tmdbId = Number(data?.id);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) return;
+
+    setSonarrPresence((prev) => ({ ...prev, loading: true }));
+    try {
+      const sonarrSettings = getSonarrSettings();
+      const [seriesRes, qualityRes] = await Promise.all([
+        window.electronAPI?.sonarrGetSeries?.(sonarrSettings),
+        window.electronAPI?.sonarrGetQualityProfiles?.(sonarrSettings),
+      ]);
+
+      const seriesList = Array.isArray(seriesRes?.items) ? seriesRes.items : [];
+      const profiles = Array.isArray(qualityRes?.items) ? qualityRes.items : [];
+      const series = seriesList.find((item) => Number(item?.tmdbId) === tmdbId);
+      const quality = profiles.find((profile) => Number(profile?.id) === Number(series?.qualityProfileId));
+
+      setSonarrPresence({
+        loading: false,
+        exists: Boolean(series),
+        monitored: series?.monitored === true,
+        qualityName: quality?.name || '-',
+        hasFile: Number(series?.statistics?.episodeFileCount || 0) > 0 || Number(series?.statistics?.episodeCount || 0) > 0,
+      });
+    } catch {
+      setSonarrPresence({
+        loading: false,
+        exists: false,
+        monitored: false,
+        qualityName: '-',
+        hasFile: false,
+      });
+    }
+  };
+
+  useEffect(() => {
+    refreshSonarrPresence().catch(() => {});
+  }, [type, sonarrEnabled, data?.id, settings.sonarrBaseUrl, settings.sonarrApiKey]);
 
   if (loading) return <div className="loading">Loading details...</div>;
   if (!data) return <div className="error">Could not load details.</div>;
@@ -440,6 +544,91 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
     }
   };
 
+  const openSonarrModal = async () => {
+    if (!sonarrEnabled) return;
+    setSonarrModalOpen(true);
+    setSonarrErrorMessage('');
+    setSonarrStatusMessage('');
+    setSonarrModalLoading(true);
+    try {
+      const sonarrSettings = getSonarrSettings();
+      const [rootRes, qualityRes] = await Promise.all([
+        window.electronAPI?.sonarrGetRootFolders?.(sonarrSettings),
+        window.electronAPI?.sonarrGetQualityProfiles?.(sonarrSettings),
+      ]);
+      const roots = Array.isArray(rootRes?.items) ? rootRes.items : [];
+      const profiles = Array.isArray(qualityRes?.items) ? qualityRes.items : [];
+      setSonarrRootFolders(roots);
+      setSonarrQualityProfiles(profiles);
+      const defaultRoot = String(sonarrSettings.sonarrDefaultRootFolder || roots?.[0]?.path || '');
+      const defaultProfile = String(sonarrSettings.sonarrDefaultQualityProfileId || profiles?.[0]?.id || '');
+      setSonarrRootFolder(defaultRoot);
+      setSonarrQualityProfileId(defaultProfile);
+      setSonarrMonitored(true);
+      if (!rootRes?.ok || !qualityRes?.ok) {
+        setSonarrErrorMessage(rootRes?.error || qualityRes?.error || 'Failed to load Sonarr defaults');
+      }
+    } catch (err) {
+      setSonarrErrorMessage(err?.message || 'Failed to load Sonarr defaults');
+    } finally {
+      setSonarrModalLoading(false);
+    }
+  };
+
+  const handleAddToSonarr = async () => {
+    const tmdbId = Number(data?.id);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+      setSonarrErrorMessage('TMDB ID is required to add this series to Sonarr.');
+      return;
+    }
+    if (!sonarrRootFolder || !sonarrQualityProfileId) {
+      setSonarrErrorMessage('Root folder and quality profile are required.');
+      return;
+    }
+    setSonarrErrorMessage('');
+    setSonarrStatusMessage('');
+    setSonarrAddLoading(true);
+    try {
+      const settingsPayload = getSonarrSettings();
+      const lookup = await window.electronAPI?.sonarrLookupSeriesByTmdbId?.({
+        settings: settingsPayload,
+        tmdbId,
+      });
+      if (!lookup?.ok || !lookup?.series) {
+        throw new Error(lookup?.error || 'Series lookup failed on Sonarr.');
+      }
+      const lookupSeries = lookup.series;
+      const seriesPayload = {
+        ...lookupSeries,
+        qualityProfileId: Number(sonarrQualityProfileId),
+        rootFolderPath: sonarrRootFolder,
+        monitored: sonarrMonitored === true,
+        addOptions: {
+          searchForMissingEpisodes: settings.sonarrSearchAfterAdd !== false,
+        },
+      };
+      const addRes = await window.electronAPI?.sonarrAddSeries?.({
+        settings: settingsPayload,
+        series: seriesPayload,
+      });
+      if (!addRes?.ok) {
+        if (addRes?.alreadyExists) {
+          setSonarrStatusMessage('Already exists in Sonarr.');
+          await refreshSonarrPresence();
+          return;
+        }
+        throw new Error(addRes?.error || 'Failed to add series to Sonarr.');
+      }
+      setSonarrStatusMessage('Added to Sonarr.');
+      await refreshSonarrPresence();
+      setSonarrModalOpen(false);
+    } catch (err) {
+      setSonarrErrorMessage(err?.message || 'Failed to add series to Sonarr.');
+    } finally {
+      setSonarrAddLoading(false);
+    }
+  };
+
   return (
     <div className="detail-view">
       <button className="close-btn" onClick={() => navigate(-1)}><X size={24} /></button>
@@ -488,6 +677,20 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                 )}
               </>
             )}
+            {type === 'tv' && (
+              <>
+                {!sonarrPresence.exists && (
+                  <button
+                    className="btn btn-secondary"
+                    disabled={!sonarrEnabled || sonarrPresence.loading}
+                    onClick={openSonarrModal}
+                    title={sonarrEnabled ? 'Add this series to Sonarr' : 'Enable Sonarr in Settings'}
+                  >
+                    {sonarrT.add}
+                  </button>
+                )}
+              </>
+            )}
           </div>
           {type === 'movie' && radarrEnabled && (
             <div style={{ marginTop: '0.85rem', color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.5 }}>
@@ -502,6 +705,22 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                 </>
               ) : (
                 <div>{radarrT.missing}</div>
+              )}
+            </div>
+          )}
+          {type === 'tv' && sonarrEnabled && (
+            <div style={{ marginTop: '0.85rem', color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.5 }}>
+              {sonarrPresence.loading ? (
+                <div>{sonarrT.checking}</div>
+              ) : sonarrPresence.exists ? (
+                <>
+                  <div>{sonarrT.exists}</div>
+                  <div>{sonarrPresence.monitored ? sonarrT.monitored : sonarrT.unmonitored}</div>
+                  <div>{sonarrT.quality}: {sonarrPresence.qualityName}</div>
+                  <div>{sonarrT.file}: {sonarrPresence.hasFile ? sonarrT.present : sonarrT.absent}</div>
+                </>
+              ) : (
+                <div>{sonarrT.missing}</div>
               )}
             </div>
           )}
@@ -628,6 +847,57 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                   <button className="btn btn-secondary" onClick={() => setRadarrModalOpen(false)}>{radarrT.cancel}</button>
                   <button className="btn btn-primary" disabled={radarrAddLoading} onClick={handleAddToRadarr}>
                     {radarrAddLoading ? radarrT.adding : radarrT.add}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {sonarrModalOpen && (
+        <div className="lightbox" onClick={() => setSonarrModalOpen(false)}>
+          <div className="radarr-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="radarr-modal-header">
+              <h3>{sonarrT.modalTitle}</h3>
+              <button className="icon-btn" onClick={() => setSonarrModalOpen(false)}><X size={16} /></button>
+            </div>
+            {sonarrModalLoading ? (
+              <p>{sonarrT.loadingDefaults}</p>
+            ) : (
+              <div className="radarr-modal-body">
+                <label>
+                  <span>Root Folder</span>
+                  <select value={sonarrRootFolder} onChange={(event) => setSonarrRootFolder(event.target.value)}>
+                    <option value="">{sonarrT.selectRoot}</option>
+                    {sonarrRootFolders.map((folder) => (
+                      <option key={folder.id || folder.path} value={folder.path}>{folder.path}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Quality Profile</span>
+                  <select value={String(sonarrQualityProfileId)} onChange={(event) => setSonarrQualityProfileId(event.target.value)}>
+                    <option value="">{sonarrT.selectQuality}</option>
+                    {sonarrQualityProfiles.map((profile) => (
+                      <option key={profile.id} value={String(profile.id)}>{profile.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="radarr-check">
+                  <input type="checkbox" checked={sonarrMonitored} onChange={(event) => setSonarrMonitored(event.target.checked)} />
+                  <span>Monitored</span>
+                </label>
+                <label className="radarr-check">
+                  <input type="checkbox" checked={settings.sonarrSearchAfterAdd !== false} readOnly />
+                  <span>Search After Add ({settings.sonarrSearchAfterAdd !== false ? 'On' : 'Off'})</span>
+                </label>
+                {sonarrErrorMessage && <p className="radarr-error">{sonarrErrorMessage}</p>}
+                {sonarrStatusMessage && <p className="radarr-success">{sonarrStatusMessage}</p>}
+                <div className="radarr-modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setSonarrModalOpen(false)}>{sonarrT.cancel}</button>
+                  <button className="btn btn-primary" disabled={sonarrAddLoading} onClick={handleAddToSonarr}>
+                    {sonarrAddLoading ? sonarrT.adding : sonarrT.add}
                   </button>
                 </div>
               </div>

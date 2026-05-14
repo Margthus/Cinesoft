@@ -59,6 +59,10 @@ resources/radarr/
 resources/Radarr/
 resources/**/radarr/
 resources/**/Radarr/
+resources/sonarr/
+resources/Sonarr/
+resources/**/sonarr/
+resources/**/Sonarr/
 resources/ffmpeg/
 resources/**/ffmpeg/
 

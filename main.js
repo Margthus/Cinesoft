@@ -8,6 +8,7 @@ const https = require('https');
 const axios = require('axios');
 const { pathToFileURL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
+const sonarrService = require('./src/main/services/sonarrService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -353,6 +354,156 @@ const normalizeRadarrProwlarrIndexers = async (radarrSettings = {}) => {
   }
 };
 
+const getSonarrMissingIndexerNames = async (prowlarrConfig = {}, sonarrSettings = {}) => {
+  try {
+    const [prowIdxRows, sonIdxRows] = await Promise.all([
+      prowlarrRequest(prowlarrConfig, '/api/v1/indexer'),
+      sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer'),
+    ]);
+    const prowNames = (Array.isArray(prowIdxRows) ? prowIdxRows : [])
+      .filter((row) => row?.enable !== false && String(row?.protocol || '').toLowerCase() === 'torrent')
+      .map((row) => String(row?.name || '').trim())
+      .filter(Boolean);
+    const normalizeName = (value = '') => String(value || '')
+      .trim()
+      .replace(/\s*\(prowlarr\)\s*$/i, '')
+      .toLowerCase();
+
+    const sonNames = new Set(
+      (Array.isArray(sonIdxRows) ? sonIdxRows : [])
+        .map((row) => normalizeName(row?.name))
+        .filter(Boolean),
+    );
+    return prowNames.filter((name) => !sonNames.has(normalizeName(name)));
+  } catch {
+    return [];
+  }
+};
+
+const setSonarrFieldValue = (fields = [], names = [], value) => {
+  const lowerNames = names.map((name) => String(name).toLowerCase());
+  const field = fields.find((item) => lowerNames.includes(String(item?.name || '').toLowerCase()));
+  if (!field) return false;
+  field.value = value;
+  return true;
+};
+
+const addMissingIndexersToSonarrViaTorznab = async (prowlarrConfig = {}, sonarrSettings = {}, missingNames = []) => {
+  if (!missingNames.length) return [];
+  const [prowIdxRows, sonSchemaRows, sonIndexerRows] = await Promise.all([
+    prowlarrRequest(prowlarrConfig, '/api/v1/indexer'),
+    sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer/schema'),
+    sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer'),
+  ]);
+  const prowlarrIndexers = Array.isArray(prowIdxRows) ? prowIdxRows : [];
+  const schemas = Array.isArray(sonSchemaRows) ? sonSchemaRows : [];
+  const sonarrIndexers = Array.isArray(sonIndexerRows) ? sonIndexerRows : [];
+  const torznabSchema = schemas.find((row) => String(row?.implementationName || '').toLowerCase() === 'torznab');
+  if (!torznabSchema) return [];
+  const enabledTemplate = sonarrIndexers.find((row) => String(row?.name || '').toLowerCase().includes('(prowlarr)') && row?.enable === true);
+
+  const added = [];
+  for (const missingName of missingNames) {
+    const sourceIndexer = prowlarrIndexers.find((row) => String(row?.name || '').trim().toLowerCase() === String(missingName).trim().toLowerCase());
+    if (!sourceIndexer?.id) continue;
+
+    const payload = JSON.parse(JSON.stringify(enabledTemplate || torznabSchema));
+    delete payload.id;
+    delete payload.indexerUrls;
+    delete payload.capabilities;
+    delete payload.protocolCapabilities;
+    payload.enable = true;
+    payload.enableRss = true;
+    payload.enableAutomaticSearch = true;
+    payload.enableInteractiveSearch = true;
+    payload.name = `${missingName} (Prowlarr)`;
+    payload.protocol = 'torrent';
+    payload.implementation = payload.implementation || 'Torznab';
+    payload.implementationName = payload.implementationName || 'Torznab';
+    payload.configContract = payload.configContract || 'TorznabSettings';
+    payload.fields = Array.isArray(payload.fields) ? payload.fields : [];
+    setSonarrFieldValue(payload.fields, ['baseUrl'], normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL'));
+    setSonarrFieldValue(payload.fields, ['apiPath'], getProwlarrTorznabIndexerPath(sourceIndexer.id));
+    setSonarrFieldValue(payload.fields, ['apiKey'], String(prowlarrConfig.apiKey || '').trim());
+
+    try {
+      const created = await sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer', {
+        method: 'POST',
+        data: payload,
+      });
+      const createdId = created?.id;
+      if (createdId != null) {
+        try {
+          const fresh = await sonarrService.sonarrRequest(sonarrSettings, `/api/v3/indexer/${createdId}`);
+          const updatePayload = {
+            ...fresh,
+            enable: true,
+            enableRss: true,
+            enableAutomaticSearch: true,
+            enableInteractiveSearch: true,
+          };
+          await sonarrService.sonarrRequest(sonarrSettings, `/api/v3/indexer/${createdId}`, {
+            method: 'PUT',
+            data: updatePayload,
+          });
+        } catch {
+          try {
+            const fresh = await sonarrService.sonarrRequest(sonarrSettings, `/api/v3/indexer/${createdId}`);
+            const updatePayload = {
+              ...fresh,
+              enable: true,
+              enableRss: true,
+              enableAutomaticSearch: true,
+              enableInteractiveSearch: true,
+            };
+            await sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer', {
+              method: 'PUT',
+              data: updatePayload,
+            });
+          } catch {
+            // Keep created indexer even if explicit enable update fails
+          }
+        }
+      }
+      added.push(missingName);
+    } catch {
+      // ignore single indexer failure, continue with others
+    }
+  }
+  return added;
+};
+
+const normalizeSonarrProwlarrIndexers = async (sonarrSettings = {}) => {
+  try {
+    const rows = await sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer');
+    const indexers = Array.isArray(rows) ? rows : [];
+    for (const indexer of indexers) {
+      const name = String(indexer?.name || '').toLowerCase();
+      if (!name.includes('(prowlarr)')) continue;
+      const payload = {
+        ...indexer,
+        enable: true,
+        enableRss: true,
+        enableAutomaticSearch: true,
+        enableInteractiveSearch: true,
+      };
+      try {
+        await sonarrService.sonarrRequest(sonarrSettings, `/api/v3/indexer/${indexer.id}`, {
+          method: 'PUT',
+          data: payload,
+        });
+      } catch {
+        await sonarrService.sonarrRequest(sonarrSettings, '/api/v3/indexer', {
+          method: 'PUT',
+          data: payload,
+        });
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+};
+
 const ensureProwlarrRadarrSync = async (prowlarrConfig = {}, radarrSettings = {}, mode = 'connect') => {
   const prowlarrUrl = normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL');
   const prowlarrApiKey = String(prowlarrConfig.apiKey || '').trim();
@@ -490,6 +641,146 @@ const ensureProwlarrRadarrSync = async (prowlarrConfig = {}, radarrSettings = {}
       : (addedByFallback.length
         ? `Radarr connected to Prowlarr. Fallback added: ${addedByFallback.join(', ')}`
         : 'Radarr connected to Prowlarr.'),
+  };
+};
+
+const ensureProwlarrSonarrSync = async (prowlarrConfig = {}, sonarrSettings = {}, mode = 'connect') => {
+  const prowlarrUrl = normalizeHttpUrl(prowlarrConfig.baseUrl, 'Prowlarr URL');
+  const prowlarrApiKey = String(prowlarrConfig.apiKey || '').trim();
+  const sonarrUrl = normalizeHttpUrl(sonarrSettings.sonarrBaseUrl, 'Sonarr URL');
+  const sonarrApiKey = String(sonarrSettings.sonarrApiKey || '').trim();
+
+  if (!prowlarrApiKey) throw new Error('Prowlarr API key is required.');
+  if (!sonarrApiKey) throw new Error('Sonarr API key is required.');
+
+  const prowlarrTest = await (await getSourcesModule()).testProwlarrConnection({
+    ...prowlarrConfig,
+    enabled: true,
+  });
+  if (!prowlarrTest?.ok) {
+    throw new Error('Prowlarr connection failed.');
+  }
+
+  const sonarrTest = await sonarrService.testConnection({
+    ...sonarrSettings,
+    sonarrBaseUrl: sonarrUrl,
+    sonarrApiKey,
+  });
+  if (!sonarrTest?.ok) {
+    throw new Error('Sonarr connection failed.');
+  }
+
+  const existingApps = await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications',
+  );
+  const apps = Array.isArray(existingApps) ? existingApps : [];
+  const existingSonarr = apps.find((appItem) => {
+    const impl = String(appItem?.implementationName || appItem?.implementation || '').toLowerCase();
+    const name = String(appItem?.name || '').toLowerCase();
+    return impl === 'sonarr' || name.includes('sonarr');
+  });
+
+  if (existingSonarr) {
+    const updated = { ...existingSonarr };
+    const fields = Array.isArray(updated.fields) ? [...updated.fields] : [];
+    setSchemaFieldValue(fields, ['baseurl', 'url', 'sonarrurl'], sonarrUrl);
+    setSchemaFieldValue(fields, ['apikey'], sonarrApiKey);
+    setSchemaFieldValue(fields, ['synclevel'], 'fullSync');
+    setSchemaFieldValue(fields, ['tags'], []);
+    updated.fields = fields;
+    updated.tags = [];
+    updated.enable = true;
+    await prowlarrRequest(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      '/api/v1/applications',
+      { method: 'PUT', data: updated },
+    );
+    const syncResult = await triggerProwlarrAppSync({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey });
+    if (syncResult?.ok && syncResult?.id) {
+      await waitForProwlarrCommand({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey }, syncResult.id);
+    }
+    const missingNames = await getSonarrMissingIndexerNames(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+    );
+    const addedByFallback = await addMissingIndexersToSonarrViaTorznab(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+      missingNames,
+    );
+    await normalizeSonarrProwlarrIndexers({ ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey });
+    const remainingMissing = await getSonarrMissingIndexerNames(
+      { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+      { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+    );
+    return {
+      ok: true,
+      prowlarr: 'connected',
+      sonarr: 'connected',
+      sync: remainingMissing.length ? 'partial' : 'configured',
+      message: remainingMissing.length
+        ? `Sync completed, but missing indexers in Sonarr: ${remainingMissing.join(', ')}`
+        : (addedByFallback.length
+          ? `Sync updated. Fallback added: ${addedByFallback.join(', ')}`
+          : (mode === 'sync' ? 'Sync updated.' : 'Already configured, updated settings.')),
+    };
+  }
+
+  const schemasResponse = await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications/schema',
+  );
+  const schemas = Array.isArray(schemasResponse) ? schemasResponse : [];
+  const sonarrSchema = schemas.find((schema) => String(schema?.implementationName || '').toLowerCase() === 'sonarr');
+  if (!sonarrSchema) {
+    throw new Error('Could not find Sonarr application schema in Prowlarr.');
+  }
+
+  const payload = JSON.parse(JSON.stringify(sonarrSchema));
+  payload.name = payload.name || 'Sonarr';
+  payload.enable = true;
+  payload.fields = Array.isArray(payload.fields) ? payload.fields : [];
+  setSchemaFieldValue(payload.fields, ['baseurl', 'url', 'sonarrurl'], sonarrUrl);
+  setSchemaFieldValue(payload.fields, ['apikey'], sonarrApiKey);
+  setSchemaFieldValue(payload.fields, ['synclevel'], 'fullSync');
+  setSchemaFieldValue(payload.fields, ['tags'], []);
+  payload.tags = [];
+
+  await prowlarrRequest(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    '/api/v1/applications',
+    { method: 'POST', data: payload },
+  );
+  const syncResult = await triggerProwlarrAppSync({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey });
+  if (syncResult?.ok && syncResult?.id) {
+    await waitForProwlarrCommand({ ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey }, syncResult.id);
+  }
+  const missingNames = await getSonarrMissingIndexerNames(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+  );
+
+  const addedByFallback = await addMissingIndexersToSonarrViaTorznab(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+    missingNames,
+  );
+  await normalizeSonarrProwlarrIndexers({ ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey });
+  const remainingMissing = await getSonarrMissingIndexerNames(
+    { ...prowlarrConfig, baseUrl: prowlarrUrl, apiKey: prowlarrApiKey },
+    { ...sonarrSettings, sonarrBaseUrl: sonarrUrl, sonarrApiKey },
+  );
+  return {
+    ok: true,
+    prowlarr: 'connected',
+    sonarr: 'connected',
+    sync: remainingMissing.length ? 'partial' : 'configured',
+    message: remainingMissing.length
+      ? `Connected, but missing indexers in Sonarr: ${remainingMissing.join(', ')}`
+      : (addedByFallback.length
+        ? `Sonarr connected to Prowlarr. Fallback added: ${addedByFallback.join(', ')}`
+        : 'Sonarr connected to Prowlarr.'),
   };
 };
 const OPENSUBTITLES_V3_BASE_URL = 'https://opensubtitles-v3.strem.io';
@@ -1051,8 +1342,21 @@ const getRadarrConfig = () => ({
   radarrDefaultQualityProfileId: store.get('radarrDefaultQualityProfileId') ?? '',
   radarrSearchAfterAdd: store.get('radarrSearchAfterAdd') !== false,
 });
+const getSonarrConfig = () => ({
+  sonarrEnabled: store.get('sonarrEnabled') === true,
+  sonarrManaged: store.get('sonarrManaged') === true,
+  sonarrBaseUrl: String(store.get('sonarrBaseUrl') || ''),
+  sonarrApiKey: String(store.get('sonarrApiKey') || ''),
+  sonarrExecutablePath: String(store.get('sonarrExecutablePath') || ''),
+  sonarrPort: Number(store.get('sonarrPort') || 8989),
+  sonarrTimeout: Number(store.get('sonarrTimeout') || 10000),
+  sonarrDefaultRootFolder: String(store.get('sonarrDefaultRootFolder') || ''),
+  sonarrDefaultQualityProfileId: store.get('sonarrDefaultQualityProfileId') ?? '',
+  sonarrSearchAfterAdd: store.get('sonarrSearchAfterAdd') !== false,
+});
 let prowlarrProcess = null;
 let radarrProcess = null;
+let sonarrProcess = null;
 const getStoredAuthUser = () => store.get('authUser') || null;
 const getStoredAuthSession = () => store.get('authSession') || { authenticated: false, rememberMe: false, username: '' };
 
@@ -1165,6 +1469,7 @@ app.on('child-process-gone', (_event, details) => {
 app.on('window-all-closed', async () => {
   stopManagedProwlarr();
   stopManagedRadarr();
+  stopManagedSonarr();
   if (torrentRulesInterval) {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
@@ -1190,6 +1495,7 @@ app.on('window-all-closed', async () => {
 
 const getManagedProwlarrDataDir = () => path.join(app.getPath('userData'), 'prowlarr');
 const getManagedRadarrDataDir = () => path.join(app.getPath('userData'), 'radarr');
+const getManagedSonarrDataDir = () => path.join(app.getPath('userData'), 'sonarr');
 
 const getBundledProwlarrExecutable = () => {
   const basePath = app.isPackaged ? process.resourcesPath : __dirname;
@@ -1217,6 +1523,20 @@ const getRadarrExecutablePath = (config = {}) => {
     return config.radarrExecutablePath;
   }
   const bundled = getBundledRadarrExecutable();
+  return fs.existsSync(bundled) ? bundled : '';
+};
+
+const getBundledSonarrExecutable = () => {
+  const basePath = app.isPackaged ? process.resourcesPath : __dirname;
+  const executable = process.platform === 'win32' ? 'Sonarr.exe' : 'Sonarr';
+  return path.join(basePath, 'resources', 'sonarr', executable);
+};
+
+const getSonarrExecutablePath = (config = {}) => {
+  if (config.sonarrExecutablePath && fs.existsSync(config.sonarrExecutablePath)) {
+    return config.sonarrExecutablePath;
+  }
+  const bundled = getBundledSonarrExecutable();
   return fs.existsSync(bundled) ? bundled : '';
 };
 
@@ -1292,6 +1612,49 @@ const ensureRadarrConfigFile = (config = {}) => {
       '  <BindAddress>127.0.0.1</BindAddress>',
       `  <Port>${port}</Port>`,
       '  <SslPort>9898</SslPort>',
+      '  <EnableSsl>False</EnableSsl>',
+      '  <LaunchBrowser>False</LaunchBrowser>',
+      '  <AuthenticationMethod>Forms</AuthenticationMethod>',
+      '  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>',
+      '  <AuthenticationRequiredWarningDismissed>True</AuthenticationRequiredWarningDismissed>',
+      `  <ApiKey>${apiKey}</ApiKey>`,
+      '  <UrlBase></UrlBase>',
+      '  <LogLevel>info</LogLevel>',
+      '</Config>',
+      '',
+    ].join('\n'));
+  }
+
+  return { dataDir, apiKey, port };
+};
+
+const ensureSonarrConfigFile = (config = {}) => {
+  const dataDir = getManagedSonarrDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  const configPath = path.join(dataDir, 'config.xml');
+  const port = Number(config.sonarrPort) || 8989;
+  let apiKey = config.sonarrApiKey || crypto.randomBytes(16).toString('hex');
+
+  if (fs.existsSync(configPath)) {
+    const xml = fs.readFileSync(configPath, 'utf8');
+    apiKey = readXmlValue(xml, 'ApiKey') || apiKey;
+    const updated = upsertXmlValues(xml, {
+      BindAddress: '127.0.0.1',
+      Port: String(port),
+      ApiKey: apiKey,
+      AuthenticationMethod: 'Forms',
+      AuthenticationRequired: 'DisabledForLocalAddresses',
+      AuthenticationRequiredWarningDismissed: 'True',
+      UrlBase: '',
+    });
+    fs.writeFileSync(configPath, updated);
+  } else {
+    fs.writeFileSync(configPath, [
+      '<Config>',
+      '  <BindAddress>127.0.0.1</BindAddress>',
+      `  <Port>${port}</Port>`,
+      '  <SslPort>9899</SslPort>',
       '  <EnableSsl>False</EnableSsl>',
       '  <LaunchBrowser>False</LaunchBrowser>',
       '  <AuthenticationMethod>Forms</AuthenticationMethod>',
@@ -1390,6 +1753,33 @@ const stopSystemRadarr = () => {
       execSync('taskkill /F /IM Radarr.exe /T', { stdio: 'ignore' });
     } else {
       execSync('pkill -f Radarr', { stdio: 'ignore' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isSystemSonarrRunning = () => {
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync('tasklist /FI "IMAGENAME eq Sonarr.exe" /FO CSV /NH', { encoding: 'utf8' });
+      return output.toLowerCase().includes('sonarr.exe');
+    }
+    const output = execSync('pgrep -f Sonarr', { encoding: 'utf8' });
+    return Boolean(String(output).trim());
+  } catch {
+    return false;
+  }
+};
+
+const stopSystemSonarr = () => {
+  if (!isSystemSonarrRunning()) return false;
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM Sonarr.exe /T', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f Sonarr', { stdio: 'ignore' });
     }
     return true;
   } catch {
@@ -1525,10 +1915,75 @@ const stopManagedRadarr = () => {
   return externalProcessStopped;
 };
 
+const buildManagedSonarrConfig = (config = {}) => {
+  const port = Number(config.sonarrPort) || 8989;
+  return {
+    ...config,
+    sonarrEnabled: true,
+    sonarrManaged: true,
+    sonarrBaseUrl: `http://127.0.0.1:${port}`,
+    sonarrPort: port,
+    sonarrApiKey: config.sonarrApiKey,
+  };
+};
+
+const startManagedSonarr = (config = {}) => {
+  const externalProcessStopped = stopSystemSonarr();
+  if (sonarrProcess && !sonarrProcess.killed) {
+    sonarrProcess.kill();
+    sonarrProcess = null;
+  }
+
+  const executablePath = getSonarrExecutablePath(config);
+  if (!executablePath) {
+    return {
+      ok: false,
+      message: 'Sonarr executable was not found',
+      expectedPath: getBundledSonarrExecutable(),
+    };
+  }
+
+  const prepared = ensureSonarrConfigFile(config);
+  const nextConfig = buildManagedSonarrConfig({
+    ...config,
+    sonarrApiKey: prepared.apiKey,
+    sonarrPort: prepared.port,
+    sonarrExecutablePath: executablePath,
+  });
+
+  sonarrProcess = spawn(executablePath, [`-data=${prepared.dataDir}`, '-nobrowser'], {
+    cwd: path.dirname(executablePath),
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+
+  sonarrProcess.once('exit', () => {
+    sonarrProcess = null;
+  });
+
+  Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
+  return {
+    ok: true,
+    externalProcessStopped,
+    ...nextConfig,
+  };
+};
+
+const stopManagedSonarr = () => {
+  const externalProcessStopped = stopSystemSonarr();
+  if (sonarrProcess && !sonarrProcess.killed) {
+    sonarrProcess.kill();
+    sonarrProcess = null;
+    return true;
+  }
+  return externalProcessStopped;
+};
+
 // IPC Handlers
 ipcMain.handle('get-settings', () => {
   const torrentio = store.get('torrentio') || {};
   const radarr = getRadarrConfig();
+  const sonarr = getSonarrConfig();
   return {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
@@ -1555,6 +2010,7 @@ ipcMain.handle('get-settings', () => {
       },
     },
     ...radarr,
+    ...sonarr,
   };
 });
 
@@ -1686,6 +2142,16 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('radarrDefaultRootFolder', String(settings.radarrDefaultRootFolder || '').trim());
   store.set('radarrDefaultQualityProfileId', settings.radarrDefaultQualityProfileId ?? '');
   store.set('radarrSearchAfterAdd', settings.radarrSearchAfterAdd !== false);
+  store.set('sonarrEnabled', settings.sonarrEnabled === true);
+  store.set('sonarrManaged', settings.sonarrManaged === true);
+  store.set('sonarrBaseUrl', String(settings.sonarrBaseUrl || '').trim());
+  store.set('sonarrApiKey', String(settings.sonarrApiKey || '').trim());
+  store.set('sonarrExecutablePath', String(settings.sonarrExecutablePath || '').trim());
+  store.set('sonarrPort', Number(settings.sonarrPort || 8989));
+  store.set('sonarrTimeout', Number(settings.sonarrTimeout || 10000));
+  store.set('sonarrDefaultRootFolder', String(settings.sonarrDefaultRootFolder || '').trim());
+  store.set('sonarrDefaultQualityProfileId', settings.sonarrDefaultQualityProfileId ?? '');
+  store.set('sonarrSearchAfterAdd', settings.sonarrSearchAfterAdd !== false);
   const savedApiKey = store.get('apiKey') || '';
   const savedProwlarr = store.get('prowlarr') || {};
   const savedRadarrEnabled = store.get('radarrEnabled') === true;
@@ -1704,6 +2170,7 @@ ipcMain.handle('save-settings', (event, settings) => {
     hasProwlarrApiKey: Boolean(savedProwlarr.apiKey),
     torrentioEnabled: store.get('torrentioEnabled') === true,
     radarrEnabled: savedRadarrEnabled,
+    sonarrEnabled: store.get('sonarrEnabled') === true,
   });
   return settingsVerified;
 });
@@ -2001,6 +2468,40 @@ ipcMain.handle('get-managed-radarr-status', async () => {
   };
 });
 
+ipcMain.handle('select-sonarr-executable', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select Sonarr executable',
+    properties: ['openFile'],
+    filters: process.platform === 'win32'
+      ? [{ name: 'Sonarr', extensions: ['exe'] }]
+      : [{ name: 'Sonarr', extensions: ['*'] }],
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return '';
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle('start-managed-sonarr', async (event, sonarrConfig) => {
+  return startManagedSonarr(sonarrConfig || getSonarrConfig());
+});
+
+ipcMain.handle('stop-managed-sonarr', async () => {
+  return {
+    ok: true,
+    stopped: stopManagedSonarr(),
+  };
+});
+
+ipcMain.handle('get-managed-sonarr-status', async () => {
+  return {
+    running: Boolean(sonarrProcess && !sonarrProcess.killed) || isSystemSonarrRunning(),
+    expectedPath: getBundledSonarrExecutable(),
+    dataDir: getManagedSonarrDataDir(),
+  };
+});
+
 ipcMain.handle('open-prowlarr-download-page', async () => {
   try {
     await shell.openExternal('https://github.com/prowlarr/prowlarr');
@@ -2151,6 +2652,136 @@ ipcMain.handle('open-radarr-web-ui', async (event, radarrSettings = {}) => {
   }
 });
 
+ipcMain.handle('sonarr:testConnection', async (event, sonarrSettings = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    return await sonarrService.testConnection(settings);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:getRootFolders', async (event, sonarrSettings = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    const items = await sonarrService.getRootFolders(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:getQualityProfiles', async (event, sonarrSettings = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    const items = await sonarrService.getQualityProfiles(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:getSeries', async (event, sonarrSettings = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    const items = await sonarrService.getSeries(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:getEpisodes', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const items = await sonarrService.getEpisodesBySeries(settings, payload?.seriesId);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:lookupSeriesByTmdbId', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const series = await sonarrService.lookupSeriesByTmdbId(settings, payload?.tmdbId);
+    return { ok: true, series };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:addSeries', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.addSeries(settings, payload?.series || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:deleteSeries', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.deleteSeries(settings, payload?.seriesId, payload?.options || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:updateSeries', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.updateSeries(settings, payload?.seriesId, payload?.series || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:upsertQbittorrentClient', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const qbittorrent = payload?.qbittorrent || {};
+    return await sonarrService.upsertQbittorrentDownloadClient(settings, qbittorrent);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:checkQbittorrentClient', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const qbittorrent = payload?.qbittorrent || {};
+    return await sonarrService.checkQbittorrentDownloadClient(settings, qbittorrent);
+  } catch (err) {
+    return { ok: false, error: err.message, exists: false, matches: false };
+  }
+});
+
+ipcMain.handle('open-sonarr-download-page', async () => {
+  try {
+    await shell.openExternal('https://github.com/Sonarr/Sonarr');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-sonarr-web-ui', async (event, sonarrSettings = {}) => {
+  try {
+    const merged = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    let baseUrl = String(merged.sonarrBaseUrl || '').trim();
+    if (!baseUrl) return { ok: false, error: 'Sonarr Base URL is empty' };
+    if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
+    const parsed = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('prowlarr:connectRadarr', async () => {
   try {
     const prowlarrConfig = getProwlarrConfig();
@@ -2172,6 +2803,26 @@ ipcMain.handle('prowlarr:syncRadarr', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+ipcMain.handle('prowlarr:connectSonarr', async () => {
+  try {
+    const prowlarrConfig = getProwlarrConfig();
+    const sonarrConfig = getSonarrConfig();
+    return await ensureProwlarrSonarrSync(prowlarrConfig, sonarrConfig, 'connect');
+  } catch (err) {
+    return { ok: false, error: err.message, prowlarr: 'disconnected', sonarr: 'disconnected', sync: 'notConfigured' };
+  }
+});
+
+ipcMain.handle('prowlarr:syncSonarr', async () => {
+  try {
+    const prowlarrConfig = getProwlarrConfig();
+    const sonarrConfig = getSonarrConfig();
+    return await ensureProwlarrSonarrSync(prowlarrConfig, sonarrConfig, 'sync');
+  } catch (err) {
+    return { ok: false, error: err.message, prowlarr: 'disconnected', sonarr: 'disconnected', sync: 'notConfigured' };
+  }
+});
+
 // TORRENT IPC HANDLERS
 // ═══════════════════════════════════════════════════════════════
 
