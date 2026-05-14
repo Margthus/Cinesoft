@@ -11,6 +11,7 @@ import MyListView from './components/MyListView';
 import DownloadsView from './components/DownloadsView';
 import SearchView from './components/SearchView';
 import LibraryView from './components/LibraryView';
+import RadarrView from './components/RadarrView';
 import { DEFAULT_PROWLARR_CONFIG } from './sources/index.mjs';
 import { normalizeTorrentioConfig } from './utils/torrentio';
 import { WATCH_STATUS_STORAGE_KEY, buildWatchStatusKey } from './utils/watchStatus';
@@ -158,6 +159,7 @@ const App = () => {
             <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/downloads" element={<DownloadsView settings={settings} />} />
+            <Route path="/radarr" element={<RadarrView settings={settings} />} />
             <Route path="/library" element={<LibraryView settings={settings} />} />
             <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
             <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
@@ -198,8 +200,8 @@ const Sidebar = ({ settings }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const t = {
-    tr: { home: 'Ana Sayfa', movies: 'Filmler', tv: 'Diziler', anime: 'Anime', settings: 'Ayarlar', library: 'Kutuphanem', myList: 'Listem', downloads: 'Indirilenler' },
-    en: { home: 'Home', movies: 'Movies', tv: 'TV Shows', anime: 'Anime', settings: 'Settings', library: 'Library', myList: 'My List', downloads: 'Downloads' },
+    tr: { home: 'Ana Sayfa', movies: 'Filmler', tv: 'Diziler', anime: 'Anime', settings: 'Ayarlar', library: 'Kutuphanem', myList: 'Listem', downloads: 'Indirilenler', radarr: 'Radarr' },
+    en: { home: 'Home', movies: 'Movies', tv: 'TV Shows', anime: 'Anime', settings: 'Settings', library: 'Library', myList: 'My List', downloads: 'Downloads', radarr: 'Radarr' },
   }[settings.language];
 
   const handleSearch = (e) => {
@@ -248,6 +250,10 @@ const Sidebar = ({ settings }) => {
           <NavLink to="/downloads" className="nav-item">
             <Download size={20} />
             <span>{t.downloads}</span>
+          </NavLink>
+          <NavLink to="/radarr" className="nav-item">
+            <Film size={20} />
+            <span>{t.radarr}</span>
           </NavLink>
         </div>
       </div>

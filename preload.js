@@ -32,8 +32,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   radarrTestConnection: (settings) => ipcRenderer.invoke('radarr:testConnection', settings),
   radarrGetRootFolders: (settings) => ipcRenderer.invoke('radarr:getRootFolders', settings),
   radarrGetQualityProfiles: (settings) => ipcRenderer.invoke('radarr:getQualityProfiles', settings),
+  radarrGetMovies: (settings) => ipcRenderer.invoke('radarr:getMovies', settings),
   radarrLookupMovieByTmdbId: (payload) => ipcRenderer.invoke('radarr:lookupMovieByTmdbId', payload),
   radarrAddMovie: (payload) => ipcRenderer.invoke('radarr:addMovie', payload),
+  radarrDeleteMovie: (payload) => ipcRenderer.invoke('radarr:deleteMovie', payload),
   openRadarrDownloadPage: () => ipcRenderer.invoke('open-radarr-download-page'),
   openRadarrWebUI: (settings) => ipcRenderer.invoke('open-radarr-web-ui', settings),
 

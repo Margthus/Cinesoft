@@ -1,0 +1,131 @@
+.radarr-view {
+  padding: 2.4rem 2.8rem;
+}
+
+.radarr-view-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+}
+
+.radarr-view-header h1 {
+  margin: 0;
+  font-size: 2.1rem;
+}
+
+.radarr-view-header p {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted);
+}
+
+.radarr-refresh-btn {
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 0.72rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.radarr-note {
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+}
+
+.radarr-note-error {
+  border-color: rgba(255, 84, 84, 0.35);
+  color: #ffb8b8;
+  background: rgba(255, 84, 84, 0.08);
+}
+
+.radarr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 1rem;
+}
+
+.radarr-card {
+  border: 1px solid var(--border-medium);
+  background: var(--surface-2);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.radarr-poster-wrap {
+  aspect-ratio: 2 / 3;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.radarr-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.radarr-poster-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.radarr-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.75rem 0.8rem;
+}
+
+.radarr-meta strong {
+  font-size: 0.92rem;
+  line-height: 1.3;
+}
+
+.radarr-meta span {
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.radarr-meta span.ok {
+  color: #5ef7cf;
+  border: 1px solid rgba(0, 228, 182, 0.35);
+  background: rgba(0, 228, 182, 0.12);
+}
+
+.radarr-meta span.off {
+  color: #ffb8b8;
+  border: 1px solid rgba(255, 84, 84, 0.35);
+  background: rgba(255, 84, 84, 0.08);
+}
+
+.radarr-card-actions {
+  padding: 0 0.8rem 0.8rem;
+}
+
+.radarr-remove-btn {
+  width: 100%;
+  border: 1px solid rgba(255, 84, 84, 0.35);
+  background: rgba(255, 84, 84, 0.08);
+  color: #ffb8b8;
+  border-radius: 10px;
+  padding: 0.58rem 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.radarr-remove-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}

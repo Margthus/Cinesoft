@@ -99,6 +99,11 @@ const getQualityProfiles = async (settings = {}) => {
   return Array.isArray(rows) ? rows : [];
 };
 
+const getMovies = async (settings = {}) => {
+  const rows = await radarrRequest(settings, '/api/v3/movie');
+  return Array.isArray(rows) ? rows : [];
+};
+
 const lookupMovieByTmdbId = async (settings = {}, tmdbId) => {
   const id = Number(tmdbId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('TMDB ID is required to add this movie to Radarr.');
@@ -130,6 +135,20 @@ const addMovie = async (settings = {}, payload = {}) => {
   }
 };
 
+const deleteMovie = async (settings = {}, movieId, options = {}) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  const params = {
+    deleteFiles: options.deleteFiles === true,
+    addImportExclusion: options.addImportExclusion !== false,
+  };
+  await radarrRequest(settings, `/api/v3/movie/${id}`, {
+    method: 'DELETE',
+    params,
+  });
+  return { ok: true };
+};
+
 module.exports = {
   normalizeBaseUrl,
   radarrRequest,
@@ -137,7 +156,9 @@ module.exports = {
   getSystemStatus,
   getRootFolders,
   getQualityProfiles,
+  getMovies,
   lookupMovieByTmdbId,
   lookupMovie,
   addMovie,
+  deleteMovie,
 };

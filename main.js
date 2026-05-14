@@ -1985,6 +1985,16 @@ ipcMain.handle('radarr:getQualityProfiles', async (event, radarrSettings = {}) =
   }
 });
 
+ipcMain.handle('radarr:getMovies', async (event, radarrSettings = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(radarrSettings || {}) };
+    const items = await radarrService.getMovies(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
 ipcMain.handle('radarr:lookupMovieByTmdbId', async (event, payload = {}) => {
   try {
     const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
@@ -2000,6 +2010,15 @@ ipcMain.handle('radarr:addMovie', async (event, payload = {}) => {
     const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
     const result = await radarrService.addMovie(settings, payload?.movie || {});
     return result;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:deleteMovie', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    return await radarrService.deleteMovie(settings, payload?.movieId, payload?.options || {});
   } catch (err) {
     return { ok: false, error: err.message };
   }

@@ -572,6 +572,11 @@
   padding: 0.75rem 0.85rem;
 }
 
+.radarr-modal-body select option {
+  background: #11161c;
+  color: #e9f2ff;
+}
+
 .radarr-check {
   display: flex;
   flex-direction: row !important;
