@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   Film,
+  BookOpen,
   FolderOpen,
   Globe,
   Home,
@@ -85,11 +86,18 @@ const SettingsView = ({ settings, setSettings }) => {
   const [activeSection, setActiveSection] = useState('general');
   const [embeddedTorrentSettings, setEmbeddedTorrentSettings] = useState(DEFAULT_EMBEDDED_TORRENT_SETTINGS);
   const [embeddedAdvancedOpen, setEmbeddedAdvancedOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState({
+    overview: true,
+    downloadEngine: true,
+    prowlarr: true,
+    radarr: false,
+  });
   const [navGroupsOpen, setNavGroupsOpen] = useState({
     general: true,
     account: true,
     download: true,
     sources: true,
+    guide: true,
   });
 
   useEffect(() => {
@@ -663,6 +671,13 @@ const SettingsView = ({ settings, setSettings }) => {
         { id: 'radarr', label: t.radarr, icon: Film },
       ],
     },
+    {
+      id: 'guide',
+      label: t.navGuide,
+      items: [
+        { id: 'guide', label: t.guide, icon: BookOpen },
+      ],
+    },
   ]), [t]);
 
   const statusTone = saveState === 'saved' ? 'saved' : saveState === 'saving' ? 'saving' : 'idle';
@@ -946,6 +961,178 @@ const SettingsView = ({ settings, setSettings }) => {
             <p className="settings-helper">{t.diskCacheWarning}</p>
           </div>
         )}
+      </div>
+    </section>
+  );
+
+  const renderGuideSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <BookOpen size={18} />
+          <div>
+            <h2>{t.guide}</h2>
+            <p>{t.guideHint}</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="settings-row-list guide-grid">
+        <article className="guide-card">
+          <button
+            type="button"
+            className="guide-accordion-btn"
+            onClick={() => setGuideOpen((current) => ({ ...current, overview: !current.overview }))}
+            aria-expanded={guideOpen.overview}
+          >
+            <span>{t.guideOverviewTitle}</span>
+            {guideOpen.overview ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {guideOpen.overview && (
+            <div className="guide-accordion-body">
+              <section className="guide-section-block">
+                <p>{t.guideOverviewText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideHowToUseTitle}</h3>
+                <ol className="guide-list">
+                  <li>{t.guideHowToUse1}</li>
+                  <li>{t.guideHowToUse2}</li>
+                  <li>{t.guideHowToUse3}</li>
+                  <li>{t.guideHowToUse4}</li>
+                </ol>
+              </section>
+            </div>
+          )}
+        </article>
+
+        <article className="guide-card">
+          <button
+            type="button"
+            className="guide-accordion-btn"
+            onClick={() => setGuideOpen((current) => ({ ...current, downloadEngine: !current.downloadEngine }))}
+            aria-expanded={guideOpen.downloadEngine}
+          >
+            <span>{t.guideDownloadEngineTitle}</span>
+            {guideOpen.downloadEngine ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {guideOpen.downloadEngine && (
+            <div className="guide-accordion-body">
+              <section className="guide-section-block">
+                <h3>{t.guideEmbeddedTitle}</h3>
+                <p>{t.guideEmbeddedText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideQbTitle}</h3>
+                <p>{t.guideQbText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideEngineChoiceTitle}</h3>
+                <ul className="guide-list">
+                  <li>{t.guideEngineChoice1}</li>
+                  <li>{t.guideEngineChoice2}</li>
+                  <li>{t.guideEngineChoice3}</li>
+                </ul>
+              </section>
+            </div>
+          )}
+        </article>
+
+        <article className="guide-card">
+          <button
+            type="button"
+            className="guide-accordion-btn"
+            onClick={() => setGuideOpen((current) => ({ ...current, prowlarr: !current.prowlarr }))}
+            aria-expanded={guideOpen.prowlarr}
+          >
+            <span>{t.guideProwlarrTitle}</span>
+            {guideOpen.prowlarr ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {guideOpen.prowlarr && (
+            <div className="guide-accordion-body">
+              <section className="guide-section-block">
+                <h3>{t.guideWhatIsTitle}</h3>
+                <p>{t.guideWhatIsText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideIntegrateTitle}</h3>
+              <ol className="guide-list">
+                <li>{t.guideIntegrate1}</li>
+                <li>{t.guideIntegrate2}</li>
+                <li>{t.guideIntegrate3}</li>
+                <li>{t.guideIntegrate4}</li>
+                <li>{t.guideIntegrate5}</li>
+              </ol>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideSettingsTitle}</h3>
+              <ul className="guide-list">
+                <li>{t.guideSettingManaged}</li>
+                <li>{t.guideSettingConnection}</li>
+                <li>{t.guideSettingFilters}</li>
+                <li>{t.guideSettingIndexers}</li>
+                <li>{t.guideSettingSync}</li>
+              </ul>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideWorkflowTitle}</h3>
+              <ol className="guide-list">
+                <li>{t.guideWorkflow1}</li>
+                <li>{t.guideWorkflow2}</li>
+                <li>{t.guideWorkflow3}</li>
+              </ol>
+              </section>
+            </div>
+          )}
+        </article>
+
+        <article className="guide-card">
+          <button
+            type="button"
+            className="guide-accordion-btn"
+            onClick={() => setGuideOpen((current) => ({ ...current, radarr: !current.radarr }))}
+            aria-expanded={guideOpen.radarr}
+          >
+            <span>{t.guideRadarrTitle}</span>
+            {guideOpen.radarr ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {guideOpen.radarr && (
+            <div className="guide-accordion-body">
+              <section className="guide-section-block">
+                <h3>{t.guideRadarrWhatIsTitle}</h3>
+                <p>{t.guideRadarrWhatIsText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideRadarrIntegrateTitle}</h3>
+              <ol className="guide-list">
+                <li>{t.guideRadarrIntegrate1}</li>
+                <li>{t.guideRadarrIntegrate2}</li>
+                <li>{t.guideRadarrIntegrate3}</li>
+                <li>{t.guideRadarrIntegrate4}</li>
+                <li>{t.guideRadarrIntegrate5}</li>
+              </ol>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideRadarrSettingsTitle}</h3>
+              <ul className="guide-list">
+                <li>{t.guideRadarrSettingEngine}</li>
+                <li>{t.guideRadarrSettingConnection}</li>
+                <li>{t.guideRadarrSettingDefaults}</li>
+                <li>{t.guideRadarrSettingSearch}</li>
+                <li>{t.guideRadarrSettingQb}</li>
+              </ul>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideRadarrWorkflowTitle}</h3>
+              <ol className="guide-list">
+                <li>{t.guideRadarrWorkflow1}</li>
+                <li>{t.guideRadarrWorkflow2}</li>
+                <li>{t.guideRadarrWorkflow3}</li>
+              </ol>
+              </section>
+            </div>
+          )}
+        </article>
       </div>
     </section>
   );
@@ -1698,6 +1885,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const renderActiveSection = () => {
     if (activeSection === 'general') return renderGeneralSection();
+    if (activeSection === 'guide') return renderGuideSection();
     if (activeSection === 'tmdb') return renderTmdbSection();
     if (activeSection === 'downloadEmbedded') return renderEmbeddedTorrentSection();
     if (activeSection === 'downloadQbittorrent') return renderQbittorrentSection();
@@ -1960,8 +2148,65 @@ const getCopy = (language) => ({
     navAccount: 'HESAP & API',
     navDownload: 'INDIRME',
     navSources: 'KAYNAKLAR',
+    navGuide: 'REHBER',
+    guideOverviewTitle: 'CineSoft Nedir?',
+    guideOverviewText: 'CineSoft; film, dizi ve anime kesfi, kaynak bulma, indirme ve kutuphane yonetimini tek uygulamada birlestiren medya merkezidir.',
+    guideHowToUseTitle: 'CineSoft nasil kullanilir?',
+    guideHowToUse1: 'Discover sayfalarindan icerik secip detayini ac.',
+    guideHowToUse2: 'Detay ekraninda Kaynak Ara ile uygun torrent kaynagini bul.',
+    guideHowToUse3: 'Indirmeyi Embedded Torrent veya qBittorrent ile baslat.',
+    guideHowToUse4: 'Tamamlanan icerikleri Kutuphane ve Radarr akisinda yonet.',
+    guideDownloadEngineTitle: 'Indirme Motorlari (Embedded vs qBittorrent)',
+    guideEmbeddedTitle: 'Embedded Torrent nerede kullanilir?',
+    guideEmbeddedText: "CineSoft icindeki dogrudan indirmeler icin kullanilir. Uygulama ici dosya secimi, kuyruk yonetimi ve disk klasoru ayarlariyla birlikte calisir.",
+    guideQbTitle: 'qBittorrent nerede kullanilir?',
+    guideQbText: "Ozellikle Radarr akisi icin harici istemci olarak kullanilir. Radarr'a istemci eklenince otomatik film indirme gorevlerini daha stabil sekilde yonetir.",
+    guideEngineChoiceTitle: 'Hangi durumda hangisini secmeli?',
+    guideEngineChoice1: 'Hizli uygulama ici indirme: Embedded Torrent.',
+    guideEngineChoice2: 'Radarr otomasyon odakli senaryo: qBittorrent.',
+    guideEngineChoice3: 'Ikisini ayni anda kullanabilirsin: Embedded (CineSoft) + qBittorrent (Radarr).',
     generalSettings: 'Genel Ayarlar',
     generalSettingsHint: 'Uygulamanin temel ayarlarini yapilandirin.',
+    guide: 'Rehber',
+    guideHint: "Prowlarr'in CineSoft icindeki kurulum ve kullanim ozeti.",
+    guideProwlarrTitle: 'Prowlarr Guide',
+    guideRadarrTitle: 'Radarr Guide',
+    guideWhatIsTitle: 'Prowlarr ne ise yarar?',
+    guideWhatIsText: 'Prowlarr, birden fazla torrent indexer kaynagini tek merkezden yonetir. CineSoft, kaynak aramada Prowlarr uzerinden sonuclari cekebilir ve Radarr ile indexer senkronu yapabilir.',
+    guideIntegrateTitle: "Prowlarr'i CineSoft'a entegre etme",
+    guideIntegrate1: 'Ayarlar > Kaynaklar > Prowlarr bolumune gir.',
+    guideIntegrate2: "Engine kismini ac ve istersen managed mod ile Prowlarr'i CineSoft baslatsin.",
+    guideIntegrate3: 'Connection alaninda Prowlarr URL ve API key bilgilerini gir.',
+    guideIntegrate4: "Baglantiyi Test Et ile dogrulama yap; basariliysa indexer listesi yuklenir.",
+    guideIntegrate5: 'Indexer Ekle alanindan indexer secip kaydet; aktif indexerlar kaynak aramada kullanilir.',
+    guideSettingsTitle: 'Ayarlar nasil kullanilir?',
+    guideSettingManaged: 'Engine / Managed: Prowlarr surecini CineSoft baslatir-durdurur.',
+    guideSettingConnection: "Connection: URL, API key ve timeout degerleriyle API baglantisini kurar.",
+    guideSettingFilters: 'Filters: film/dizi kategori ID filtreleriyle daha temiz sonuc verir.',
+    guideSettingIndexers: "Indexers: hangi indexerlarin aramaya dahil olacagini secersin.",
+    guideSettingSync: "Prowlarr Sync (Radarr sayfasinda): Prowlarr indexerlarini Radarr'a aktarir.",
+    guideWorkflowTitle: 'Gunluk kullanim akisi',
+    guideWorkflow1: 'Film/Dizi/Anime detayinda Kaynak Ara dediginde CineSoft Prowlarr kaynaklarina sorgu yollar.',
+    guideWorkflow2: "Sonuclar seed, boyut ve kaliteye gore listelenir; uygun kaynagi indirirsin.",
+    guideWorkflow3: "Radarr kullaniyorsan sync ile indexerlar tek seferde Radarr'a gecirilir.",
+    guideRadarrWhatIsTitle: 'Radarr ne ise yarar?',
+    guideRadarrWhatIsText: "Radarr film yonetimi, izleme ve otomatik indirme akisi icin kullanilir. CineSoft icinde Radarr'a film ekleyebilir, varsayilan kalite/root klasoru secip qBittorrent istemcisiyle indirebilirsin.",
+    guideRadarrIntegrateTitle: "Radarr'i CineSoft'a entegre etme",
+    guideRadarrIntegrate1: 'Ayarlar > Kaynaklar > Radarr bolumune gir.',
+    guideRadarrIntegrate2: "Engine'i ac ve istersen managed mod ile Radarr'i CineSoft baslatsin.",
+    guideRadarrIntegrate3: 'Connection alaninda Radarr Base URL ve API key gir.',
+    guideRadarrIntegrate4: "Baglantiyi Test Et ile kontrol et; root folder ve kalite profilleri yuklenmeli.",
+    guideRadarrIntegrate5: "qBittorrent sekmesinden istemciyi Radarr'a ekle ve kontrol et.",
+    guideRadarrSettingsTitle: 'Radarr ayarlari nasil kullanilir?',
+    guideRadarrSettingEngine: 'Engine: Radarr servisinin uygulama tarafindan baslatilip durdurulmasi.',
+    guideRadarrSettingConnection: 'Connection: API baglantisi icin URL, API key ve timeout.',
+    guideRadarrSettingDefaults: 'Defaults: varsayilan root folder ve kalite profili secimi.',
+    guideRadarrSettingSearch: 'Search After Add: film eklendikten sonra otomatik arama davranisi.',
+    guideRadarrSettingQb: "qBittorrent entegrasyonu: indirme istemcisini Radarr'a baglama.",
+    guideRadarrWorkflowTitle: 'Radarr gunluk kullanim akisi',
+    guideRadarrWorkflow1: "Film detayinda Radarr'da var/yok kontrolu ile ekleme yap.",
+    guideRadarrWorkflow2: "Radarr sayfasinda ekli filmleri duzenle (kalite, root folder, monitored).",
+    guideRadarrWorkflow3: 'Automation altindaki Radarr menusu ve qBittorrent ile indirmeyi takip et.',
     language: 'Dil',
     languageHint: 'Arayuz dilini aninda degistir.',
     defaultPage: 'Varsayilan Sayfa',
@@ -2135,8 +2380,65 @@ const getCopy = (language) => ({
     navAccount: 'ACCOUNT & API',
     navDownload: 'DOWNLOAD',
     navSources: 'SOURCES',
+    navGuide: 'GUIDE',
+    guideOverviewTitle: 'What is CineSoft?',
+    guideOverviewText: 'CineSoft is a media hub that combines discovery, source search, downloading, and library management for movies, TV shows, and anime.',
+    guideHowToUseTitle: 'How to use CineSoft',
+    guideHowToUse1: 'Pick content from Discover pages and open details.',
+    guideHowToUse2: 'Use Find Sources in detail view to locate suitable torrents.',
+    guideHowToUse3: 'Start download via Embedded Torrent or qBittorrent.',
+    guideHowToUse4: 'Manage completed content from Library and Radarr workflows.',
+    guideDownloadEngineTitle: 'Download Engines (Embedded vs qBittorrent)',
+    guideEmbeddedTitle: 'When to use Embedded Torrent',
+    guideEmbeddedText: 'Use it for direct in-app downloads. It works with CineSoft file selection, queue controls, and download directory settings.',
+    guideQbTitle: 'When to use qBittorrent',
+    guideQbText: 'Use it mainly as the external client for Radarr workflows. Once linked, Radarr can manage automated movie downloads more reliably.',
+    guideEngineChoiceTitle: 'Which one should you choose?',
+    guideEngineChoice1: 'Fast in-app download flow: Embedded Torrent.',
+    guideEngineChoice2: 'Automation-focused Radarr flow: qBittorrent.',
+    guideEngineChoice3: 'You can use both together: Embedded (CineSoft) + qBittorrent (Radarr).',
     generalSettings: 'General Settings',
     generalSettingsHint: 'Configure the app basics.',
+    guide: 'Guide',
+    guideHint: 'Setup and usage summary for Prowlarr integration in CineSoft.',
+    guideProwlarrTitle: 'Prowlarr Guide',
+    guideRadarrTitle: 'Radarr Guide',
+    guideWhatIsTitle: 'What is Prowlarr for?',
+    guideWhatIsText: 'Prowlarr centralizes multiple torrent indexers. CineSoft can fetch source results through Prowlarr and sync indexers to Radarr.',
+    guideIntegrateTitle: 'Integrating Prowlarr into CineSoft',
+    guideIntegrate1: 'Open Settings > Sources > Prowlarr.',
+    guideIntegrate2: 'Enable Engine and optionally use managed mode so CineSoft starts Prowlarr.',
+    guideIntegrate3: 'Enter Prowlarr URL and API key in Connection.',
+    guideIntegrate4: 'Use Test Connection to verify; indexer list should load.',
+    guideIntegrate5: 'Add and save indexers; active indexers are used in source search.',
+    guideSettingsTitle: 'How settings are used',
+    guideSettingManaged: 'Engine / Managed: CineSoft controls Prowlarr process lifecycle.',
+    guideSettingConnection: 'Connection: URL, API key, and timeout for API access.',
+    guideSettingFilters: 'Filters: Movie/TV category IDs for cleaner matching.',
+    guideSettingIndexers: 'Indexers: Select which indexers are included in search.',
+    guideSettingSync: 'Prowlarr Sync (in Radarr section): pushes indexers into Radarr.',
+    guideWorkflowTitle: 'Daily workflow',
+    guideWorkflow1: 'From Movie/TV/Anime details, Find Sources queries Prowlarr.',
+    guideWorkflow2: 'Results are listed by seed, size, and quality; pick and download.',
+    guideWorkflow3: 'If you use Radarr, sync once to keep indexers aligned.',
+    guideRadarrWhatIsTitle: 'What is Radarr for?',
+    guideRadarrWhatIsText: 'Radarr is used for movie management, monitoring, and automated download flow. In CineSoft, you can add movies to Radarr, choose defaults, and download via qBittorrent.',
+    guideRadarrIntegrateTitle: 'Integrating Radarr into CineSoft',
+    guideRadarrIntegrate1: 'Open Settings > Sources > Radarr.',
+    guideRadarrIntegrate2: 'Enable Engine, and optionally use managed mode so CineSoft starts Radarr.',
+    guideRadarrIntegrate3: 'Enter Radarr Base URL and API key in Connection.',
+    guideRadarrIntegrate4: 'Use Test Connection; root folders and quality profiles should load.',
+    guideRadarrIntegrate5: 'From qBittorrent section, add client to Radarr and verify.',
+    guideRadarrSettingsTitle: 'How Radarr settings are used',
+    guideRadarrSettingEngine: 'Engine: Start/stop Radarr service under app control.',
+    guideRadarrSettingConnection: 'Connection: URL, API key, and timeout for API connectivity.',
+    guideRadarrSettingDefaults: 'Defaults: Root folder and quality profile selections.',
+    guideRadarrSettingSearch: 'Search After Add: automatic search behavior after adding a movie.',
+    guideRadarrSettingQb: 'qBittorrent integration: attach download client to Radarr.',
+    guideRadarrWorkflowTitle: 'Radarr daily workflow',
+    guideRadarrWorkflow1: 'Check whether a movie exists in Radarr and add when missing.',
+    guideRadarrWorkflow2: 'Edit added movies in Radarr page (quality, root folder, monitored).',
+    guideRadarrWorkflow3: 'Track automation flow with Automation > Radarr and qBittorrent.',
     language: 'Language',
     languageHint: 'Switch the interface language instantly.',
     defaultPage: 'Default Page',

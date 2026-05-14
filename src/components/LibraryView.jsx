@@ -24,6 +24,7 @@ const stripReleaseJunk = (value = '') => {
     .replace(/\bE\d{1,3}\b/gi, ' ')
     .replace(/\b(2160p|1080p|720p|480p|4k|uhd|hdr|dv|x264|x265|h264|h265|hevc|avc|10bit|bluray|brrip|web[- ]?dl|webrip|hdrip|dvdrip|proper|repack|remux|aac|ddp?5?\.?1|atmos|yify|yts|rarbg|eztv|tgx|torrentgalaxy|ettv|amzn|nf|hulu)\b/gi, ' ')
     .replace(/\b(ac3|eac3|dts|truehd|flac|opus|mp3|2ch|5\.1|7\.1)\b/gi, ' ')
+    .replace(/\b(aac|ac3|ddp?|dts)\s*\d(?:\.\d)?\b/gi, ' ')
     .replace(/\b\d+(?:[.,]\d+)?\s?(?:gb|gib|mb|mib)\b/gi, ' ')
     .replace(/\b(part|cd|disk|disc)\s?\d+\b/gi, ' ')
     .replace(/\b(multi|dubbed|dual audio|turkish|english|subs?|subbed|complete|season pack|proper|uncut|extended)\b/gi, ' ')
@@ -31,6 +32,41 @@ const stripReleaseJunk = (value = '') => {
     .replace(/\b(\d{1,2})\s+\1\b/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
+};
+
+const normalizeSearchQuery = (value = '') => {
+  let cleaned = stripReleaseJunk(value)
+    .replace(/\b(remaster(?:ed)?|extended|unrated|proper|repack)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const tail = tokens[tokens.length - 1];
+    if (/^[A-Z0-9]{5,}$/.test(tail) || /^[A-Z]{3,}\d+$/.test(tail)) {
+      tokens.pop();
+      cleaned = tokens.join(' ').trim();
+    }
+  }
+  return cleaned;
+};
+
+const buildMetadataQueries = (item) => {
+  const candidates = [item.query, item.cleanTitle, item.displayTitle, item.title, item.fileName];
+  const unique = new Set();
+  const pushVariant = (text = '') => {
+    const query = normalizeSearchQuery(text);
+    if (!query) return;
+    unique.add(query);
+    unique.add(query.replace(/\b(19|20)\d{2}\b/g, ' ').replace(/\s+/g, ' ').trim());
+    unique.add(query.replace(/[:|-].*$/g, '').trim());
+    const words = query.split(/\s+/).filter(Boolean);
+    if (words.length > 2) unique.add(words.slice(0, -1).join(' '));
+  };
+  candidates.forEach((candidate) => {
+    pushVariant(candidate);
+  });
+  return Array.from(unique).filter(Boolean).slice(0, 10);
 };
 
 const looksLikeReleaseName = (value = '') => {
@@ -128,13 +164,14 @@ const parseLibraryMedia = (item) => {
   }
 
   const query = stripReleaseJunk(fileBase);
+  const isNumericTitle = /^\d{4}$/.test(String(query || '').trim());
   return {
     mediaType: 'movie',
     query,
     displayTitle: query || titleCase(stripReleaseJunk(item.title || fileBase)) || 'Unknown Movie',
     season: null,
     episode: null,
-    year,
+    year: isNumericTitle ? null : year,
   };
 };
 
@@ -186,24 +223,65 @@ const buildTorrentLibraryItems = (torrent) => {
   return item ? [item] : [];
 };
 
+const normalizeTitleKey = (value = '') => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '');
+
+const tokenizeTitle = (value = '') => normalizeSearchQuery(value).toLowerCase().split(/\s+/).filter(Boolean);
+
+const isLikelyTitleMismatch = (queryValue = '', titleValue = '') => {
+  const queryTokens = tokenizeTitle(queryValue);
+  const titleTokens = tokenizeTitle(titleValue);
+  if (!queryTokens.length || !titleTokens.length) return false;
+  const queryKey = queryTokens.join('');
+  const titleKey = titleTokens.join('');
+  if (queryKey === titleKey) return false;
+
+  if (queryTokens.length === 1) {
+    const query = queryTokens[0];
+    const isArticlePrefix = titleTokens.length === 2 && ['the', 'a', 'an'].includes(titleTokens[0]) && titleTokens[1] === query;
+    return !isArticlePrefix;
+  }
+
+  const titleSet = new Set(titleTokens);
+  const overlap = queryTokens.filter((token) => titleSet.has(token)).length;
+  const overlapRatio = overlap / queryTokens.length;
+  return overlapRatio < 0.6;
+};
+
 const scoreTmdbResult = (result, parsed) => {
   const dateRaw = result.release_date || result.first_air_date || '';
   const resultYear = Number(String(dateRaw).slice(0, 4)) || 0;
-  const yearPenalty = parsed.year && resultYear ? Math.abs(resultYear - parsed.year) : 1;
+  const numericTitle = /^\d{4}$/.test(String(parsed?.query || '').trim());
+  const yearPenalty = numericTitle
+    ? 1
+    : (parsed.year && resultYear ? Math.abs(resultYear - parsed.year) : 1);
   const typePenalty = result.media_type === parsed.mediaType ? 0 : 4;
-  return yearPenalty + typePenalty;
+  const posterPenalty = result.poster_path ? 0 : 2;
+  const resultTitle = normalizeSearchQuery(result?.title || result?.name || '');
+  const queryRaw = normalizeSearchQuery(parsed?.query || parsed?.cleanTitle || '');
+  const resultKey = normalizeTitleKey(resultTitle);
+  const queryKey = normalizeTitleKey(queryRaw);
+  const exactTitleBonus = queryKey && resultKey === queryKey ? -40 : 0;
+  const prefixBonus = !exactTitleBonus && queryKey && resultKey.startsWith(queryKey) ? -10 : 0;
+  const numericMismatchPenalty = numericTitle && resultTitle && resultTitle !== queryRaw ? 35 : 0;
+  const mismatchPenalty = isLikelyTitleMismatch(queryRaw, resultTitle) ? 45 : 0;
+  return yearPenalty + typePenalty + posterPenalty + numericMismatchPenalty + mismatchPenalty + exactTitleBonus + prefixBonus;
 };
 
 const pickBestResult = (results, parsed) => {
   const usable = (results || []).filter((result) => {
-    if (!result?.poster_path) return false;
     if (parsed.mediaType === 'tv') return result.media_type === 'tv' || !result.media_type;
     return result.media_type === 'movie' || !result.media_type;
   });
   if (!usable.length) return null;
-  return usable
+  const ranked = usable
     .map((item) => ({ item, score: scoreTmdbResult(item, parsed) }))
-    .sort((a, b) => a.score - b.score)[0]?.item || usable[0];
+    .sort((a, b) => a.score - b.score);
+  const best = ranked[0];
+  if (!best) return null;
+  if (best.score >= 28) return null;
+  return best.item;
 };
 
 const buildSubtitleDebugText = (debug, isTr) => {
@@ -331,6 +409,9 @@ const LibraryView = ({ settings }) => {
   const [seriesDetails, setSeriesDetails] = useState(null);
   const [seasonDetails, setSeasonDetails] = useState({});
   const metadataPending = useRef(new Set());
+  const metadataRetryUntil = useRef(new Map());
+  const tmdbSearchCache = useRef(new Map());
+  const tmdbDetailsCache = useRef(new Map());
 
   const isTr = settings.language === 'tr';
 
@@ -384,8 +465,14 @@ const LibraryView = ({ settings }) => {
         const torrent = torrentByPath.get(key);
         const torrentFile = torrentFileByPath.get(key);
         const currentItem = currentMap.get(String(item.id)) || {};
-        const tmdbId = Number(cache?.tmdbId || mediaInfo.tmdbId || currentItem.tmdbId) || null;
-        const poster = mediaInfo.poster || cache?.posterUrl || currentItem.poster || '';
+        const numericTitleQuery = /^\d{4}$/.test(String(parsed.query || '').trim());
+        const cacheTitleMismatch = numericTitleQuery
+          && cache?.title
+          && normalizeTitleKey(cache.title) !== normalizeTitleKey(parsed.query);
+        const safeCacheTmdbId = cacheTitleMismatch ? null : cache?.tmdbId;
+        const safeCachePoster = cacheTitleMismatch ? '' : cache?.posterUrl;
+        const tmdbId = Number(safeCacheTmdbId || mediaInfo.tmdbId || currentItem.tmdbId) || null;
+        const poster = mediaInfo.poster || safeCachePoster || currentItem.poster || '';
         const torrentSeason = Number(parsed.season || mediaInfo.season) || parsed.season;
         const torrentEpisode = Number(parsed.episode || mediaInfo.episode) || parsed.episode;
         const cleanTitle = parsed.mediaType === 'tv'
@@ -420,26 +507,75 @@ const LibraryView = ({ settings }) => {
   useEffect(() => {
     const fillMetadata = async () => {
       if (!settings?.apiKey || !items.length) return;
+      const cacheNow = Date.now();
+      const getCachedSearch = async (apiKey, language, mediaType, query, page = 1) => {
+        const key = `${String(language || 'en').toLowerCase()}|${mediaType}|${String(query || '').toLowerCase()}|${page}`;
+        const hit = tmdbSearchCache.current.get(key);
+        if (hit && hit.expiresAt > Date.now()) return hit.data;
+        const data = await searchContent(apiKey, language, query, page);
+        const ttl = Array.isArray(data) && data.length ? 12 * 60 * 60 * 1000 : 10 * 60 * 1000;
+        tmdbSearchCache.current.set(key, { data, expiresAt: Date.now() + ttl });
+        return data;
+      };
+      const getCachedDetails = async (apiKey, language, tmdbType, tmdbId) => {
+        const key = `${String(language || 'en').toLowerCase()}|${tmdbType}|${tmdbId}`;
+        const hit = tmdbDetailsCache.current.get(key);
+        if (hit && hit.expiresAt > Date.now()) return hit.data;
+        const data = await fetchDetails(apiKey, language, tmdbType, tmdbId);
+        const ttl = data ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000;
+        tmdbDetailsCache.current.set(key, { data, expiresAt: Date.now() + ttl });
+        return data;
+      };
+      // Keep cache size bounded.
+      if (tmdbSearchCache.current.size > 800) {
+        tmdbSearchCache.current.clear();
+      }
+      if (tmdbDetailsCache.current.size > 800) {
+        tmdbDetailsCache.current.clear();
+      }
       const missing = items
         .filter((item) => !item.poster || !item.tmdbId)
         .filter((item) => item.query && !metadataPending.current.has(item.id))
+        .filter((item) => (metadataRetryUntil.current.get(item.id) || 0) <= cacheNow)
         .slice(0, 12);
       if (!missing.length) return;
 
       missing.forEach((item) => metadataPending.current.add(item.id));
       const updates = await Promise.all(missing.map(async (item) => {
-        const results = await searchContent(settings.apiKey, 'en', item.query, 1);
-        const picked = pickBestResult(results, item);
-        if (!picked) return { id: item.id, poster: '', tmdbId: null };
-        const details = await fetchDetails(settings.apiKey, 'en', item.mediaType, picked.id);
-        return {
-          id: item.id,
-          title: details?.name || details?.title || picked.name || picked.title || item.cleanTitle,
-          poster: imageUrl(details?.poster_path || picked.poster_path),
-          tmdbId: picked.id,
-          tmdbType: item.mediaType,
-          year: Number(String(details?.first_air_date || details?.release_date || '').slice(0, 4)) || item.year || null,
-        };
+        try {
+          const queries = buildMetadataQueries(item);
+          if (!queries.length) return { id: item.id, poster: '', tmdbId: null };
+          const preferredLanguage = String(settings.language || 'en').toLowerCase();
+          const languages = preferredLanguage === 'en' ? ['en'] : [preferredLanguage, 'en'];
+          for (const language of languages) {
+            for (const query of queries) {
+              for (const page of [1, 2]) {
+                const results = await getCachedSearch(settings.apiKey, language, item.mediaType, query, page);
+                const picked = pickBestResult(results, item);
+                if (!picked) continue;
+                const tmdbType = picked.media_type === 'tv' || picked.media_type === 'movie'
+                  ? picked.media_type
+                  : item.mediaType;
+                const details = await getCachedDetails(settings.apiKey, language, tmdbType, picked.id);
+                const poster = imageUrl(details?.poster_path || picked.poster_path);
+                if (!poster && !picked.id) continue;
+                metadataRetryUntil.current.delete(item.id);
+                return {
+                  id: item.id,
+                  title: details?.name || details?.title || picked.name || picked.title || item.cleanTitle,
+                  poster,
+                  tmdbId: picked.id,
+                  tmdbType,
+                  year: Number(String(details?.first_air_date || details?.release_date || '').slice(0, 4)) || item.year || null,
+                };
+              }
+            }
+          }
+        } finally {
+          metadataPending.current.delete(item.id);
+        }
+        metadataRetryUntil.current.set(item.id, Date.now() + 20 * 1000);
+        return { id: item.id, poster: '', tmdbId: null };
       }));
 
       setItems((current) => current.map((item) => {
@@ -466,7 +602,7 @@ const LibraryView = ({ settings }) => {
       }));
     };
     fillMetadata();
-  }, [items, settings?.apiKey]);
+  }, [items, settings?.apiKey, settings?.language]);
 
   const libraryCards = useMemo(() => {
     const seriesMap = new Map();

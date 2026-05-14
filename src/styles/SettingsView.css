@@ -352,6 +352,79 @@
   margin-top: 0.9rem;
 }
 
+.guide-grid {
+  gap: 0.9rem;
+}
+
+.guide-card {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.guide-card h3 {
+  margin: 0 0 0.55rem;
+  font-size: 1.02rem;
+}
+
+.guide-accordion-btn {
+  width: 100%;
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.07), rgba(255, 255, 255, 0.01)),
+    rgba(11, 16, 20, 0.9);
+  color: var(--text);
+  border-radius: 14px;
+  min-height: 50px;
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 700;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.guide-accordion-btn:hover {
+  border-color: rgba(var(--accent-rgb), 0.36);
+}
+
+.guide-accordion-body {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.78rem;
+  padding: 0 0.2rem 0.2rem;
+}
+
+.guide-section-block {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.015);
+  border-radius: 12px;
+  padding: 0.8rem 0.85rem;
+}
+
+.guide-section-block h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.98rem;
+}
+
+.guide-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.guide-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  display: grid;
+  gap: 0.35rem;
+}
+
 .settings-input,
 .search-shell,
 .search-shell input,

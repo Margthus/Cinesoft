@@ -1107,6 +1107,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false,
     backgroundColor: '#000000',
     icon: windowIconPath || undefined,
     webPreferences: {
@@ -1118,6 +1119,11 @@ function createWindow() {
     },
     title: 'Cinesoft',
     autoHideMenuBar: true,
+  });
+
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.show();
   });
 
   if (isDevMode) {
@@ -3005,8 +3011,11 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     if (!filePath || !fs.existsSync(filePath)) {
       return { ok: false, error: 'File not found' };
     }
-    const fileUrl = pathToFileURL(filePath).href;
-    await shell.openExternal(fileUrl);
+    const openPathError = await shell.openPath(filePath);
+    if (openPathError) {
+      const fileUrl = pathToFileURL(filePath).href;
+      await shell.openExternal(fileUrl);
+    }
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
