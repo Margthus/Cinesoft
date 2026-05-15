@@ -82,3 +82,5 @@ __pycache__/
 .codex/
 scratch_test.js
 
+dist-release/
+dist-portable-test/
