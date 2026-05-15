@@ -1,4 +1,4 @@
-# CineSoft
+﻿# CineSoft
 
 ---
 
@@ -6,6 +6,17 @@
 
 ### Overview
 CineSoft is a desktop media hub that combines movie/TV/anime discovery, torrent source search, download management, library tracking, and subtitle download in one interface.
+
+### What’s New (Latest Updates)
+- A fully refreshed side menu with cleaner navigation and a more modern visual language.
+- A redesigned settings experience with clearer grouping, improved readability, and smoother control flow.
+- Expanded Radarr integration for a stronger movie automation workflow.
+- Expanded Sonarr integration for cleaner TV-series automation and management.
+- New one-click auto-download and auto-install flow for Prowlarr, Radarr, and Sonarr, including automatic API key detection where available.
+- Broad bug-fix pass across engine control and settings interactions for more stable day-to-day usage.
+- Performance improvements focused on responsiveness during background operations and install tasks.
+- New default-page selection and notification options for a more personalized startup experience.
+- A dedicated Guide section to simplify setup steps and integration walkthroughs.
 
 ### Features
 - Discover movies, TV shows, and anime in one place
@@ -32,16 +43,30 @@ CineSoft is a desktop media hub that combines movie/TV/anime discovery, torrent 
   <img src="screenshots/movies.png" width="49%" />
 </p>
 
-#### Detail Page
+#### Detail & Library
 <p align="center">
   <img src="screenshots/detail-overview.png" width="49%" />
   <img src="screenshots/detail-media.png" width="49%" />
+</p>
+<p align="center">
+  <img src="screenshots/library-detail.png" width="49%" />
+  <img src="screenshots/sonarr-detail.png" width="49%" />
 </p>
 
 #### Settings
 <p align="center">
   <img src="screenshots/settings-general.png" width="49%" />
   <img src="screenshots/settings-prowlarr.png" width="49%" />
+</p>
+<p align="center">
+  <img src="screenshots/settings-radarrr.png" width="49%" />
+  <img src="screenshots/settings-sonarr.png" width="49%" />
+</p>
+
+#### Guide & Downloader
+<p align="center">
+  <img src="screenshots/guide-page.png" width="49%" />
+  <img src="screenshots/embedded-torrent.png" width="49%" />
 </p>
 
 ### Installation
@@ -60,9 +85,9 @@ npm start
 - [npm](https://www.npmjs.com/) 9+
 - [Git](https://git-scm.com/)
 - Windows
-- Python 3.11+ (for local torrent service)
+- Python 3.11+ (for local torrent service and Bazarr source mode)
 - TMDB API key (required for metadata/posters/details)
-- Optional: Prowlarr installation for Prowlarr-based source search
+- Optional: Prowlarr/Bazarr installations for external/custom setups
 
 ### TMDB API Key (Required)
 Get your own API key from TMDB:
@@ -70,20 +95,6 @@ Get your own API key from TMDB:
 https://www.themoviedb.org/settings/api
 
 Then add it from the app Settings page.
-
-### Prowlarr (Optional, User-Installed)
-Download Prowlarr from:
-
-https://github.com/Prowlarr/Prowlarr/releases
-
-Users should install/configure Prowlarr on their own machine for Prowlarr-based source search.  
-If using local resources flow, place files under:
-
-```text
-resources/prowlarr/
-```
-
-This folder is intentionally excluded from the repository.
 
 ### Build (Developer)
 ```powershell
@@ -101,6 +112,17 @@ npm run build
 
 ### Genel Bakış
 CineSoft; film, dizi ve anime keşfi, torrent kaynak arama, indirme yönetimi, kütüphane takibi ve altyazı indirmeyi tek arayüzde birleştiren masaüstü medya uygulamasıdır.
+
+### Neler Yeni (Son Güncellemeler)
+- Yan menü tamamen yenilendi; gezinme yapısı daha sade, daha okunabilir ve daha modern hale getirildi.
+- Ayarlar sayfası baştan tasarlandı; bölümler daha anlaşılır, kullanım akışı daha net bir yapıya kavuştu.
+- Radarr entegrasyonu film otomasyonu için daha kapsamlı ve daha stabil bir seviyeye taşındı.
+- Sonarr entegrasyonu dizi yönetimi ve otomasyon süreçleri için güçlendirildi.
+- Prowlarr, Radarr ve Sonarr için tek tuşla otomatik indirme, otomatik kurulum ve uygun senaryolarda API anahtarı tanıma desteği eklendi.
+- Engine control ve ayar akışlarında genel stabiliteyi artıran kapsamlı bug düzeltmeleri yapıldı.
+- Arka plan işlemlerinde ve kurulum akışında uygulama tepkiselliğini artıran performans iyileştirmeleri uygulandı.
+- Varsayılan açılış sayfası seçimi ve bildirim ayarları ile kişiselleştirme seçenekleri genişletildi.
+- Kurulum ve entegrasyon adımlarını kolaylaştırmak için kapsamlı bir Guide bölümü eklendi.
 
 ### Özellikler
 - Film, dizi ve anime içeriklerini tek yerde keşfetme
@@ -127,10 +149,14 @@ CineSoft; film, dizi ve anime keşfi, torrent kaynak arama, indirme yönetimi, k
   <img src="screenshots/movies.png" width="49%" />
 </p>
 
-#### Detay Sayfası
+#### Detay & Kütüphane
 <p align="center">
   <img src="screenshots/detail-overview.png" width="49%" />
   <img src="screenshots/detail-media.png" width="49%" />
+</p>
+<p align="center">
+  <img src="screenshots/library-detail.png" width="49%" />
+  <img src="screenshots/sonarr-detail.png" width="49%" />
 </p>
 
 #### Ayarlar
@@ -138,8 +164,18 @@ CineSoft; film, dizi ve anime keşfi, torrent kaynak arama, indirme yönetimi, k
   <img src="screenshots/settings-general.png" width="49%" />
   <img src="screenshots/settings-prowlarr.png" width="49%" />
 </p>
+<p align="center">
+  <img src="screenshots/settings-radarrr.png" width="49%" />
+  <img src="screenshots/settings-sonarr.png" width="49%" />
+</p>
 
-### Kurulum (Installation)
+#### Rehber & Downloader
+<p align="center">
+  <img src="screenshots/guide-page.png" width="49%" />
+  <img src="screenshots/embedded-torrent.png" width="49%" />
+</p>
+
+### Kurulum
 > Artık `.exe` dağıtımı yapılmıyor.  
 > Windows SmartScreen ve code-signing kaynaklı sürtünme nedeniyle CineSoft yalnızca kaynak kod + npm ile kurulur ve çalıştırılır.
 
@@ -155,9 +191,9 @@ npm start
 - [npm](https://www.npmjs.com/) 9+
 - [Git](https://git-scm.com/)
 - Windows
-- Python 3.11+ (yerel torrent servisi için)
+- Python 3.11+ (yerel torrent servisi ve Bazarr source modu için)
 - TMDB API anahtarı (metadata/afiş/detaylar için zorunlu)
-- İsteğe bağlı: Prowlarr tabanlı kaynak arama için Prowlarr kurulumu
+- İsteğe bağlı: Harici/özel kurulumlar için Prowlarr/Bazarr
 
 ### TMDB API Anahtarı (Zorunlu)
 TMDB API anahtarınızı buradan alın:
@@ -165,20 +201,6 @@ TMDB API anahtarınızı buradan alın:
 https://www.themoviedb.org/settings/api
 
 Sonrasında uygulama içindeki Ayarlar sayfasından ekleyin.
-
-### Prowlarr (İsteğe Bağlı, Kullanıcı Kurar)
-Prowlarr indirme sayfası:
-
-https://github.com/Prowlarr/Prowlarr/releases
-
-Prowlarr tabanlı kaynak arama için kullanıcıların Prowlarr'ı kendi sistemlerine kurup yapılandırması gerekir.  
-Yerel kaynak akışı kullanılacaksa dosyaları şu klasöre koyun:
-
-```text
-resources/prowlarr/
-```
-
-Bu klasör bilerek repoya dahil edilmez.
 
 ### Build (Geliştirici)
 ```powershell
@@ -189,4 +211,3 @@ npm run build
 - Kısmi streaming altyapısı
 - Manga görüntüleme ve okuma
 - Comics görüntüleme ve okuma
-
