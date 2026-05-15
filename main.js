@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Tray, Menu } = require('electron');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -30,6 +30,9 @@ let completionNotificationBootstrapped = false;
 const completedTorrentNotified = new Set();
 const appLogs = [];
 const MAX_APP_LOGS = 500;
+let mainWindow = null;
+let appTray = null;
+let isQuitting = false;
 
 const PERSISTED_DOWNLOADS_KEY = 'torrentDownloads';
 const TORRENT_SPEED_LIMIT_KEY = 'torrentDownloadSpeedLimitKbps';
@@ -1377,6 +1380,15 @@ if (!store.has('embeddedTorrentEnabled')) {
 if (!store.has('qbittorrentEnabled')) {
   store.set('qbittorrentEnabled', true);
 }
+if (!store.has('minimizeToTrayOnClose')) {
+  store.set('minimizeToTrayOnClose', true);
+}
+if (!store.has('stopManagedEnginesOnExit')) {
+  store.set('stopManagedEnginesOnExit', true);
+}
+if (!store.has('confirmExitWhileDownloading')) {
+  store.set('confirmExitWhileDownloading', true);
+}
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
 }
@@ -1393,7 +1405,7 @@ if (shouldForceSoftwareRendering) {
   app.commandLine.appendSwitch('disable-gpu');
 }
 
-function createWindow() {
+const getWindowIconPath = () => {
   const isDevMode = !app.isPackaged;
   const iconCandidates = process.platform === 'win32'
     ? [
@@ -1408,7 +1420,111 @@ function createWindow() {
         path.join(app.getAppPath(), 'build', 'icon.png'),
         path.join(__dirname, 'build', 'icon.png'),
       ];
-  const windowIconPath = iconCandidates.find((candidate) => fs.existsSync(candidate));
+  return iconCandidates.find((candidate) => fs.existsSync(candidate));
+};
+
+const shouldMinimizeToTrayOnClose = () => store.get('minimizeToTrayOnClose') !== false;
+const shouldStopManagedEnginesOnExit = () => store.get('stopManagedEnginesOnExit') !== false;
+const shouldConfirmExitWhileDownloading = () => store.get('confirmExitWhileDownloading') !== false;
+
+const hasActiveDownloads = async () => {
+  if (!torrentManager) return false;
+  try {
+    const all = await torrentManager.getAll();
+    const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
+    return torrents.some((torrent) => {
+      const done = torrent?.done === true || Number(torrent?.progress || 0) >= 99.9;
+      const paused = torrent?.paused === true;
+      return !done && !paused;
+    });
+  } catch {
+    return false;
+  }
+};
+
+const ensureMainWindow = () => {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  createWindow();
+  return mainWindow;
+};
+
+const showMainWindow = () => {
+  const win = ensureMainWindow();
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+};
+
+const navigateMainWindow = (routePath = '/') => {
+  const normalized = String(routePath || '/').startsWith('/') ? String(routePath || '/') : `/${routePath}`;
+  const win = ensureMainWindow();
+  if (!win) return;
+  showMainWindow();
+  const nextHash = `#${normalized}`;
+  const applyRoute = () => win.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(nextHash)};`).catch(() => {});
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', applyRoute);
+    return;
+  }
+  applyRoute();
+};
+
+const requestQuitFromTray = async () => {
+  if (isQuitting) return;
+  if (shouldConfirmExitWhileDownloading()) {
+    const hasActive = await hasActiveDownloads();
+    if (hasActive) {
+      const isTr = String(store.get('language') || 'tr') === 'tr';
+      const title = 'CineSoft';
+      const message = isTr ? 'Aktif indirmeler devam ediyor.' : 'Active downloads are still running.';
+      const detail = isTr
+        ? 'Simdi cikarsaniz aktif indirmeler durabilir. Yine de cikmak istiyor musunuz?'
+        : 'If you exit now, active downloads may stop. Do you want to exit anyway?';
+      const answer = await dialog.showMessageBox(mainWindow || undefined, {
+        type: 'warning',
+        buttons: isTr ? ['Cikis', 'Iptal'] : ['Exit', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title,
+        message,
+        detail,
+      });
+      if (answer.response !== 0) return;
+    }
+  }
+  isQuitting = true;
+  app.quit();
+};
+
+const createTray = () => {
+  if (appTray) return appTray;
+  const trayIconPath = getWindowIconPath();
+  if (!trayIconPath) return null;
+
+  appTray = new Tray(trayIconPath);
+  appTray.setToolTip('CineSoft');
+  appTray.on('double-click', () => showMainWindow());
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: "CineSoft'u Ac", click: () => showMainWindow() },
+    { label: 'Indirmeler', click: () => navigateMainWindow('/downloads') },
+    { type: 'separator' },
+    { label: 'Radarr Ac', click: () => shell.openExternal('http://127.0.0.1:7878').catch(() => {}) },
+    { label: 'Sonarr Ac', click: () => shell.openExternal('http://127.0.0.1:8989').catch(() => {}) },
+    { label: 'Prowlarr Ac', click: () => shell.openExternal('http://127.0.0.1:9696').catch(() => {}) },
+    { label: 'Ayarlar', click: () => navigateMainWindow('/settings') },
+    { type: 'separator' },
+    { label: 'Cikis', click: () => { requestQuitFromTray().catch(() => {}); } },
+  ]);
+  appTray.setContextMenu(contextMenu);
+  return appTray;
+};
+
+function createWindow() {
+  const isDevMode = !app.isPackaged;
+  const windowIconPath = getWindowIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -1431,6 +1547,20 @@ function createWindow() {
     win.show();
   });
 
+  win.on('close', (event) => {
+    if (isQuitting) return;
+    if (shouldMinimizeToTrayOnClose()) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
+  });
+
   if (isDevMode) {
     win.loadURL('http://localhost:5173');
   } else {
@@ -1447,17 +1577,35 @@ function createWindow() {
   // if (isDev) {
   //   win.webContents.openDevTools();
   // }
+  mainWindow = win;
+  return win;
 }
 
 app.whenReady().then(() => {
   initMetadataDb();
   createWindow();
+  createTray();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    showMainWindow();
   });
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
+  if (appTray) {
+    appTray.destroy();
+    appTray = null;
+  }
+  if (shouldStopManagedEnginesOnExit()) {
+    stopManagedProwlarr();
+    stopManagedRadarr();
+    stopManagedSonarr();
+  }
+  if (torrentRulesInterval) {
+    clearInterval(torrentRulesInterval);
+    torrentRulesInterval = null;
+  }
 });
 
 app.on('child-process-gone', (_event, details) => {
@@ -1468,9 +1616,9 @@ app.on('child-process-gone', (_event, details) => {
 });
 
 app.on('window-all-closed', async () => {
-  stopManagedProwlarr();
-  stopManagedRadarr();
-  stopManagedSonarr();
+  if (!isQuitting) {
+    return;
+  }
   if (torrentRulesInterval) {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
@@ -1488,9 +1636,6 @@ app.on('window-all-closed', async () => {
     torrentManager = null;
   } else {
     pruneCompletedPersistedDownloads([]);
-  }
-  if (process.platform !== 'darwin') {
-    app.quit();
   }
 });
 
@@ -2013,6 +2158,9 @@ ipcMain.handle('get-settings', () => {
     language: store.get('language'),
     defaultPage: store.get('defaultPage') || 'home',
     notificationsEnabled: store.get('notificationsEnabled') !== false,
+    minimizeToTrayOnClose: store.get('minimizeToTrayOnClose') !== false,
+    stopManagedEnginesOnExit: store.get('stopManagedEnginesOnExit') !== false,
+    confirmExitWhileDownloading: store.get('confirmExitWhileDownloading') !== false,
     prowlarr: store.get('prowlarr'),
     torrentioEnabled: store.get('torrentioEnabled') || false,
     embeddedTorrentEnabled: store.get('embeddedTorrentEnabled') !== false,
@@ -2135,6 +2283,9 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('language', settings.language);
   store.set('defaultPage', String(settings.defaultPage || 'home'));
   store.set('notificationsEnabled', settings.notificationsEnabled !== false);
+  store.set('minimizeToTrayOnClose', settings.minimizeToTrayOnClose !== false);
+  store.set('stopManagedEnginesOnExit', settings.stopManagedEnginesOnExit !== false);
+  store.set('confirmExitWhileDownloading', settings.confirmExitWhileDownloading !== false);
   store.set('prowlarr', settings.prowlarr || {});
   store.set('torrentioEnabled', settings.torrentioEnabled || false);
   store.set('embeddedTorrentEnabled', settings.embeddedTorrentEnabled !== false);

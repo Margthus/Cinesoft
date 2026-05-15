@@ -276,6 +276,9 @@ const SettingsView = ({ settings, setSettings }) => {
         || 'qbittorrentEnabled' in changes
         || 'qbittorrent' in changes
         || 'torrentio' in changes
+        || 'minimizeToTrayOnClose' in changes
+        || 'stopManagedEnginesOnExit' in changes
+        || 'confirmExitWhileDownloading' in changes
         || 'radarrEnabled' in changes
         || 'radarrManaged' in changes
         || 'radarrBaseUrl' in changes
@@ -1193,6 +1196,45 @@ const SettingsView = ({ settings, setSettings }) => {
             <Toggle
               checked={formData.notificationsEnabled !== false}
               onChange={(checked) => updateRoot({ notificationsEnabled: checked })}
+            />
+          </div>
+        </div>
+
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.minimizeToTrayOnClose}</strong>
+            <span>{t.minimizeToTrayOnCloseHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <Toggle
+              checked={formData.minimizeToTrayOnClose !== false}
+              onChange={(checked) => updateRoot({ minimizeToTrayOnClose: checked })}
+            />
+          </div>
+        </div>
+
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.stopManagedEnginesOnExit}</strong>
+            <span>{t.stopManagedEnginesOnExitHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <Toggle
+              checked={formData.stopManagedEnginesOnExit !== false}
+              onChange={(checked) => updateRoot({ stopManagedEnginesOnExit: checked })}
+            />
+          </div>
+        </div>
+
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.confirmExitWhileDownloading}</strong>
+            <span>{t.confirmExitWhileDownloadingHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <Toggle
+              checked={formData.confirmExitWhileDownloading !== false}
+              onChange={(checked) => updateRoot({ confirmExitWhileDownloading: checked })}
             />
           </div>
         </div>
@@ -3142,6 +3184,12 @@ const getCopy = (language) => ({
     defaultPageHint: 'Uygulama acildiginda gosterilecek sayfa.',
     notifications: 'Bildirimler',
     notificationsHint: 'Uygulama ici bildirimleri etkinlestir.',
+    minimizeToTrayOnClose: 'Kapatinca sistem tepsisine kucult',
+    minimizeToTrayOnCloseHint: 'X tusuna basildiginda uygulamayi kapatmak yerine sistem tepsisinde calistirmaya devam eder.',
+    stopManagedEnginesOnExit: 'CineSoft kapanirken managed engineleri durdur',
+    stopManagedEnginesOnExitHint: 'Sadece Cikis secenegi ile uygulama kapatildiginda managed Radarr/Sonarr/Prowlarr sureclerini durdurur.',
+    confirmExitWhileDownloading: 'Indirme devam ederken cikisi onaylat',
+    confirmExitWhileDownloadingHint: 'Aktif indirme varsa Cikis oncesi ek onay ister.',
     pageHome: 'Ana Sayfa',
     pageMovies: 'Filmler',
     pageTv: 'Diziler',
@@ -3448,6 +3496,12 @@ const getCopy = (language) => ({
     defaultPageHint: 'Page shown when the app opens.',
     notifications: 'Notifications',
     notificationsHint: 'Enable in-app notifications.',
+    minimizeToTrayOnClose: 'Minimize to system tray on close',
+    minimizeToTrayOnCloseHint: 'When pressing X, keep CineSoft running in the system tray instead of closing.',
+    stopManagedEnginesOnExit: 'Stop managed engines on CineSoft exit',
+    stopManagedEnginesOnExitHint: 'When exiting via tray Quit, stop managed Radarr/Sonarr/Prowlarr processes.',
+    confirmExitWhileDownloading: 'Confirm exit while downloads are active',
+    confirmExitWhileDownloadingHint: 'Ask for confirmation before exit if active downloads are in progress.',
     pageHome: 'Home',
     pageMovies: 'Movies',
     pageTv: 'TV Shows',
