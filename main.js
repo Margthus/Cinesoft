@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Tray, Menu, nativeImage } = require('electron');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -34,7 +34,9 @@ const MAX_APP_LOGS = 500;
 let vpnDisconnectPauseNotified = false;
 let mainWindow = null;
 let appTray = null;
+let trayAvailable = false;
 let isQuitting = false;
+let cleanupStarted = false;
 
 const PERSISTED_DOWNLOADS_KEY = 'torrentDownloads';
 const TORRENT_SPEED_LIMIT_KEY = 'torrentDownloadSpeedLimitKbps';
@@ -1491,6 +1493,8 @@ const getSonarrConfig = () => ({
 let prowlarrProcess = null;
 let radarrProcess = null;
 let sonarrProcess = null;
+const managedProcesses = new Map();
+const startingEngines = new Set();
 const getStoredAuthUser = () => store.get('authUser') || null;
 const getStoredAuthSession = () => store.get('authSession') || { authenticated: false, rememberMe: false, username: '' };
 
@@ -1512,6 +1516,9 @@ if (!store.has('qbittorrentEnabled')) {
 }
 if (!store.has('minimizeToTrayOnClose')) {
   store.set('minimizeToTrayOnClose', true);
+}
+if (!store.has('closeToTray')) {
+  store.set('closeToTray', store.get('minimizeToTrayOnClose') !== false);
 }
 if (!store.has('stopManagedEnginesOnExit')) {
   store.set('stopManagedEnginesOnExit', true);
@@ -1565,9 +1572,127 @@ const getWindowIconPath = () => {
   return iconCandidates.find((candidate) => fs.existsSync(candidate));
 };
 
+const getTrayIconPath = () => {
+  const isPackaged = app.isPackaged;
+  const candidates = process.platform === 'win32'
+    ? [
+        ...(isPackaged ? [
+          path.join(process.resourcesPath, 'build', 'tray.ico'),
+          path.join(process.resourcesPath, 'build', 'icon.ico'),
+        ] : [
+          path.join(__dirname, 'build', 'tray.ico'),
+          path.join(__dirname, 'build', 'icon.ico'),
+          path.join(process.cwd(), 'build', 'tray.ico'),
+          path.join(process.cwd(), 'build', 'icon.ico'),
+        ]),
+      ]
+    : [
+        ...(isPackaged ? [
+          path.join(process.resourcesPath, 'build', 'icon.png'),
+        ] : [
+          path.join(__dirname, 'build', 'icon.png'),
+          path.join(process.cwd(), 'build', 'icon.png'),
+        ]),
+      ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+};
+
 const shouldMinimizeToTrayOnClose = () => store.get('minimizeToTrayOnClose') !== false;
+const shouldCloseToTray = () => store.get('closeToTray') !== false;
 const shouldStopManagedEnginesOnExit = () => store.get('stopManagedEnginesOnExit') !== false;
 const shouldConfirmExitWhileDownloading = () => store.get('confirmExitWhileDownloading') !== false;
+
+const registerManagedEngine = (name, childProcess) => {
+  if (!childProcess || !childProcess.pid) return;
+  const key = String(name || '').toLowerCase();
+  const pid = Number(childProcess.pid) || 0;
+  const existing = managedProcesses.get(key);
+  if (existing?.pid) {
+    try {
+      process.kill(existing.pid, 0);
+      console.log('[EngineLifecycle] managed engine already registered, skipping duplicate', { engine: key, pid: existing.pid });
+      return;
+    } catch {
+      managedProcesses.delete(key);
+    }
+  }
+  managedProcesses.set(key, {
+    engine: key,
+    name: key,
+    processRef: childProcess,
+    child: childProcess,
+    pid,
+    startedByCineSoft: true,
+    startedAt: Date.now(),
+  });
+  console.log('[EngineLifecycle] registered managed engine', { engine: key, pid });
+  console.log('[EngineLifecycle] registry size', managedProcesses.size);
+  console.log('[EngineLifecycle] registry keys', [...managedProcesses.keys()]);
+  childProcess.once('exit', () => {
+    const current = managedProcesses.get(key);
+    if (current?.pid === pid) {
+      managedProcesses.delete(key);
+    }
+  });
+};
+
+const stopManagedEngineEntry = async (entry) => {
+  if (!entry || entry.startedByCineSoft !== true) {
+    console.log('[EngineLifecycle] skipped external engine', { engine: entry?.name || 'unknown' });
+    return false;
+  }
+
+  const targetPid = Number(entry.pid) || Number(entry.processRef?.pid) || Number(entry.child?.pid) || 0;
+  console.log('[EngineLifecycle] stopping managed engine', { engine: entry.name, pid: targetPid || null });
+
+  try {
+    const proc = entry.processRef || entry.child;
+    if (proc && !proc.killed) {
+      proc.kill();
+    }
+  } catch (error) {
+    console.warn('[EngineLifecycle] stop failed', { engine: entry.name, pid: targetPid || null, error: error.message });
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  if (targetPid > 0) {
+    try {
+      process.kill(targetPid, 0);
+      if (process.platform === 'win32') {
+        execSync(`taskkill /PID ${targetPid} /T /F`, { stdio: 'ignore' });
+      } else {
+        process.kill(targetPid, 'SIGKILL');
+      }
+    } catch {
+      // already stopped
+    }
+  }
+
+  managedProcesses.delete(entry.name);
+  return true;
+};
+
+const stopAllManagedEngines = async () => {
+  console.log('[EngineLifecycle] stop managed engines requested');
+  console.log('[EngineLifecycle] registry size before stop', managedProcesses.size);
+  console.log('[EngineLifecycle] registry entries before stop', [...managedProcesses.entries()].map(([engine, item]) => ({ engine, pid: item?.pid || null, startedByCineSoft: item?.startedByCineSoft === true })));
+  if (managedProcesses.size === 0) {
+    console.log('[EngineLifecycle] no managed engines in registry');
+  }
+  const entries = [...managedProcesses.values()];
+  const result = { stopped: [], skipped: [], errors: [] };
+  for (const entry of entries) {
+    try {
+      const stopped = await stopManagedEngineEntry(entry);
+      if (stopped) result.stopped.push(entry.name);
+      else result.skipped.push(entry.name);
+    } catch (error) {
+      result.errors.push({ engine: entry?.name || 'unknown', error: error.message });
+      console.warn('[EngineLifecycle] stop failed', { engine: entry?.name || 'unknown', error: error.message });
+    }
+  }
+  return result;
+};
 
 const hasActiveDownloads = async () => {
   if (!torrentManager) return false;
@@ -1594,8 +1719,38 @@ const showMainWindow = () => {
   const win = ensureMainWindow();
   if (!win) return;
   if (win.isMinimized()) win.restore();
+  win.setSkipTaskbar(false);
   win.show();
   win.focus();
+  console.log('[Tray] show window');
+};
+
+const hideMainWindowToTray = () => {
+  if (!trayAvailable || !appTray) {
+    console.warn('[Tray] hide requested but tray is unavailable');
+    return false;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) return;
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.hide();
+  console.log('[Tray] hide window');
+  return true;
+};
+
+const performAppQuit = async (reason = 'unknown') => {
+  if (isQuitting) return;
+  if (cleanupStarted) {
+    console.log('[AppLifecycle] cleanup already started, skipping duplicate');
+    return;
+  }
+  cleanupStarted = true;
+  console.log('[AppLifecycle] real quit requested', { reason });
+  if (shouldStopManagedEnginesOnExit()) {
+    await stopAllManagedEngines();
+  }
+  isQuitting = true;
+  app.quit();
 };
 
 const navigateMainWindow = (routePath = '/') => {
@@ -1614,6 +1769,7 @@ const navigateMainWindow = (routePath = '/') => {
 
 const requestQuitFromTray = async () => {
   if (isQuitting) return;
+  console.log('[AppLifecycle] close requested', { isQuitting, closeToTray: shouldCloseToTray() });
   if (shouldConfirmExitWhileDownloading()) {
     const hasActive = await hasActiveDownloads();
     if (hasActive) {
@@ -1636,29 +1792,54 @@ const requestQuitFromTray = async () => {
       if (answer.response !== 0) return;
     }
   }
-  isQuitting = true;
-  app.quit();
+  await performAppQuit('tray_exit');
 };
 
 const createTray = () => {
   if (appTray) return appTray;
-  const trayIconPath = getWindowIconPath();
-  if (!trayIconPath) return null;
-
-  appTray = new Tray(trayIconPath);
+  const trayIconPath = getTrayIconPath();
+  const trayIconExists = Boolean(trayIconPath) && fs.existsSync(trayIconPath);
+  console.log('[Tray] icon path', trayIconPath || '(none)');
+  console.log('[Tray] icon exists', trayIconExists);
+  if (!trayIconExists) {
+    trayAvailable = false;
+    console.warn('[Tray] failed', { reason: 'icon_not_found' });
+    return null;
+  }
+  const trayImage = nativeImage.createFromPath(trayIconPath);
+  const imageEmpty = trayImage.isEmpty();
+  console.log('[Tray] image empty', imageEmpty);
+  if (imageEmpty) {
+    trayAvailable = false;
+    console.warn('[Tray] failed', { reason: 'icon_image_empty' });
+    return null;
+  }
+  try {
+    appTray = new Tray(trayImage);
+  } catch (error) {
+    trayAvailable = false;
+    console.warn('[Tray] failed', { reason: 'create_failed', error: error.message });
+    return null;
+  }
+  trayAvailable = true;
+  console.log('[Tray] created');
   appTray.setToolTip('CineSoft');
   appTray.on('double-click', () => showMainWindow());
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: "CineSoft'u Ac", click: () => showMainWindow() },
-    { label: 'Indirmeler', click: () => navigateMainWindow('/downloads') },
+    { label: 'Show CineSoft', click: () => showMainWindow() },
+    { label: 'Hide to Tray', click: () => hideMainWindowToTray() },
+    {
+      label: 'Stop Managed Engines',
+      click: () => {
+        console.log('[IPC] engines:stop-managed requested');
+        stopAllManagedEngines()
+          .then((result) => console.log('[IPC] engines:stop-managed result', result))
+          .catch((error) => console.warn('[EngineLifecycle] stop failed', { engine: 'all', error: error.message }));
+      },
+    },
     { type: 'separator' },
-    { label: 'Radarr Ac', click: () => shell.openExternal('http://127.0.0.1:7878').catch(() => {}) },
-    { label: 'Sonarr Ac', click: () => shell.openExternal('http://127.0.0.1:8989').catch(() => {}) },
-    { label: 'Prowlarr Ac', click: () => shell.openExternal('http://127.0.0.1:9696').catch(() => {}) },
-    { label: 'Ayarlar', click: () => navigateMainWindow('/settings') },
-    { type: 'separator' },
-    { label: 'Cikis', click: () => { requestQuitFromTray().catch(() => {}); } },
+    { label: 'Exit', click: () => { requestQuitFromTray().catch(() => {}); } },
   ]);
   appTray.setContextMenu(contextMenu);
   return appTray;
@@ -1690,11 +1871,22 @@ function createWindow() {
   });
 
   win.on('close', (event) => {
+    console.log('[AppLifecycle] close requested', { isQuitting, closeToTray: shouldCloseToTray(), trayAvailable });
     if (isQuitting) return;
-    if (shouldMinimizeToTrayOnClose()) {
+    if (shouldCloseToTray() && shouldMinimizeToTrayOnClose() && trayAvailable && appTray) {
       event.preventDefault();
-      win.hide();
+      console.log('[AppLifecycle] close prevented, hiding to tray');
+      hideMainWindowToTray();
+      return;
     }
+    if (shouldCloseToTray() && shouldMinimizeToTrayOnClose() && !trayAvailable) {
+      event.preventDefault();
+      console.warn('[AppLifecycle] closeToTray requested but tray is unavailable; quitting instead');
+      performAppQuit('tray_unavailable_close').catch(() => {});
+      return;
+    }
+    event.preventDefault();
+    requestQuitFromTray().catch(() => {});
   });
 
   win.on('closed', () => {
@@ -1707,6 +1899,15 @@ function createWindow() {
     win.loadURL('http://localhost:5173');
   } else {
     const indexFile = path.join(__dirname, 'renderer', 'index.html');
+    const indexExists = fs.existsSync(indexFile);
+    console.log('[Main] Packaged renderer bootstrap', {
+      isPackaged: app.isPackaged,
+      __dirname,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      rendererIndexPath: indexFile,
+      rendererIndexExists: indexExists,
+    });
     win.loadFile(indexFile).catch((error) => {
       console.error('[Main] Failed to load renderer:', error.message);
     });
@@ -1734,16 +1935,15 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  if (cleanupStarted) {
+    console.log('[AppLifecycle] cleanup already started, skipping duplicate');
+  }
   isQuitting = true;
   if (appTray) {
     appTray.destroy();
     appTray = null;
   }
-  if (shouldStopManagedEnginesOnExit()) {
-    stopManagedProwlarr();
-    stopManagedRadarr();
-    stopManagedSonarr();
-  }
+  trayAvailable = false;
   if (torrentRulesInterval) {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
@@ -1758,7 +1958,11 @@ app.on('child-process-gone', (_event, details) => {
 });
 
 app.on('window-all-closed', async () => {
-  if (!isQuitting) {
+  if (!isQuitting && appTray) {
+    return;
+  }
+  if (!isQuitting && process.platform !== 'darwin') {
+    await performAppQuit('window_all_closed');
     return;
   }
   if (torrentRulesInterval) {
@@ -2018,20 +2222,7 @@ const isSystemProwlarrRunning = () => {
 };
 
 const stopSystemProwlarr = () => {
-  if (!isSystemProwlarrRunning()) {
-    return false;
-  }
-
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM Prowlarr.exe /T', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f Prowlarr', { stdio: 'ignore' });
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 };
 
 const isSystemRadarrRunning = () => {
@@ -2048,17 +2239,7 @@ const isSystemRadarrRunning = () => {
 };
 
 const stopSystemRadarr = () => {
-  if (!isSystemRadarrRunning()) return false;
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM Radarr.exe /T', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f Radarr', { stdio: 'ignore' });
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 };
 
 const isSystemSonarrRunning = () => {
@@ -2075,21 +2256,32 @@ const isSystemSonarrRunning = () => {
 };
 
 const stopSystemSonarr = () => {
-  if (!isSystemSonarrRunning()) return false;
-  try {
-    if (process.platform === 'win32') {
-      execSync('taskkill /F /IM Sonarr.exe /T', { stdio: 'ignore' });
-    } else {
-      execSync('pkill -f Sonarr', { stdio: 'ignore' });
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 };
 
 const startManagedProwlarr = (config = {}) => {
-  const externalProcessStopped = stopSystemProwlarr();
+  if (startingEngines.has('prowlarr')) {
+    console.log('[EngineLifecycle] start skipped because engine is already starting', { engine: 'prowlarr' });
+    return { ok: true, starting: true };
+  }
+  const existingEntry = managedProcesses.get('prowlarr');
+  if (existingEntry?.pid) {
+    try {
+      process.kill(existingEntry.pid, 0);
+      console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'prowlarr', pid: existingEntry.pid });
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+    } catch {
+      managedProcesses.delete('prowlarr');
+    }
+  }
+  startingEngines.add('prowlarr');
+  try {
+  const externalRunning = isSystemProwlarrRunning() && !(prowlarrProcess && !prowlarrProcess.killed);
+  if (externalRunning) {
+    console.log('[EngineLifecycle] skipped external engine', { engine: 'prowlarr' });
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+  }
+  const externalProcessStopped = false;
   if (prowlarrProcess && !prowlarrProcess.killed) {
     prowlarrProcess.kill();
     prowlarrProcess = null;
@@ -2120,6 +2312,7 @@ const startManagedProwlarr = (config = {}) => {
   prowlarrProcess.once('exit', () => {
     prowlarrProcess = null;
   });
+  registerManagedEngine('prowlarr', prowlarrProcess);
 
   store.set('prowlarr', nextConfig);
   return {
@@ -2128,16 +2321,27 @@ const startManagedProwlarr = (config = {}) => {
     externalProcessStopped,
     ...nextConfig,
   };
+  } finally {
+    startingEngines.delete('prowlarr');
+  }
 };
 
 const stopManagedProwlarr = () => {
-  const externalProcessStopped = stopSystemProwlarr();
+  const entry = managedProcesses.get('prowlarr');
+  if (entry) {
+    stopManagedEngineEntry(entry).catch((error) => {
+      console.warn('[EngineLifecycle] stop failed', { engine: 'prowlarr', error: error.message });
+    });
+    prowlarrProcess = null;
+    return true;
+  }
+  console.log('[EngineLifecycle] skipped external engine', { engine: 'prowlarr' });
   if (prowlarrProcess && !prowlarrProcess.killed) {
     prowlarrProcess.kill();
     prowlarrProcess = null;
     return true;
   }
-  return externalProcessStopped;
+  return false;
 };
 
 const buildManagedProwlarrConfig = (config = {}) => {
@@ -2165,7 +2369,28 @@ const buildManagedRadarrConfig = (config = {}) => {
 };
 
 const startManagedRadarr = (config = {}) => {
-  const externalProcessStopped = stopSystemRadarr();
+  if (startingEngines.has('radarr')) {
+    console.log('[EngineLifecycle] start skipped because engine is already starting', { engine: 'radarr' });
+    return { ok: true, starting: true };
+  }
+  const existingEntry = managedProcesses.get('radarr');
+  if (existingEntry?.pid) {
+    try {
+      process.kill(existingEntry.pid, 0);
+      console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'radarr', pid: existingEntry.pid });
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+    } catch {
+      managedProcesses.delete('radarr');
+    }
+  }
+  startingEngines.add('radarr');
+  try {
+  const externalRunning = isSystemRadarrRunning() && !(radarrProcess && !radarrProcess.killed);
+  if (externalRunning) {
+    console.log('[EngineLifecycle] skipped external engine', { engine: 'radarr' });
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+  }
+  const externalProcessStopped = false;
   if (radarrProcess && !radarrProcess.killed) {
     radarrProcess.kill();
     radarrProcess = null;
@@ -2197,6 +2422,7 @@ const startManagedRadarr = (config = {}) => {
   radarrProcess.once('exit', () => {
     radarrProcess = null;
   });
+  registerManagedEngine('radarr', radarrProcess);
 
   Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
   return {
@@ -2204,16 +2430,27 @@ const startManagedRadarr = (config = {}) => {
     externalProcessStopped,
     ...nextConfig,
   };
+  } finally {
+    startingEngines.delete('radarr');
+  }
 };
 
 const stopManagedRadarr = () => {
-  const externalProcessStopped = stopSystemRadarr();
+  const entry = managedProcesses.get('radarr');
+  if (entry) {
+    stopManagedEngineEntry(entry).catch((error) => {
+      console.warn('[EngineLifecycle] stop failed', { engine: 'radarr', error: error.message });
+    });
+    radarrProcess = null;
+    return true;
+  }
+  console.log('[EngineLifecycle] skipped external engine', { engine: 'radarr' });
   if (radarrProcess && !radarrProcess.killed) {
     radarrProcess.kill();
     radarrProcess = null;
     return true;
   }
-  return externalProcessStopped;
+  return false;
 };
 
 const buildManagedSonarrConfig = (config = {}) => {
@@ -2229,7 +2466,28 @@ const buildManagedSonarrConfig = (config = {}) => {
 };
 
 const startManagedSonarr = (config = {}) => {
-  const externalProcessStopped = stopSystemSonarr();
+  if (startingEngines.has('sonarr')) {
+    console.log('[EngineLifecycle] start skipped because engine is already starting', { engine: 'sonarr' });
+    return { ok: true, starting: true };
+  }
+  const existingEntry = managedProcesses.get('sonarr');
+  if (existingEntry?.pid) {
+    try {
+      process.kill(existingEntry.pid, 0);
+      console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'sonarr', pid: existingEntry.pid });
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+    } catch {
+      managedProcesses.delete('sonarr');
+    }
+  }
+  startingEngines.add('sonarr');
+  try {
+  const externalRunning = isSystemSonarrRunning() && !(sonarrProcess && !sonarrProcess.killed);
+  if (externalRunning) {
+    console.log('[EngineLifecycle] skipped external engine', { engine: 'sonarr' });
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+  }
+  const externalProcessStopped = false;
   if (sonarrProcess && !sonarrProcess.killed) {
     sonarrProcess.kill();
     sonarrProcess = null;
@@ -2261,6 +2519,7 @@ const startManagedSonarr = (config = {}) => {
   sonarrProcess.once('exit', () => {
     sonarrProcess = null;
   });
+  registerManagedEngine('sonarr', sonarrProcess);
 
   Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
   return {
@@ -2268,16 +2527,27 @@ const startManagedSonarr = (config = {}) => {
     externalProcessStopped,
     ...nextConfig,
   };
+  } finally {
+    startingEngines.delete('sonarr');
+  }
 };
 
 const stopManagedSonarr = () => {
-  const externalProcessStopped = stopSystemSonarr();
+  const entry = managedProcesses.get('sonarr');
+  if (entry) {
+    stopManagedEngineEntry(entry).catch((error) => {
+      console.warn('[EngineLifecycle] stop failed', { engine: 'sonarr', error: error.message });
+    });
+    sonarrProcess = null;
+    return true;
+  }
+  console.log('[EngineLifecycle] skipped external engine', { engine: 'sonarr' });
   if (sonarrProcess && !sonarrProcess.killed) {
     sonarrProcess.kill();
     sonarrProcess = null;
     return true;
   }
-  return externalProcessStopped;
+  return false;
 };
 
 const engineInstaller = createEngineInstallerService({
@@ -2301,6 +2571,7 @@ ipcMain.handle('get-settings', () => {
     defaultPage: store.get('defaultPage') || 'home',
     notificationsEnabled: store.get('notificationsEnabled') !== false,
     minimizeToTrayOnClose: store.get('minimizeToTrayOnClose') !== false,
+    closeToTray: store.get('closeToTray') !== false,
     stopManagedEnginesOnExit: store.get('stopManagedEnginesOnExit') !== false,
     confirmExitWhileDownloading: store.get('confirmExitWhileDownloading') !== false,
     showVpnReminderBeforeTorrentDownload: store.get('showVpnReminderBeforeTorrentDownload') === true,
@@ -2430,6 +2701,7 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('defaultPage', String(settings.defaultPage || 'home'));
   store.set('notificationsEnabled', settings.notificationsEnabled !== false);
   store.set('minimizeToTrayOnClose', settings.minimizeToTrayOnClose !== false);
+  store.set('closeToTray', settings.closeToTray !== false);
   store.set('stopManagedEnginesOnExit', settings.stopManagedEnginesOnExit !== false);
   store.set('confirmExitWhileDownloading', settings.confirmExitWhileDownloading !== false);
   store.set('showVpnReminderBeforeTorrentDownload', settings.showVpnReminderBeforeTorrentDownload === true);
@@ -2844,6 +3116,13 @@ ipcMain.handle('stop-managed-sonarr', async () => {
     ok: true,
     stopped: stopManagedSonarr(),
   };
+});
+
+ipcMain.handle('engines:stop-managed', async () => {
+  console.log('[IPC] engines:stop-managed requested');
+  const result = await stopAllManagedEngines();
+  console.log('[IPC] engines:stop-managed result', result);
+  return result;
 });
 
 ipcMain.handle('get-managed-sonarr-status', async () => {

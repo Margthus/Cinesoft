@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectSonarrExecutable: () => ipcRenderer.invoke('select-sonarr-executable'),
   startManagedSonarr: (sonarrConfig) => ipcRenderer.invoke('start-managed-sonarr', sonarrConfig),
   stopManagedSonarr: () => ipcRenderer.invoke('stop-managed-sonarr'),
+  stopManagedEngines: () => ipcRenderer.invoke('engines:stop-managed'),
   getManagedSonarrStatus: () => ipcRenderer.invoke('get-managed-sonarr-status'),
   engineInstallLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
   engineGetStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),

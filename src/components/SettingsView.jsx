@@ -212,6 +212,31 @@ const SettingsView = ({ settings, setSettings }) => {
   }, [activeSection, formData.sonarrEnabled, formData.sonarrBaseUrl, formData.sonarrApiKey]);
 
   useEffect(() => {
+    if (!['prowlarr', 'radarr', 'sonarr'].includes(activeSection)) return undefined;
+    let cancelled = false;
+    const syncNow = async () => {
+      if (cancelled) return;
+      await syncManagedConnectionToggles();
+    };
+    syncNow().catch(() => {});
+    const interval = setInterval(() => {
+      syncNow().catch(() => {});
+    }, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    activeSection,
+    formData.prowlarr?.managed,
+    formData.prowlarr?.enabled,
+    formData.radarrManaged,
+    formData.radarrEnabled,
+    formData.sonarrManaged,
+    formData.sonarrEnabled,
+  ]);
+
+  useEffect(() => {
     if (!radarrConfigOpen) return;
     if (!formData.radarrEnabled) return;
     if (!formData.radarrBaseUrl || !formData.radarrApiKey) return;
@@ -618,6 +643,31 @@ const SettingsView = ({ settings, setSettings }) => {
     updateRoot({ sonarrEnabled: false });
     if (formData.sonarrManaged) {
       await handleStopSonarr();
+    }
+  };
+
+  const syncManagedConnectionToggles = async () => {
+    try {
+      const [prowlarrState, radarrState, sonarrState] = await Promise.all([
+        window.electronAPI?.getManagedProwlarrStatus?.(),
+        window.electronAPI?.getManagedRadarrStatus?.(),
+        window.electronAPI?.getManagedSonarrStatus?.(),
+      ]);
+
+      if (formData.prowlarr?.managed && formData.prowlarr?.enabled && prowlarrState?.running !== true) {
+        updateProwlarr({ enabled: false });
+        setManagedStatus('stopped');
+      }
+      if (formData.radarrManaged && formData.radarrEnabled && radarrState?.running !== true) {
+        updateRoot({ radarrEnabled: false });
+        setRadarrManagedStatus('stopped');
+      }
+      if (formData.sonarrManaged && formData.sonarrEnabled && sonarrState?.running !== true) {
+        updateRoot({ sonarrEnabled: false });
+        setSonarrManagedStatus('stopped');
+      }
+    } catch {
+      // best-effort UI sync only
     }
   };
 

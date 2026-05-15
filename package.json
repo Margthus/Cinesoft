@@ -1,17 +1,28 @@
 {
   "name": "cinesoft",
   "version": "1.0.0",
-  "description": "",
+  "description": "Open-source Windows media manager with torrent/download support.",
   "main": "main.js",
   "scripts": {
     "dev": "vite",
     "electron": "electron .",
     "start": "concurrently --kill-others --success first \"npm run dev\" \"wait-on http://localhost:5173 && npm run electron\"",
     "test": "node --test \"src/**/*.test.mjs\"",
-    "build": "vite build && electron-builder"
+    "build": "vite build",
+    "build:portable": "vite build && electron-builder --win portable",
+    "build:installer": "vite build && electron-builder --win nsis"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "electron",
+    "react",
+    "windows",
+    "media-manager",
+    "torrent",
+    "download-manager",
+    "prowlarr",
+    "cinesoft"
+  ],
+  "author": "Mustafa Özmen",
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
@@ -35,33 +46,52 @@
   "build": {
     "appId": "com.margthus.cinesoft",
     "productName": "CineSoft",
-    "asarUnpack": [
-      "src/torrent/**/*.py"
-    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist-release"
+    },
     "files": [
       "main.js",
       "preload.js",
-      "build/**/*",
       "renderer/**/*",
       "src/**/*",
       "package.json",
       "node_modules/**/*"
     ],
-    "directories": {
-      "buildResources": "build"
-    },
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "build/icon.ico"
+      }
+    ],
+    "asarUnpack": [
+      "src/torrent/**/*.py"
+    ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon": "icon.ico"
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "CineSoft-${version}-portable.exe"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "icon.ico",
-      "uninstallerIcon": "icon.ico",
-      "installerHeaderIcon": "icon.ico"
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CineSoft",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     }
   }
 }
