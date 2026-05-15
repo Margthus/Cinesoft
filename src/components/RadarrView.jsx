@@ -483,7 +483,8 @@ const RadarrView = ({ settings }) => {
     setRemoveModal({ open: false, movieIds: [], title: '', deleteFiles: false });
 
     if (movieIds.length === 1) setRemovingId(movieIds[0]);
-    await runBulkAction('delete', async () => {
+    setBulkBusy('delete');
+    try {
       for (const movieId of movieIds) {
         // eslint-disable-next-line no-await-in-loop
         const result = await window.electronAPI?.radarrDeleteMovie?.({
@@ -495,9 +496,11 @@ const RadarrView = ({ settings }) => {
       }
       setItems((prev) => prev.filter((entry) => !movieIds.includes(Number(entry?.id || 0))));
       setSelectedMovieIds((prev) => prev.filter((id) => !movieIds.includes(Number(id || 0))));
-    }).catch((error) => {
+    } catch (error) {
       alert(settings?.language === 'tr' ? `Film kaldirilamadi: ${error.message}` : `Could not remove movie: ${error.message}`);
-    });
+    } finally {
+      setBulkBusy('');
+    }
     setRemovingId(null);
   };
 

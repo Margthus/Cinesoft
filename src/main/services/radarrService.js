@@ -154,8 +154,24 @@ const addMovie = async (settings = {}, payload = {}) => {
 const deleteMovie = async (settings = {}, movieId, options = {}) => {
   const id = Number(movieId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  const shouldDeleteFiles = options.deleteFiles === true;
+
+  if (shouldDeleteFiles) {
+    try {
+      const movie = await getMovieById(settings, id);
+      const movieFileId = Number(movie?.movieFile?.id || 0);
+      if (movieFileId > 0) {
+        await radarrRequest(settings, `/api/v3/moviefile/${movieFileId}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      // Best-effort fallback: continue with movie delete request.
+    }
+  }
+
   const params = {
-    deleteFiles: options.deleteFiles === true,
+    deleteFiles: shouldDeleteFiles,
     addImportExclusion: options.addImportExclusion !== false,
   };
   await radarrRequest(settings, `/api/v3/movie/${id}`, {
