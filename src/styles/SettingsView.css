@@ -318,6 +318,28 @@
   max-width: 300px;
 }
 
+.privacy-network-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.privacy-network-card .settings-row-control {
+  min-width: 0;
+  width: 100%;
+  justify-content: stretch;
+}
+
+.privacy-network-list {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.7rem;
+}
+
+.privacy-network-list .toggle-field {
+  width: 100%;
+}
+
 .segmented-control {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));

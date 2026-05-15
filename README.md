@@ -1,5 +1,5 @@
 ﻿# CineSoft
-
+Vibe Coding
 ---
 
 ## English

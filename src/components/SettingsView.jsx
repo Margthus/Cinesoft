@@ -279,6 +279,10 @@ const SettingsView = ({ settings, setSettings }) => {
         || 'minimizeToTrayOnClose' in changes
         || 'stopManagedEnginesOnExit' in changes
         || 'confirmExitWhileDownloading' in changes
+        || 'showVpnReminderBeforeTorrentDownload' in changes
+        || 'warnIfNoVpnAdapterDetected' in changes
+        || 'pauseTorrentOnVpnDisconnect' in changes
+        || 'requireConfirmationWithoutVpn' in changes
         || 'radarrEnabled' in changes
         || 'radarrManaged' in changes
         || 'radarrBaseUrl' in changes
@@ -1236,6 +1240,45 @@ const SettingsView = ({ settings, setSettings }) => {
               checked={formData.confirmExitWhileDownloading !== false}
               onChange={(checked) => updateRoot({ confirmExitWhileDownloading: checked })}
             />
+          </div>
+        </div>
+
+        <div className="settings-row-card settings-row-card--stacked-mobile privacy-network-card">
+          <div className="settings-row-copy">
+            <strong>{t.privacyNetwork}</strong>
+            <span>{t.privacyNetworkHint}</span>
+          </div>
+          <div className="settings-row-control settings-row-control--wide">
+            <div className="privacy-network-list">
+              <label className="toggle-field">
+                <span>{t.showVpnReminderBeforeTorrentDownload}</span>
+                <Toggle
+                  checked={formData.showVpnReminderBeforeTorrentDownload === true}
+                  onChange={(checked) => updateRoot({ showVpnReminderBeforeTorrentDownload: checked })}
+                />
+              </label>
+              <label className="toggle-field">
+                <span>{t.warnIfNoVpnAdapterDetected}</span>
+                <Toggle
+                  checked={formData.warnIfNoVpnAdapterDetected === true}
+                  onChange={(checked) => updateRoot({ warnIfNoVpnAdapterDetected: checked })}
+                />
+              </label>
+              <label className="toggle-field">
+                <span>{t.pauseTorrentOnVpnDisconnect}</span>
+                <Toggle
+                  checked={formData.pauseTorrentOnVpnDisconnect === true}
+                  onChange={(checked) => updateRoot({ pauseTorrentOnVpnDisconnect: checked })}
+                />
+              </label>
+              <label className="toggle-field">
+                <span>{t.requireConfirmationWithoutVpn}</span>
+                <Toggle
+                  checked={formData.requireConfirmationWithoutVpn === true}
+                  onChange={(checked) => updateRoot({ requireConfirmationWithoutVpn: checked })}
+                />
+              </label>
+            </div>
           </div>
         </div>
 
@@ -3190,6 +3233,12 @@ const getCopy = (language) => ({
     stopManagedEnginesOnExitHint: 'Sadece Cikis secenegi ile uygulama kapatildiginda managed Radarr/Sonarr/Prowlarr sureclerini durdurur.',
     confirmExitWhileDownloading: 'Indirme devam ederken cikisi onaylat',
     confirmExitWhileDownloadingHint: 'Aktif indirme varsa Cikis oncesi ek onay ister.',
+    privacyNetwork: 'Privacy & Network',
+    privacyNetworkHint: 'Torrent indirme oncesi VPN ile ilgili hatirlatma, uyari ve koruma ayarlari.',
+    showVpnReminderBeforeTorrentDownload: 'Torrent indirme baslamadan once VPN hatirlatmasi goster',
+    warnIfNoVpnAdapterDetected: 'VPN benzeri ag bagdastiricisi tespit edilmezse uyar',
+    pauseTorrentOnVpnDisconnect: 'VPN baglantisi koparsa torrent motorunu duraklat',
+    requireConfirmationWithoutVpn: 'VPN olmadan indirme baslamadan once onay iste',
     pageHome: 'Ana Sayfa',
     pageMovies: 'Filmler',
     pageTv: 'Diziler',
@@ -3502,6 +3551,12 @@ const getCopy = (language) => ({
     stopManagedEnginesOnExitHint: 'When exiting via tray Quit, stop managed Radarr/Sonarr/Prowlarr processes.',
     confirmExitWhileDownloading: 'Confirm exit while downloads are active',
     confirmExitWhileDownloadingHint: 'Ask for confirmation before exit if active downloads are in progress.',
+    privacyNetwork: 'Privacy & Network',
+    privacyNetworkHint: 'VPN reminders, warnings, and safety controls for torrent download flow.',
+    showVpnReminderBeforeTorrentDownload: 'Show VPN reminder before starting torrent downloads',
+    warnIfNoVpnAdapterDetected: 'Warn me if no VPN-like network adapter is detected',
+    pauseTorrentOnVpnDisconnect: 'Pause torrent engine when VPN disconnects',
+    requireConfirmationWithoutVpn: 'Require confirmation before downloading without VPN',
     pageHome: 'Home',
     pageMovies: 'Movies',
     pageTv: 'TV Shows',
