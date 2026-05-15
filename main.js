@@ -9,6 +9,7 @@ const axios = require('axios');
 const { pathToFileURL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
 const sonarrService = require('./src/main/services/sonarrService');
+const { createEngineInstallerService } = require('./src/main/services/engineInstallerService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -1497,10 +1498,25 @@ const getManagedProwlarrDataDir = () => path.join(app.getPath('userData'), 'prow
 const getManagedRadarrDataDir = () => path.join(app.getPath('userData'), 'radarr');
 const getManagedSonarrDataDir = () => path.join(app.getPath('userData'), 'sonarr');
 
-const getBundledProwlarrExecutable = () => {
+const getBundledEngineExecutable = (folderName, executableName) => {
   const basePath = app.isPackaged ? process.resourcesPath : __dirname;
+  const resourcesCandidates = [
+    path.join(process.cwd(), 'resources'),
+    path.join(basePath, 'resources'),
+  ];
+  const folderCandidates = [folderName, String(folderName || '').toLowerCase()];
+  for (const resourcesRoot of resourcesCandidates) {
+    for (const folderCandidate of folderCandidates) {
+      const candidate = path.join(resourcesRoot, folderCandidate, executableName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return path.join(resourcesCandidates[0], folderName, executableName);
+};
+
+const getBundledProwlarrExecutable = () => {
   const executable = process.platform === 'win32' ? 'Prowlarr.exe' : 'Prowlarr';
-  return path.join(basePath, 'resources', 'prowlarr', executable);
+  return getBundledEngineExecutable('Prowlarr', executable);
 };
 
 const getProwlarrExecutablePath = (config = {}) => {
@@ -1513,9 +1529,8 @@ const getProwlarrExecutablePath = (config = {}) => {
 };
 
 const getBundledRadarrExecutable = () => {
-  const basePath = app.isPackaged ? process.resourcesPath : __dirname;
   const executable = process.platform === 'win32' ? 'Radarr.exe' : 'Radarr';
-  return path.join(basePath, 'resources', 'radarr', executable);
+  return getBundledEngineExecutable('Radarr', executable);
 };
 
 const getRadarrExecutablePath = (config = {}) => {
@@ -1527,9 +1542,8 @@ const getRadarrExecutablePath = (config = {}) => {
 };
 
 const getBundledSonarrExecutable = () => {
-  const basePath = app.isPackaged ? process.resourcesPath : __dirname;
   const executable = process.platform === 'win32' ? 'Sonarr.exe' : 'Sonarr';
-  return path.join(basePath, 'resources', 'sonarr', executable);
+  return getBundledEngineExecutable('Sonarr', executable);
 };
 
 const getSonarrExecutablePath = (config = {}) => {
@@ -1979,6 +1993,16 @@ const stopManagedSonarr = () => {
   return externalProcessStopped;
 };
 
+const engineInstaller = createEngineInstallerService({
+  stopEngineByName: (appName) => {
+    const key = String(appName || '').toLowerCase();
+    if (key === 'prowlarr') return stopManagedProwlarr();
+    if (key === 'radarr') return stopManagedRadarr();
+    if (key === 'sonarr') return stopManagedSonarr();
+    return false;
+  },
+});
+
 // IPC Handlers
 ipcMain.handle('get-settings', () => {
   const torrentio = store.get('torrentio') || {};
@@ -2375,8 +2399,35 @@ ipcMain.handle('test-prowlarr-connection', async (event, prowlarrConfig) => {
 });
 
 ipcMain.handle('get-prowlarr-indexers', async (event, prowlarrConfig) => {
-  const { getProwlarrIndexers } = await getSourcesModule();
-  return getProwlarrIndexers(prowlarrConfig || getProwlarrConfig());
+  try {
+    const { getProwlarrIndexers } = await getSourcesModule();
+    const rows = await getProwlarrIndexers(prowlarrConfig || getProwlarrConfig());
+    return {
+      ok: true,
+      reason: 'ok',
+      indexers: Array.isArray(rows) ? rows : [],
+    };
+  } catch (err) {
+    const message = String(err?.message || '').toLowerCase();
+    if (
+      message.includes('econnrefused')
+      || message.includes('fetch failed')
+      || message.includes('connect error')
+      || message.includes('could not connect')
+    ) {
+      return {
+        ok: false,
+        reason: 'prowlarr_not_running',
+        indexers: [],
+      };
+    }
+    return {
+      ok: false,
+      reason: 'unknown_error',
+      error: String(err?.message || 'Failed to fetch Prowlarr indexers'),
+      indexers: [],
+    };
+  }
 });
 
 ipcMain.handle('get-prowlarr-indexer-schemas', async (event, prowlarrConfig) => {
@@ -2499,6 +2550,38 @@ ipcMain.handle('get-managed-sonarr-status', async () => {
     running: Boolean(sonarrProcess && !sonarrProcess.killed) || isSystemSonarrRunning(),
     expectedPath: getBundledSonarrExecutable(),
     dataDir: getManagedSonarrDataDir(),
+  };
+});
+
+ipcMain.handle('engine:install-latest', async (event, appName) => {
+  const result = await engineInstaller.installLatestEngine(appName);
+  if (result?.ok) {
+    const normalized = engineInstaller.normalizeEngineName(appName);
+    if (normalized === 'Prowlarr') {
+      const prowlarr = store.get('prowlarr') || {};
+      store.set('prowlarr', {
+        ...prowlarr,
+        executablePath: result.exePath,
+      });
+    } else if (normalized === 'Radarr') {
+      store.set('radarrExecutablePath', String(result.exePath || ''));
+    } else if (normalized === 'Sonarr') {
+      store.set('sonarrExecutablePath', String(result.exePath || ''));
+    }
+  }
+  return result;
+});
+
+ipcMain.handle('engine:get-status', async (event, appName) => {
+  return engineInstaller.getEngineStatus(appName);
+});
+
+ipcMain.handle('engine:find-exe', async (event, appName) => {
+  const exePath = await engineInstaller.findEngineExe(appName);
+  return {
+    ok: Boolean(exePath),
+    appName: engineInstaller.normalizeEngineName(appName) || '',
+    exePath: exePath || '',
   };
 });
 

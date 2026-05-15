@@ -26,6 +26,7 @@
     "axios": "^1.15.2",
     "electron-is-dev": "^3.0.1",
     "electron-store": "^6.0.1",
+    "extract-zip": "^2.0.1",
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

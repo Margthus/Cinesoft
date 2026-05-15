@@ -86,6 +86,12 @@ const SettingsView = ({ settings, setSettings }) => {
   const [sonarrStatus, setSonarrStatus] = useState('');
   const [sonarrRootFolders, setSonarrRootFolders] = useState([]);
   const [sonarrQualityProfiles, setSonarrQualityProfiles] = useState([]);
+  const [engineInstallState, setEngineInstallState] = useState({
+    Prowlarr: { stage: 'idle', message: '', error: '', busy: false },
+    Radarr: { stage: 'idle', message: '', error: '', busy: false },
+    Sonarr: { stage: 'idle', message: '', error: '', busy: false },
+  });
+  const [installConfirmDialog, setInstallConfirmDialog] = useState(null);
   const [radarrProwlarrSyncStatus, setRadarrProwlarrSyncStatus] = useState({
     prowlarr: 'disconnected',
     radarr: 'disconnected',
@@ -117,6 +123,16 @@ const SettingsView = ({ settings, setSettings }) => {
     sources: true,
     guide: true,
   });
+  const prowlarrIndexerInFlightRef = useRef(false);
+  const prowlarrLastRefreshRef = useRef(0);
+  const installConfirmResolverRef = useRef(null);
+
+  useEffect(() => () => {
+    if (installConfirmResolverRef.current) {
+      installConfirmResolverRef.current(false);
+      installConfirmResolverRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     setFormData({
@@ -127,7 +143,6 @@ const SettingsView = ({ settings, setSettings }) => {
   }, [settings]);
 
   useEffect(() => {
-    refreshIndexers();
     window.electronAPI?.getDownloadDir?.().then((dir) => {
       if (typeof dir === 'string' && dir.trim()) {
         setEmbeddedDownloadDir(dir);
@@ -144,15 +159,21 @@ const SettingsView = ({ settings, setSettings }) => {
   }, []);
 
   useEffect(() => {
-    if (!formData.prowlarr.enabled) return;
-    if (indexers.length > 0 || indexerStatus === 'loading') return;
-
-    const retryTimer = setTimeout(() => {
-      refreshIndexers();
-    }, 1200);
-
-    return () => clearTimeout(retryTimer);
-  }, [formData.prowlarr.enabled, formData.prowlarr.baseUrl, formData.prowlarr.apiKey, indexers.length, indexerStatus]);
+    if (activeSection !== 'prowlarr') return undefined;
+    let cancelled = false;
+    const refreshNow = async () => {
+      if (cancelled) return;
+      await refreshIndexers({ force: false });
+    };
+    refreshNow().catch(() => {});
+    const interval = setInterval(() => {
+      refreshNow().catch(() => {});
+    }, 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeSection, formData.prowlarr.enabled, formData.prowlarr.baseUrl, formData.prowlarr.apiKey, formData.prowlarr.timeout]);
 
   useEffect(() => {
     if (!formData.radarrEnabled) return;
@@ -375,6 +396,143 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
+  const setInstallStateFor = (appName, next = {}) => {
+    setEngineInstallState((current) => ({
+      ...current,
+      [appName]: {
+        ...(current[appName] || { stage: 'idle', message: '', error: '', busy: false }),
+        ...next,
+      },
+    }));
+  };
+
+  const applyInstallStatus = (appName, status = {}) => {
+    const stage = String(status?.stage || 'idle');
+    setInstallStateFor(appName, {
+      stage,
+      message: String(status?.message || ''),
+      error: String(status?.error || ''),
+      busy: ['looking_release', 'asset_selected', 'downloading', 'extracting', 'cleaning_old', 'installing', 'validating_exe'].includes(stage),
+    });
+  };
+
+  const getEngineApi = () => window.cinesoft?.engine || {
+    installLatest: (appName) => window.electronAPI?.engineInstallLatest?.(appName),
+    getStatus: (appName) => window.electronAPI?.engineGetStatus?.(appName),
+    findExe: (appName) => window.electronAPI?.engineFindExe?.(appName),
+  };
+
+  const getEngineInstallMeta = (appName) => {
+    if (appName === 'Prowlarr') {
+      return {
+        repo: 'Prowlarr/Prowlarr',
+        releaseUrl: 'https://github.com/Prowlarr/Prowlarr/releases/latest',
+        exeName: 'Prowlarr.exe',
+        folderName: 'Prowlarr',
+      };
+    }
+    if (appName === 'Radarr') {
+      return {
+        repo: 'Radarr/Radarr',
+        releaseUrl: 'https://github.com/Radarr/Radarr/releases/latest',
+        exeName: 'Radarr.exe',
+        folderName: 'Radarr',
+      };
+    }
+    return {
+      repo: 'Sonarr/Sonarr',
+      releaseUrl: 'https://github.com/Sonarr/Sonarr/releases/latest',
+      exeName: 'Sonarr.exe',
+      folderName: 'Sonarr',
+    };
+  };
+
+  const buildEngineInstallConfirmData = (appName, status = null) => {
+    const meta = getEngineInstallMeta(appName);
+    const targetDir = String(status?.targetDir || `resources/${meta.folderName}`);
+    const expectedExe = `${targetDir}\\${meta.exeName}`;
+    return {
+      appName,
+      title: `${appName} ${t.installConfirmTitle}`,
+      source: meta.releaseUrl,
+      targetDir,
+      expectedExe,
+      note: t.installConfirmNote,
+    };
+  };
+
+  const closeInstallConfirmDialog = (approved) => {
+    const resolver = installConfirmResolverRef.current;
+    installConfirmResolverRef.current = null;
+    setInstallConfirmDialog(null);
+    if (resolver) resolver(Boolean(approved));
+  };
+
+  const requestEngineInstallConfirmation = async (appName) => {
+    if (installConfirmResolverRef.current) return false;
+    const api = getEngineApi();
+    const statusPreview = await api.getStatus(appName).catch(() => null);
+    const dialogData = buildEngineInstallConfirmData(appName, statusPreview);
+    return new Promise((resolve) => {
+      installConfirmResolverRef.current = resolve;
+      setInstallConfirmDialog(dialogData);
+    });
+  };
+
+  const handleInstallEngine = async (appName) => {
+    if (engineInstallState?.[appName]?.busy) return;
+    const confirmed = await requestEngineInstallConfirmation(appName);
+    if (!confirmed) {
+      setInstallStateFor(appName, { stage: 'idle', message: '', error: '', busy: false });
+      return;
+    }
+
+    const api = getEngineApi();
+    setInstallStateFor(appName, { stage: 'downloading', message: '', error: '', busy: true });
+    const timer = setInterval(async () => {
+      try {
+        const status = await api.getStatus(appName);
+        if (status?.ok) applyInstallStatus(appName, status);
+      } catch {}
+    }, 600);
+
+    try {
+      const result = await api.installLatest(appName);
+      if (!result?.ok) {
+        setInstallStateFor(appName, {
+          stage: 'error',
+          error: String(result?.error || 'Installation failed'),
+          message: '',
+          busy: false,
+        });
+        return;
+      }
+
+      if (appName === 'Prowlarr') {
+        updateProwlarr({ executablePath: result.exePath || '' });
+      } else if (appName === 'Radarr') {
+        updateRoot({ radarrExecutablePath: result.exePath || '' });
+      } else if (appName === 'Sonarr') {
+        updateRoot({ sonarrExecutablePath: result.exePath || '' });
+      }
+      setInstallStateFor(appName, {
+        stage: 'completed',
+        message: String(result?.assetName || ''),
+        error: '',
+        busy: false,
+      });
+    } catch (error) {
+      setInstallStateFor(appName, {
+        stage: 'error',
+        message: '',
+        error: String(error?.message || 'Installation failed'),
+        busy: false,
+      });
+    } finally {
+      clearInterval(timer);
+    }
+  };
+
   const handleSelectRadarrExecutable = async () => {
     const executablePath = await window.electronAPI?.selectRadarrExecutable?.();
     if (executablePath) {
@@ -390,6 +548,7 @@ const SettingsView = ({ settings, setSettings }) => {
   };
 
   const handleStartRadarr = async (configOverride) => {
+    updateRoot({ radarrManaged: true, radarrEnabled: true });
     setRadarrManagedStatus('starting');
     const configToStart = configOverride || getRadarrSettings();
     const result = await window.electronAPI?.startManagedRadarr?.(configToStart);
@@ -627,7 +786,12 @@ const SettingsView = ({ settings, setSettings }) => {
       setFormData((current) => ({ ...current, prowlarr: nextProwlarr, torrentioEnabled: false }));
       setSettings((current) => ({ ...current, prowlarr: nextProwlarr, torrentioEnabled: false }));
       setManagedStatus(result.externalProcessStopped ? 'restarted' : 'running');
-      await refreshIndexers();
+      const ready = await waitForProwlarrReady(30000, 500);
+      if (ready) {
+        await refreshIndexers({ force: true });
+      } else {
+        setIndexerStatus('prowlarrNotRunning');
+      }
       return;
     }
     setManagedStatus('missing');
@@ -658,7 +822,7 @@ const SettingsView = ({ settings, setSettings }) => {
       updateProwlarr({ managed: true });
       await handleStartProwlarr({ ...formData.prowlarr, enabled: true, managed: true });
     }
-    await refreshIndexers();
+    await refreshIndexers({ force: true });
   };
 
   const handleDisableProwlarrConnection = async () => {
@@ -705,14 +869,63 @@ const SettingsView = ({ settings, setSettings }) => {
     }
   };
 
-  const refreshIndexers = async () => {
+  const isProwlarrRunning = async () => {
+    const baseUrl = String(formData?.prowlarr?.baseUrl || '').toLowerCase();
+    const isLocal = baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost');
+    if (!isLocal) return true;
+    try {
+      const status = await window.electronAPI?.getManagedProwlarrStatus?.();
+      return status?.running === true;
+    } catch {
+      return false;
+    }
+  };
+
+  const waitForProwlarrReady = async (timeoutMs = 30000, intervalMs = 500) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
+      const running = await isProwlarrRunning();
+      if (running) return true;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return false;
+  };
+
+  const refreshIndexers = async ({ force = false } = {}) => {
+    const now = Date.now();
+    if (!force && now - prowlarrLastRefreshRef.current < 10000) return;
+    if (prowlarrIndexerInFlightRef.current) return;
+
+    if (!formData.prowlarr.enabled || !formData.prowlarr.baseUrl || !formData.prowlarr.apiKey) {
+      setIndexerStatus('empty');
+      return;
+    }
+
+    const running = await isProwlarrRunning();
+    if (!running) {
+      setIndexerStatus('prowlarrNotRunning');
+      return;
+    }
+
+    prowlarrIndexerInFlightRef.current = true;
+    prowlarrLastRefreshRef.current = now;
     setIndexerStatus('loading');
     try {
       const result = await window.electronAPI?.getProwlarrIndexers?.(formData.prowlarr);
-      setIndexers(Array.isArray(result) ? result : []);
-      setIndexerStatus(Array.isArray(result) && result.length > 0 ? 'loaded' : 'empty');
+      if (result?.ok === false && result?.reason === 'prowlarr_not_running') {
+        setIndexers([]);
+        setIndexerStatus('prowlarrNotRunning');
+        return;
+      }
+      const items = Array.isArray(result) ? result : (Array.isArray(result?.indexers) ? result.indexers : []);
+      setIndexers(items);
+      setIndexerStatus(items.length > 0 ? 'loaded' : 'empty');
     } catch {
       setIndexerStatus('failed');
+    } finally {
+      prowlarrIndexerInFlightRef.current = false;
     }
   };
 
@@ -729,7 +942,7 @@ const SettingsView = ({ settings, setSettings }) => {
     setIndexerStatus('loading');
     try {
       await window.electronAPI?.deleteProwlarrIndexer?.(formData.prowlarr, id);
-      await refreshIndexers();
+      await refreshIndexers({ force: true });
     } catch {
       setIndexerStatus('failed');
     }
@@ -806,7 +1019,7 @@ const SettingsView = ({ settings, setSettings }) => {
       setAddState('indexerAdded');
       setIndexerDraft(null);
       setSchemaQuery('');
-      await refreshIndexers();
+      await refreshIndexers({ force: true });
     } catch {
       setAddState('indexerAddFailed');
     }
@@ -1795,8 +2008,13 @@ const SettingsView = ({ settings, setSettings }) => {
           </div>
         </div>
         <div className="settings-card-actions settings-card-actions--wrap">
-          <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrDownload}>
-            <span>{t.downloadRadarr}</span>
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            onClick={() => handleInstallEngine('Radarr')}
+            disabled={engineInstallState.Radarr?.busy === true}
+          >
+            <span>{renderEngineInstallerButtonLabel(engineInstallState.Radarr, t)}</span>
           </button>
           <button type="button" className="settings-collapse-btn" onClick={handleOpenRadarrWebUI}>
             <span>{t.openRadarrWebUI}</span>
@@ -1833,7 +2051,7 @@ const SettingsView = ({ settings, setSettings }) => {
                 />
               </label>
               <div className="action-cluster">
-                <button className="action-btn start" onClick={handleStartRadarr} disabled={radarrManagedStatus === 'starting'}>
+                <button className="action-btn start" onClick={() => handleStartRadarr()} disabled={radarrManagedStatus === 'starting'}>
                   {radarrManagedStatus === 'starting' ? <RefreshCcw className="spin" size={16} /> : <Play size={16} />}
                   {t.start}
                 </button>
@@ -1844,6 +2062,7 @@ const SettingsView = ({ settings, setSettings }) => {
               </div>
             </div>
             <div className="status-line">{renderRadarrManagedStatus(radarrManagedStatus, t)}</div>
+            <div className="status-line">{renderEngineInstallerStatus(engineInstallState.Radarr, t)}</div>
           </div>
 
           <div className="prowlarr-panel">
@@ -2018,8 +2237,13 @@ const SettingsView = ({ settings, setSettings }) => {
           </div>
         </div>
         <div className="settings-card-actions settings-card-actions--wrap">
-          <button type="button" className="settings-collapse-btn" onClick={handleOpenSonarrDownload}>
-            <span>{t.downloadSonarr}</span>
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            onClick={() => handleInstallEngine('Sonarr')}
+            disabled={engineInstallState.Sonarr?.busy === true}
+          >
+            <span>{renderEngineInstallerButtonLabel(engineInstallState.Sonarr, t)}</span>
           </button>
           <button type="button" className="settings-collapse-btn" onClick={handleOpenSonarrWebUI}>
             <span>{t.openSonarrWebUI}</span>
@@ -2067,6 +2291,7 @@ const SettingsView = ({ settings, setSettings }) => {
               </div>
             </div>
             <div className="status-line">{renderSonarrManagedStatus(sonarrManagedStatus, t)}</div>
+            <div className="status-line">{renderEngineInstallerStatus(engineInstallState.Sonarr, t)}</div>
           </div>
 
           <div className="prowlarr-panel">
@@ -2241,8 +2466,13 @@ const SettingsView = ({ settings, setSettings }) => {
           </div>
         </div>
         <div className="settings-card-actions settings-card-actions--wrap">
-          <button type="button" className="settings-collapse-btn" onClick={handleOpenProwlarrDownload}>
-            <span>{t.downloadProwlarr}</span>
+          <button
+            type="button"
+            className="settings-collapse-btn"
+            onClick={() => handleInstallEngine('Prowlarr')}
+            disabled={engineInstallState.Prowlarr?.busy === true}
+          >
+            <span>{renderEngineInstallerButtonLabel(engineInstallState.Prowlarr, t)}</span>
           </button>
           <button type="button" className="settings-collapse-btn" onClick={handleOpenProwlarrWebUI}>
             <span>{t.openProwlarrWebUI}</span>
@@ -2291,6 +2521,7 @@ const SettingsView = ({ settings, setSettings }) => {
             </div>
 
             <div className="status-line">{renderManagedStatus(managedStatus, t)}</div>
+            <div className="status-line">{renderEngineInstallerStatus(engineInstallState.Prowlarr, t)}</div>
           </div>
 
           <div className="prowlarr-panel">
@@ -2363,7 +2594,13 @@ const SettingsView = ({ settings, setSettings }) => {
                 </article>
               ))}
             </div>
-            {!indexers.length && <div className="empty-box">{indexerStatus === 'failed' ? t.indexerFailed : t.noIndexers}</div>}
+            {!indexers.length && (
+              <div className="empty-box">
+                {indexerStatus === 'failed'
+                  ? t.indexerFailed
+                  : (indexerStatus === 'prowlarrNotRunning' ? t.prowlarrNotRunningHint : t.noIndexers)}
+              </div>
+            )}
           </div>
 
           <div className="prowlarr-panel prowlarr-panel-wide">
@@ -2538,6 +2775,29 @@ const SettingsView = ({ settings, setSettings }) => {
           {renderActiveSection()}
         </div>
       </div>
+      {installConfirmDialog && (
+        <div className="settings-install-overlay" role="dialog" aria-modal="true">
+          <div className="settings-install-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="settings-install-modal-head">
+              <h3>{installConfirmDialog.title}</h3>
+            </div>
+            <div className="settings-install-modal-body">
+              <p><strong>{t.installConfirmSource}:</strong> {installConfirmDialog.source}</p>
+              <p><strong>{t.installConfirmExtract}:</strong> {installConfirmDialog.targetDir}</p>
+              <p><strong>{t.installConfirmDetect}:</strong> {installConfirmDialog.expectedExe}</p>
+              <p className="settings-install-note">{installConfirmDialog.note}</p>
+            </div>
+            <div className="settings-install-modal-actions">
+              <button type="button" className="action-btn subtle" onClick={() => closeInstallConfirmDialog(false)}>
+                {t.installConfirmCancel}
+              </button>
+              <button type="button" className="action-btn primary" onClick={() => closeInstallConfirmDialog(true)}>
+                {t.installConfirmProceed}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2724,6 +2984,33 @@ const renderSonarrStatus = (state, t) => {
     return message || t.testFailed;
   }
   return t.testFailed;
+};
+
+const renderEngineInstallerStatus = (state, t) => {
+  const stage = String(state?.stage || '');
+  if (!stage || stage === 'idle') return '';
+  if (stage === 'looking_release') return t.installLookingRelease;
+  if (stage === 'asset_selected') return state?.message || t.installAssetSelected;
+  if (stage === 'downloading') return t.installDownloading;
+  if (stage === 'extracting') return t.installExtracting;
+  if (stage === 'cleaning_old') return t.installCleaningOld;
+  if (stage === 'installing') return t.installInstalling;
+  if (stage === 'validating_exe') return t.installValidatingExe;
+  if (stage === 'completed') return t.installCompleted;
+  if (stage === 'error') return `${t.installError}${state?.error ? `: ${state.error}` : ''}`;
+  return state?.message || '';
+};
+
+const renderEngineInstallerButtonLabel = (state, t) => {
+  const stage = String(state?.stage || '');
+  if (stage === 'looking_release') return t.installLookingRelease;
+  if (stage === 'asset_selected') return t.installAssetSelected;
+  if (stage === 'downloading') return t.installDownloading;
+  if (stage === 'extracting') return t.installExtracting;
+  if (stage === 'cleaning_old') return t.installCleaningOld;
+  if (stage === 'installing') return t.installInstalling;
+  if (stage === 'validating_exe') return t.installValidatingExe;
+  return t.autoDownload;
 };
 
 const renderAddStatus = (state, t) => {
@@ -3009,6 +3296,7 @@ const getCopy = (language) => ({
     port: 'Port',
     start: 'Baslat',
     stop: 'Durdur',
+    autoDownload: 'Otomatik Indir',
     starting: 'Prowlarr baslatiliyor...',
     running: 'Prowlarr CineSoft kontrolunde calisiyor.',
     restarted: 'Sistemde acik Prowlarr kapatildi ve CineSoft ayarlariyla yeniden baslatildi.',
@@ -3022,11 +3310,28 @@ const getCopy = (language) => ({
     testing: 'Test ediliyor...',
     testFailed: 'Baglanti basarisiz.',
     testOk: 'Baglanti hazir',
+    installLookingRelease: 'Latest release araniyor...',
+    installAssetSelected: 'Asset secildi...',
+    installDownloading: 'Indiriliyor...',
+    installExtracting: 'Cikariliyor...',
+    installCleaningOld: 'Eski klasor temizleniyor...',
+    installInstalling: 'Kuruluyor...',
+    installValidatingExe: 'EXE dogrulaniyor...',
+    installCompleted: 'Tamamlandi.',
+    installError: 'Kurulum hatasi',
+    installConfirmTitle: 'otomatik indirilsin mi?',
+    installConfirmSource: 'Indirilecek kaynak',
+    installConfirmExtract: 'Kurulum klasoru',
+    installConfirmDetect: 'EXE dogrulama',
+    installConfirmNote: 'Evet dersen indirme baslar. Hayir dersen islem iptal edilir.',
+    installConfirmCancel: 'Hayir, iptal et',
+    installConfirmProceed: 'Evet, indir',
     movieCategories: 'Film kategorileri',
     tvCategories: 'Dizi kategorileri',
     indexers: 'Indexerlar',
     allIndexers: 'Secim yapmazsan tum etkin indexerlar kullanilir.',
     noIndexers: 'Henuz indexer eklenmemis.',
+    prowlarrNotRunningHint: 'Prowlarr calismiyor, once baslat.',
     indexerFailed: 'Indexer listesi alinamadi.',
     addIndexer: 'Indexer Ekle',
     searchIndexer: 'Indexer ara',
@@ -3297,6 +3602,7 @@ const getCopy = (language) => ({
     port: 'Port',
     start: 'Start',
     stop: 'Stop',
+    autoDownload: 'Auto Download',
     starting: 'Starting Prowlarr...',
     running: 'Prowlarr is running under CineSoft control.',
     restarted: 'A running Prowlarr instance was stopped and restarted with CineSoft settings.',
@@ -3310,11 +3616,28 @@ const getCopy = (language) => ({
     testing: 'Testing...',
     testFailed: 'Connection failed.',
     testOk: 'Connection ready',
+    installLookingRelease: 'Looking for latest release...',
+    installAssetSelected: 'Asset selected...',
+    installDownloading: 'Downloading...',
+    installExtracting: 'Extracting...',
+    installCleaningOld: 'Cleaning old folder...',
+    installInstalling: 'Installing...',
+    installValidatingExe: 'Validating executable...',
+    installCompleted: 'Completed.',
+    installError: 'Installation error',
+    installConfirmTitle: 'auto-download confirmation',
+    installConfirmSource: 'Download source',
+    installConfirmExtract: 'Install directory',
+    installConfirmDetect: 'EXE validation',
+    installConfirmNote: 'If you click Yes, download will start. If you click No, it will be cancelled.',
+    installConfirmCancel: 'No, cancel',
+    installConfirmProceed: 'Yes, download',
     movieCategories: 'Movie categories',
     tvCategories: 'TV categories',
     indexers: 'Indexers',
     allIndexers: 'If none are selected, all enabled indexers are used.',
     noIndexers: 'No indexers have been added yet.',
+    prowlarrNotRunningHint: 'Prowlarr is not running. Start it first.',
     indexerFailed: 'Could not load indexers.',
     addIndexer: 'Add Indexer',
     searchIndexer: 'Search indexer',

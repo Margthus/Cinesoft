@@ -1018,6 +1018,67 @@ select.settings-input:focus {
   transform: translateY(-1px);
 }
 
+.settings-install-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(2, 8, 14, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.settings-install-modal {
+  width: min(740px, 96vw);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(10, 16, 24, 0.98), rgba(8, 12, 20, 0.98));
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.58);
+  overflow: hidden;
+}
+
+.settings-install-modal-head {
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-install-modal-head h3 {
+  margin: 0;
+  font-size: 1.08rem;
+  letter-spacing: 0.01em;
+}
+
+.settings-install-modal-body {
+  padding: 1rem 1.2rem 0.8rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.settings-install-modal-body p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.settings-install-modal-body p strong {
+  color: var(--text);
+}
+
+.settings-install-note {
+  margin-top: 0.35rem !important;
+  color: rgba(var(--accent-rgb), 0.9) !important;
+}
+
+.settings-install-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  padding: 0.95rem 1.2rem 1.15rem;
+}
+
 @media (max-width: 1180px) {
   .settings-layout {
     grid-template-columns: 1fr;
@@ -1077,6 +1138,10 @@ select.settings-input:focus {
   .input-action-row {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .settings-install-modal-actions {
+    flex-direction: column;
   }
 }
 

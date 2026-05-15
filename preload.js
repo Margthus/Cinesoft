@@ -52,6 +52,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startManagedSonarr: (sonarrConfig) => ipcRenderer.invoke('start-managed-sonarr', sonarrConfig),
   stopManagedSonarr: () => ipcRenderer.invoke('stop-managed-sonarr'),
   getManagedSonarrStatus: () => ipcRenderer.invoke('get-managed-sonarr-status'),
+  engineInstallLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+  engineGetStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
+  engineFindExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   sonarrTestConnection: (settings) => ipcRenderer.invoke('sonarr:testConnection', settings),
   sonarrGetRootFolders: (settings) => ipcRenderer.invoke('sonarr:getRootFolders', settings),
   sonarrGetQualityProfiles: (settings) => ipcRenderer.invoke('sonarr:getQualityProfiles', settings),
@@ -106,4 +109,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
   getDownloadDirFreeSpace: () => ipcRenderer.invoke('get-download-dir-free-space'),
   isDev: process.env.NODE_ENV === 'development',
+});
+
+contextBridge.exposeInMainWorld('cinesoft', {
+  engine: {
+    installLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+    getStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
+    findExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
+  },
 });
