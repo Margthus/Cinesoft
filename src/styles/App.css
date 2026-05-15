@@ -325,6 +325,12 @@
   backdrop-filter: blur(10px);
 }
 
+.btn-danger {
+  background: linear-gradient(180deg, rgba(255, 84, 84, 0.28), rgba(255, 84, 84, 0.18));
+  border: 1px solid rgba(255, 84, 84, 0.55);
+  color: #ffd2d2;
+}
+
 .movie-item {
   width: 200px;
   flex: 0 0 200px;
@@ -563,4 +569,42 @@
 
 .welcome-btn:hover {
   filter: brightness(1.04);
+}
+
+.app-toast-stack {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  pointer-events: none;
+}
+
+.app-toast {
+  max-width: min(420px, calc(100vw - 2rem));
+  padding: 0.72rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-medium);
+  background: rgba(18, 22, 27, 0.92);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.app-toast-success {
+  border-color: rgba(26, 197, 136, 0.5);
+  box-shadow: 0 10px 28px rgba(5, 145, 98, 0.22);
+}
+
+.app-toast-error {
+  border-color: rgba(228, 82, 101, 0.58);
+  box-shadow: 0 10px 28px rgba(182, 46, 64, 0.25);
+}
+
+.app-toast-warn {
+  border-color: rgba(232, 170, 53, 0.52);
 }

@@ -100,10 +100,11 @@ const SettingsView = ({ settings, setSettings }) => {
   const [embeddedTorrentSettings, setEmbeddedTorrentSettings] = useState(DEFAULT_EMBEDDED_TORRENT_SETTINGS);
   const [embeddedAdvancedOpen, setEmbeddedAdvancedOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState({
-    overview: true,
-    downloadEngine: true,
-    prowlarr: true,
+    overview: false,
+    downloadEngine: false,
+    prowlarr: false,
     radarr: false,
+    sonarr: false,
   });
   const [navGroupsOpen, setNavGroupsOpen] = useState({
     general: true,
@@ -1365,6 +1366,55 @@ const SettingsView = ({ settings, setSettings }) => {
                 <li>{t.guideRadarrWorkflow2}</li>
                 <li>{t.guideRadarrWorkflow3}</li>
               </ol>
+              </section>
+            </div>
+          )}
+        </article>
+
+        <article className="guide-card">
+          <button
+            type="button"
+            className="guide-accordion-btn"
+            onClick={() => setGuideOpen((current) => ({ ...current, sonarr: !current.sonarr }))}
+            aria-expanded={guideOpen.sonarr}
+          >
+            <span>{t.guideSonarrTitle}</span>
+            {guideOpen.sonarr ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {guideOpen.sonarr && (
+            <div className="guide-accordion-body">
+              <section className="guide-section-block">
+                <h3>{t.guideSonarrWhatIsTitle}</h3>
+                <p>{t.guideSonarrWhatIsText}</p>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideSonarrIntegrateTitle}</h3>
+                <ol className="guide-list">
+                  <li>{t.guideSonarrIntegrate1}</li>
+                  <li>{t.guideSonarrIntegrate2}</li>
+                  <li>{t.guideSonarrIntegrate3}</li>
+                  <li>{t.guideSonarrIntegrate4}</li>
+                  <li>{t.guideSonarrIntegrate5}</li>
+                </ol>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideSonarrSettingsTitle}</h3>
+                <ul className="guide-list">
+                  <li>{t.guideSonarrSettingEngine}</li>
+                  <li>{t.guideSonarrSettingConnection}</li>
+                  <li>{t.guideSonarrSettingDefaults}</li>
+                  <li>{t.guideSonarrSettingMonitoring}</li>
+                  <li>{t.guideSonarrSettingQb}</li>
+                </ul>
+              </section>
+              <section className="guide-section-block">
+                <h3>{t.guideSonarrWorkflowTitle}</h3>
+                <ol className="guide-list">
+                  <li>{t.guideSonarrWorkflow1}</li>
+                  <li>{t.guideSonarrWorkflow2}</li>
+                  <li>{t.guideSonarrWorkflow3}</li>
+                  <li>{t.guideSonarrWorkflow4}</li>
+                </ol>
               </section>
             </div>
           )}
@@ -2770,9 +2820,10 @@ const getCopy = (language) => ({
     generalSettings: 'Genel Ayarlar',
     generalSettingsHint: 'Uygulamanin temel ayarlarini yapilandirin.',
     guide: 'Rehber',
-    guideHint: "Prowlarr'in CineSoft icindeki kurulum ve kullanim ozeti.",
+    guideHint: 'CineSoft entegrasyonlari icin kurulum ve kullanim rehberi.',
     guideProwlarrTitle: 'Prowlarr Guide',
     guideRadarrTitle: 'Radarr Guide',
+    guideSonarrTitle: 'Sonarr Guide',
     guideWhatIsTitle: 'Prowlarr ne ise yarar?',
     guideWhatIsText: 'Prowlarr, birden fazla torrent indexer kaynagini tek merkezden yonetir. CineSoft, kaynak aramada Prowlarr uzerinden sonuclari cekebilir ve Radarr ile indexer senkronu yapabilir.',
     guideIntegrateTitle: "Prowlarr'i CineSoft'a entegre etme",
@@ -2809,6 +2860,25 @@ const getCopy = (language) => ({
     guideRadarrWorkflow1: "Film detayinda Radarr'da var/yok kontrolu ile ekleme yap.",
     guideRadarrWorkflow2: "Radarr sayfasinda ekli filmleri duzenle (kalite, root folder, monitored).",
     guideRadarrWorkflow3: 'Automation altindaki Radarr menusu ve qBittorrent ile indirmeyi takip et.',
+    guideSonarrWhatIsTitle: 'Sonarr ne ise yarar?',
+    guideSonarrWhatIsText: "Sonarr dizi yonetimi, sezon/bolum takibi ve otomatik indirme akisi icin kullanilir. CineSoft icinde Sonarr'a dizi ekleyebilir, bolum bazli arama yapabilir, otomasyonu izleyebilirsin.",
+    guideSonarrIntegrateTitle: "Sonarr'i CineSoft'a entegre etme",
+    guideSonarrIntegrate1: 'Ayarlar > Kaynaklar > Sonarr bolumune gir.',
+    guideSonarrIntegrate2: "Engine'i ac ve istersen managed mod ile Sonarr'i CineSoft baslatsin.",
+    guideSonarrIntegrate3: 'Connection alaninda Sonarr Base URL ve API key gir.',
+    guideSonarrIntegrate4: 'Test Connection ile baglantiyi dogrula; root folder ve quality profile listesi yuklenmeli.',
+    guideSonarrIntegrate5: "Prowlarr ve qBittorrent baglantilarini tamamlayip senkronu kontrol et.",
+    guideSonarrSettingsTitle: 'Sonarr ayarlari nasil kullanilir?',
+    guideSonarrSettingEngine: 'Engine: Sonarr servisinin uygulama tarafindan baslatilip durdurulmasi.',
+    guideSonarrSettingConnection: 'Connection: URL, API key ve timeout ile API baglantisi.',
+    guideSonarrSettingDefaults: 'Defaults: varsayilan root folder ve quality profile secimi.',
+    guideSonarrSettingMonitoring: 'Monitoring: dizi/sezon/bolum takip davranisi ve otomatik arama akisi.',
+    guideSonarrSettingQb: "Download Client: qBittorrent istemcisini Sonarr'a baglayip dogrulama.",
+    guideSonarrWorkflowTitle: 'Sonarr gunluk kullanim akisi',
+    guideSonarrWorkflow1: "Dizi detayinda Sonarr'da var/yok kontrolu yapip ekleme islemini tamamla.",
+    guideSonarrWorkflow2: 'Sonarr detay sayfasinda sezon sec, bolumleri takipte/takip disi ayarla.',
+    guideSonarrWorkflow3: "Search season pack veya tek bolum manual search ile uygun release'i indir.",
+    guideSonarrWorkflow4: 'Indirme bittiginde durum ve disk boyutu alanlarini kontrol ederek kutuphane akisini yonet.',
     language: 'Dil',
     languageHint: 'Arayuz dilini aninda degistir.',
     defaultPage: 'Varsayilan Sayfa',
@@ -3038,9 +3108,10 @@ const getCopy = (language) => ({
     generalSettings: 'General Settings',
     generalSettingsHint: 'Configure the app basics.',
     guide: 'Guide',
-    guideHint: 'Setup and usage summary for Prowlarr integration in CineSoft.',
+    guideHint: 'Setup and usage guide for CineSoft integrations.',
     guideProwlarrTitle: 'Prowlarr Guide',
     guideRadarrTitle: 'Radarr Guide',
+    guideSonarrTitle: 'Sonarr Guide',
     guideWhatIsTitle: 'What is Prowlarr for?',
     guideWhatIsText: 'Prowlarr centralizes multiple torrent indexers. CineSoft can fetch source results through Prowlarr and sync indexers to Radarr.',
     guideIntegrateTitle: 'Integrating Prowlarr into CineSoft',
@@ -3077,6 +3148,25 @@ const getCopy = (language) => ({
     guideRadarrWorkflow1: 'Check whether a movie exists in Radarr and add when missing.',
     guideRadarrWorkflow2: 'Edit added movies in Radarr page (quality, root folder, monitored).',
     guideRadarrWorkflow3: 'Track automation flow with Automation > Radarr and qBittorrent.',
+    guideSonarrWhatIsTitle: 'What is Sonarr for?',
+    guideSonarrWhatIsText: 'Sonarr is used for TV series management, season/episode monitoring, and automated download flow. In CineSoft, you can add series to Sonarr, run episode-level searches, and track automation status.',
+    guideSonarrIntegrateTitle: 'Integrating Sonarr into CineSoft',
+    guideSonarrIntegrate1: 'Open Settings > Sources > Sonarr.',
+    guideSonarrIntegrate2: 'Enable Engine, and optionally use managed mode so CineSoft starts Sonarr.',
+    guideSonarrIntegrate3: 'Enter Sonarr Base URL and API key in Connection.',
+    guideSonarrIntegrate4: 'Use Test Connection; root folders and quality profiles should load.',
+    guideSonarrIntegrate5: 'Complete Prowlarr and qBittorrent links, then verify sync status.',
+    guideSonarrSettingsTitle: 'How Sonarr settings are used',
+    guideSonarrSettingEngine: 'Engine: Start/stop Sonarr service under app control.',
+    guideSonarrSettingConnection: 'Connection: URL, API key, and timeout for API connectivity.',
+    guideSonarrSettingDefaults: 'Defaults: Root folder and quality profile selections.',
+    guideSonarrSettingMonitoring: 'Monitoring: series/season/episode follow behavior and auto-search flow.',
+    guideSonarrSettingQb: 'Download Client: attach and validate qBittorrent in Sonarr.',
+    guideSonarrWorkflowTitle: 'Sonarr daily workflow',
+    guideSonarrWorkflow1: 'Check whether a series exists in Sonarr and add when missing.',
+    guideSonarrWorkflow2: 'In Sonarr detail page, choose season and set episodes monitored/unmonitored.',
+    guideSonarrWorkflow3: 'Use Search season pack or per-episode manual search to grab releases.',
+    guideSonarrWorkflow4: 'After completion, verify status and size-on-disk fields to continue library flow.',
     language: 'Language',
     languageHint: 'Switch the interface language instantly.',
     defaultPage: 'Default Page',

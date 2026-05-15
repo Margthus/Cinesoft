@@ -99,6 +99,11 @@ const getQualityProfiles = async (settings = {}) => {
   return Array.isArray(rows) ? rows : [];
 };
 
+const getLanguageProfiles = async (settings = {}) => {
+  const rows = await sonarrRequest(settings, '/api/v3/languageprofile');
+  return Array.isArray(rows) ? rows : [];
+};
+
 const getSeries = async (settings = {}) => {
   const rows = await sonarrRequest(settings, '/api/v3/series');
   return Array.isArray(rows) ? rows : [];
@@ -111,6 +116,132 @@ const getEpisodesBySeries = async (settings = {}, seriesId) => {
     params: { seriesId: id },
   });
   return Array.isArray(rows) ? rows : [];
+};
+
+const setEpisodesMonitored = async (settings = {}, episodeIds = [], monitored = true) => {
+  const ids = (Array.isArray(episodeIds) ? episodeIds : [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) throw new Error('At least one valid Sonarr episode id is required.');
+  await sonarrRequest(settings, '/api/v3/episode/monitor', {
+    method: 'PUT',
+    data: {
+      episodeIds: ids,
+      monitored: monitored === true,
+    },
+  });
+  return { ok: true, episodeIds: ids, monitored: monitored === true };
+};
+
+const searchEpisodes = async (settings = {}, episodeIds = []) => {
+  const ids = (Array.isArray(episodeIds) ? episodeIds : [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) throw new Error('At least one valid Sonarr episode id is required.');
+  const command = await sonarrRequest(settings, '/api/v3/command', {
+    method: 'POST',
+    data: {
+      name: 'EpisodeSearch',
+      episodeIds: ids,
+    },
+  });
+  return { ok: true, command };
+};
+
+const searchSeason = async (settings = {}, seriesId, seasonNumber) => {
+  const id = Number(seriesId);
+  const season = Number(seasonNumber);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Sonarr series id is required.');
+  if (!Number.isFinite(season) || season <= 0) throw new Error('Valid Sonarr season number is required.');
+  const command = await sonarrRequest(settings, '/api/v3/command', {
+    method: 'POST',
+    data: {
+      name: 'SeasonSearch',
+      seriesId: id,
+      seasonNumber: season,
+    },
+  });
+  return { ok: true, command };
+};
+
+const getEpisodeReleases = async (settings = {}, episodeId) => {
+  const id = Number(episodeId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Sonarr episode id is required.');
+  const rows = await sonarrRequest(settings, '/api/v3/release', {
+    params: { episodeId: id },
+  });
+  return Array.isArray(rows) ? rows : [];
+};
+
+const grabRelease = async (settings = {}, release = {}) => {
+  if (!release || typeof release !== 'object') throw new Error('Valid Sonarr release payload is required.');
+  const guid = String(release?.guid || '').trim();
+  const indexerId = Number(release?.indexerId || 0);
+  const payloads = [
+    release,
+    guid && indexerId ? { guid, indexerId } : null,
+    guid ? { guid } : null,
+  ].filter(Boolean);
+
+  let lastError = null;
+  for (const payload of payloads) {
+    try {
+      const response = await sonarrRequest(settings, '/api/v3/release', {
+        method: 'POST',
+        data: payload,
+      });
+      return { ok: true, release: response || release };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Could not grab release.');
+};
+
+const scoreSeasonRelease = (release = {}, seasonNumber = 0) => {
+  const title = String(release.title || release.releaseTitle || '').toLowerCase();
+  const seasonCode = seasonNumber ? `s${String(seasonNumber).padStart(2, '0')}` : '';
+  let score = 0;
+  if (release.fullSeason === true) score += 120;
+  if (Array.isArray(release.episodeNumbers) && release.episodeNumbers.length > 1) score += 80;
+  if (seasonCode && title.includes(seasonCode) && !/\bs\d{1,2}e\d{1,3}\b/i.test(title)) score += 55;
+  if (/\b(complete|season|sezon|pack)\b/i.test(title)) score += 35;
+  if (release.rejections?.length) score -= 200;
+  if (release.downloadAllowed === false) score -= 200;
+  score += Math.min(40, Number(release.seeders || 0));
+  score += Math.min(20, Math.round((Number(release.size || 0) || 0) / (1024 ** 3)));
+  return score;
+};
+
+const grabBestSeasonPack = async (settings = {}, seriesId, seasonNumber) => {
+  const id = Number(seriesId);
+  const season = Number(seasonNumber);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Sonarr series id is required.');
+  if (!Number.isFinite(season) || season <= 0) throw new Error('Valid Sonarr season number is required.');
+
+  const releases = await sonarrRequest(settings, '/api/v3/release', {
+    params: { seriesId: id, seasonNumber: season },
+  });
+  const releaseList = Array.isArray(releases) ? releases : [];
+  const best = releaseList
+    .filter((release) => scoreSeasonRelease(release, season) > 0)
+    .sort((a, b) => scoreSeasonRelease(b, season) - scoreSeasonRelease(a, season))[0];
+
+  if (!best) {
+    const fallback = await searchSeason(settings, id, season);
+    return { ok: true, grabbed: false, fallbackCommand: fallback.command, releaseCount: releaseList.length };
+  }
+
+  const grabbed = await sonarrRequest(settings, '/api/v3/release', {
+    method: 'POST',
+    data: best,
+  });
+  return {
+    ok: true,
+    grabbed: true,
+    release: grabbed || best,
+    releaseCount: releaseList.length,
+  };
 };
 
 const getSeriesById = async (settings = {}, seriesId) => {
@@ -325,8 +456,15 @@ module.exports = {
   getSystemStatus,
   getRootFolders,
   getQualityProfiles,
+  getLanguageProfiles,
   getSeries,
   getEpisodesBySeries,
+  setEpisodesMonitored,
+  searchEpisodes,
+  searchSeason,
+  getEpisodeReleases,
+  grabRelease,
+  grabBestSeasonPack,
   getSeriesById,
   lookupSeries,
   lookupSeriesByTmdbId,

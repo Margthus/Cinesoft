@@ -30,6 +30,8 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   const [radarrRootFolder, setRadarrRootFolder] = useState('');
   const [radarrQualityProfileId, setRadarrQualityProfileId] = useState('');
   const [radarrMonitored, setRadarrMonitored] = useState(true);
+  const [radarrSearchAfterAdd, setRadarrSearchAfterAdd] = useState(settings.radarrSearchAfterAdd !== false);
+  const [radarrMinimumAvailability, setRadarrMinimumAvailability] = useState('released');
   const [sonarrModalOpen, setSonarrModalOpen] = useState(false);
   const [sonarrModalLoading, setSonarrModalLoading] = useState(false);
   const [sonarrAddLoading, setSonarrAddLoading] = useState(false);
@@ -479,6 +481,8 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
       setRadarrRootFolder(defaultRoot);
       setRadarrQualityProfileId(defaultProfile);
       setRadarrMonitored(true);
+      setRadarrSearchAfterAdd(radarrSettings.radarrSearchAfterAdd !== false);
+      setRadarrMinimumAvailability('released');
       if (!rootRes?.ok || !qualityRes?.ok) {
         setRadarrErrorMessage(rootRes?.error || qualityRes?.error || 'Failed to load Radarr defaults');
       }
@@ -517,9 +521,9 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
         qualityProfileId: Number(radarrQualityProfileId),
         rootFolderPath: radarrRootFolder,
         monitored: radarrMonitored === true,
-        minimumAvailability: 'released',
+        minimumAvailability: String(radarrMinimumAvailability || 'released'),
         addOptions: {
-          searchForMovie: settings.radarrSearchAfterAdd !== false,
+          searchForMovie: radarrSearchAfterAdd === true,
         },
       };
       const addRes = await window.electronAPI?.radarrAddMovie?.({
@@ -837,9 +841,19 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                   <input type="checkbox" checked={radarrMonitored} onChange={(event) => setRadarrMonitored(event.target.checked)} />
                   <span>Monitored</span>
                 </label>
+                <label>
+                  <span>Minimum Availability</span>
+                  <select value={radarrMinimumAvailability} onChange={(event) => setRadarrMinimumAvailability(event.target.value)}>
+                    <option value="announced">Announced</option>
+                    <option value="inCinemas">In Cinemas</option>
+                    <option value="released">Released</option>
+                  </select>
+                </label>
                 <label className="radarr-check">
-                  <input type="checkbox" checked={settings.radarrSearchAfterAdd !== false} readOnly />
-                  <span>Search After Add ({settings.radarrSearchAfterAdd !== false ? 'On' : 'Off'})</span>
+                  <input type="checkbox" checked={radarrSearchAfterAdd} onChange={(event) => setRadarrSearchAfterAdd(event.target.checked)} />
+                  <span title={settings.language === 'tr' ? 'Acikken film eklendigi anda Radarr uygun release arar.' : 'When enabled, Radarr will search for a movie immediately after adding it.'}>
+                    Search After Add ({radarrSearchAfterAdd ? 'On' : 'Off'})
+                  </span>
                 </label>
                 {radarrErrorMessage && <p className="radarr-error">{radarrErrorMessage}</p>}
                 {radarrStatusMessage && <p className="radarr-success">{radarrStatusMessage}</p>}

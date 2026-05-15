@@ -32,6 +32,13 @@ const DEFAULT_PAGE_ROUTE_MAP = {
   sonarr: '/sonarr',
   settings: '/settings',
 };
+const APP_TOAST_EVENT = 'cinesoft:toast';
+let appToastId = 0;
+
+export const showAppToast = (detail = {}) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(APP_TOAST_EVENT, { detail }));
+};
 
 const App = () => {
   const [settings, setSettings] = useState({
@@ -77,6 +84,7 @@ const App = () => {
   const [tvState, setTvState] = useState({ shows: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [animeState, setAnimeState] = useState({ anime: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [showWelcome, setShowWelcome] = useState(false);
+  const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -156,6 +164,24 @@ const App = () => {
     localStorage.setItem(WATCH_STATUS_STORAGE_KEY, JSON.stringify(watchStatusMap));
   }, [watchStatusMap]);
 
+  useEffect(() => {
+    const onToast = (event) => {
+      if (settings.notificationsEnabled === false) return;
+      const detail = event?.detail || {};
+      const message = String(detail.message || '').trim();
+      if (!message) return;
+      const id = ++appToastId;
+      const tone = ['success', 'error', 'info', 'warn'].includes(detail.tone) ? detail.tone : 'info';
+      const durationMs = Math.max(1800, Math.min(8000, Number(detail.durationMs) || 3600));
+      setToasts((prev) => [...prev, { id, tone, message }]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((item) => item.id !== id));
+      }, durationMs);
+    };
+    window.addEventListener(APP_TOAST_EVENT, onToast);
+    return () => window.removeEventListener(APP_TOAST_EVENT, onToast);
+  }, [settings.notificationsEnabled]);
+
   const toggleMyList = (item) => {
     setMyList((prev) => {
       const exists = prev.find((i) => i.id === item.id);
@@ -218,6 +244,13 @@ const App = () => {
           </Routes>
         </main>
         {showWelcome && <WelcomeOverlay language={settings.language} onClose={dismissWelcome} />}
+        <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`app-toast app-toast-${toast.tone}`}>
+              {toast.message}
+            </div>
+          ))}
+        </div>
       </div>
     </Router>
   );

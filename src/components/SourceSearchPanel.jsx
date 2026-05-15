@@ -10,6 +10,7 @@ import { fetchSeasonDetails, searchContent, fetchDetails } from '../utils/tmdb';
 
 const TORRENTIO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TORRENTIO_CACHE_MAX_ENTRIES = 1500;
+const APP_TOAST_EVENT = 'cinesoft:toast';
 const torrentioSearchCache = new Map();
 
 const buildTorrentioCacheKey = (payload = {}) => JSON.stringify(payload);
@@ -94,6 +95,10 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
   const prowlarrConfig = settings.prowlarr || DEFAULT_PROWLARR_CONFIG;
   const activeCount = prowlarrConfig.enabled ? 1 : 0;
   const isEpisodic = type === 'tv' || type === 'anime';
+  const notify = (message, tone = 'info', durationMs) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(APP_TOAST_EVENT, { detail: { message, tone, durationMs } }));
+  };
 
   const logSourceSearch = (code, message, details = {}) => {
     window.electronAPI?.logEvent?.({
@@ -455,11 +460,12 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
   };
 
   const handleTorrentDownload = async (source) => {
-    if (!window.electronAPI?.torrentAdd) return;
+    if (!window.electronAPI?.torrentPrepare || !window.electronAPI?.torrentGetFiles || !window.electronAPI?.torrentSelectFiles) return;
 
     setActionLoading(prev => ({ ...prev, [source.id]: true }));
 
     try {
+      let pendingTorrentId = '';
       const releaseDate = item.release_date || item.first_air_date || '';
       const releaseYear = releaseDate ? new Date(releaseDate).getFullYear() : 0;
       const expectedEpisode = isEpisodic && selectedEpisode?.episode_number ? Number(selectedEpisode.episode_number) : 0;
@@ -486,9 +492,13 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         },
       });
       if (validation && validation.ok === false) {
-        alert(settings.language === 'en'
-          ? `Blocked: ${validation.reasons?.join(', ') || 'validation failed'}`
-          : `Engellendi: ${validation.reasons?.join(', ') || 'dogrulama basarisiz'}`);
+        notify(
+          settings.language === 'en'
+            ? `Blocked: ${validation.reasons?.join(', ') || 'validation failed'}`
+            : `Engellendi: ${validation.reasons?.join(', ') || 'dogrulama basarisiz'}`,
+          'warn',
+          4200,
+        );
         return;
       }
 
@@ -516,8 +526,22 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       if (!prepared?.ok || !prepared?.id) {
         throw new Error(prepared?.error || 'Prepare failed');
       }
+      pendingTorrentId = prepared.id;
+
+      setFilePickerTorrentId(prepared.id);
+      setFilePickerSource(source);
+      setFilePickerOpen(true);
+      notify(
+        settings.language === 'en'
+          ? 'Torrent added. Select files to start download.'
+          : 'Torrent eklendi. Indirmeyi baslatmak icin dosya sec.',
+        'success',
+      );
 
       let files = Array.isArray(prepared.files) ? prepared.files : [];
+      setFilePickerFiles(files);
+      setSelectedFileIndexes(files.map((file) => file.index));
+
       if (!prepared.metadataReady) {
         // Metadata acquisition for magnet links can be slow, especially when another torrent is active.
         // Poll for up to ~3 minutes before failing.
@@ -531,18 +555,23 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         }
       }
       if (!files.length) {
+        closePicker();
+        if (pendingTorrentId) {
+          try {
+            await window.electronAPI?.torrentRemove?.(pendingTorrentId, false);
+          } catch (cleanupError) {
+            console.error('Failed to cleanup pending torrent after metadata timeout:', cleanupError);
+          }
+        }
         throw new Error(settings.language === 'en' ? 'Torrent metadata not ready' : 'Torrent metadata hazir degil');
       }
 
-      setFilePickerTorrentId(prepared.id);
       setFilePickerFiles(files);
-      setSelectedFileIndexes(files.map((file) => file.index));
-      setFilePickerSource(source);
-      setFilePickerOpen(true);
+      setSelectedFileIndexes((current) => current.length ? current : files.map((file) => file.index));
 
     } catch (err) {
       console.error('Torrent action error:', err);
-      alert(settings.language === 'en' ? `Failed to add torrent: ${err.message}` : `Torrent eklenemedi: ${err.message}`);
+      notify(settings.language === 'en' ? `Failed to add torrent: ${err.message}` : `Torrent eklenemedi: ${err.message}`, 'error', 5000);
     } finally {
       setFilePickerLoading(false);
       setTimeout(() => {
@@ -596,8 +625,9 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         const disk = await window.electronAPI?.getDownloadDirFreeSpace?.();
         const freeBytes = Number(disk?.freeBytes || 0);
         if (!disk?.ok || freeBytes < selectedSizeBytes) {
-          alert(settings.language === 'en'
-            ? 'Not enough disk space for this download.'
+          notify(
+            settings.language === 'en'
+              ? 'Not enough disk space for this download.'
             : 'Bu indirme için yeterli disk alanı yok.');
           return;
         }
@@ -607,9 +637,15 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       if (!result?.ok) {
         throw new Error(result?.error || 'Select files failed');
       }
+      notify(
+        settings.language === 'en'
+          ? (autoStartDownload ? 'Download started and added to queue.' : 'Torrent added to queue.')
+          : (autoStartDownload ? 'Indirme baslatildi ve kuyruga eklendi.' : 'Torrent kuyruga eklendi.'),
+        'success',
+      );
       closePicker();
     } catch (err) {
-      alert(settings.language === 'en' ? `Failed: ${err.message}` : `Islem basarisiz: ${err.message}`);
+      notify(settings.language === 'en' ? `Failed: ${err.message}` : `Islem basarisiz: ${err.message}`, 'error', 5000);
     } finally {
       setFilePickerLoading(false);
     }
@@ -1090,7 +1126,12 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
               </span>
             </label>
             <div className="torrent-file-picker-list">
-              {filePickerFiles.map((file) => (
+              {filePickerLoading && filePickerFiles.length === 0 ? (
+                <div className="source-empty">
+                  <Loader2 size={18} className="spin-animation" />
+                  <span>{settings.language === 'en' ? 'Loading torrent files...' : 'Torrent dosyalari yukleniyor...'}</span>
+                </div>
+              ) : filePickerFiles.map((file) => (
                 <label key={file.index} className="source-file-picker-row">
                   <input
                     type="checkbox"

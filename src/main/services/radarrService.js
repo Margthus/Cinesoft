@@ -183,6 +183,72 @@ const updateMovie = async (settings = {}, movieId, patch = {}) => {
   return { ok: true, movie: response };
 };
 
+const searchMovie = async (settings = {}, movieId) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  const response = await radarrRequest(settings, '/api/v3/command', {
+    method: 'POST',
+    data: {
+      name: 'MoviesSearch',
+      movieIds: [id],
+    },
+  });
+  return { ok: true, command: response };
+};
+
+const refreshAndScanMovie = async (settings = {}, movieId) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  const commandNames = ['RefreshMovie', 'RescanMovie'];
+  let lastError = null;
+  for (const name of commandNames) {
+    try {
+      const response = await radarrRequest(settings, '/api/v3/command', {
+        method: 'POST',
+        data: { name, movieIds: [id] },
+      });
+      return { ok: true, command: response };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('Could not start refresh/scan command.');
+};
+
+const getMovieReleases = async (settings = {}, movieId) => {
+  const id = Number(movieId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Radarr movie id is required.');
+  const rows = await radarrRequest(settings, '/api/v3/release', {
+    params: { movieId: id },
+  });
+  return Array.isArray(rows) ? rows : [];
+};
+
+const grabMovieRelease = async (settings = {}, release = {}) => {
+  if (!release || typeof release !== 'object') throw new Error('Valid Radarr release payload is required.');
+  const guid = String(release?.guid || '').trim();
+  const indexerId = Number(release?.indexerId || 0);
+  const payloads = [
+    release,
+    guid && indexerId ? { guid, indexerId } : null,
+    guid ? { guid } : null,
+  ].filter(Boolean);
+
+  let lastError = null;
+  for (const payload of payloads) {
+    try {
+      const response = await radarrRequest(settings, '/api/v3/release', {
+        method: 'POST',
+        data: payload,
+      });
+      return { ok: true, release: response || release };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Could not grab release.');
+};
+
 const normalizeQbBaseUrlParts = (baseUrl = '') => {
   const raw = String(baseUrl || '').trim();
   const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
@@ -320,6 +386,10 @@ module.exports = {
   addMovie,
   deleteMovie,
   updateMovie,
+  searchMovie,
+  refreshAndScanMovie,
+  getMovieReleases,
+  grabMovieRelease,
   upsertQbittorrentDownloadClient,
   checkQbittorrentDownloadClient,
 };

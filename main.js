@@ -2608,6 +2608,43 @@ ipcMain.handle('radarr:updateMovie', async (event, payload = {}) => {
   }
 });
 
+ipcMain.handle('radarr:searchMovie', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    return await radarrService.searchMovie(settings, payload?.movieId);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:refreshAndScanMovie', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    return await radarrService.refreshAndScanMovie(settings, payload?.movieId);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:getMovieReleases', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const items = await radarrService.getMovieReleases(settings, payload?.movieId);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('radarr:grabMovieRelease', async (event, payload = {}) => {
+  try {
+    const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    return await radarrService.grabMovieRelease(settings, payload?.release || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('radarr:upsertQbittorrentClient', async (event, payload = {}) => {
   try {
     const settings = { ...getRadarrConfig(), ...(payload?.settings || {}) };
@@ -2681,6 +2718,16 @@ ipcMain.handle('sonarr:getQualityProfiles', async (event, sonarrSettings = {}) =
   }
 });
 
+ipcMain.handle('sonarr:getLanguageProfiles', async (event, sonarrSettings = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
+    const items = await sonarrService.getLanguageProfiles(settings);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
 ipcMain.handle('sonarr:getSeries', async (event, sonarrSettings = {}) => {
   try {
     const settings = { ...getSonarrConfig(), ...(sonarrSettings || {}) };
@@ -2698,6 +2745,61 @@ ipcMain.handle('sonarr:getEpisodes', async (event, payload = {}) => {
     return { ok: true, items };
   } catch (err) {
     return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:setEpisodesMonitored', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.setEpisodesMonitored(settings, payload?.episodeIds || [], payload?.monitored === true);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:searchEpisodes', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.searchEpisodes(settings, payload?.episodeIds || []);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:searchSeason', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.searchSeason(settings, payload?.seriesId, payload?.seasonNumber);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:getEpisodeReleases', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const items = await sonarrService.getEpisodeReleases(settings, payload?.episodeId);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('sonarr:grabRelease', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.grabRelease(settings, payload?.release || {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sonarr:grabBestSeasonPack', async (event, payload = {}) => {
+  try {
+    const settings = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    return await sonarrService.grabBestSeasonPack(settings, payload?.seriesId, payload?.seasonNumber);
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 });
 
@@ -2775,6 +2877,26 @@ ipcMain.handle('open-sonarr-web-ui', async (event, sonarrSettings = {}) => {
     if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
     const parsed = new URL(baseUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-sonarr-series-page', async (event, payload = {}) => {
+  try {
+    const merged = { ...getSonarrConfig(), ...(payload?.settings || {}) };
+    const seriesId = Number(payload?.seriesId || 0);
+    if (!seriesId) return { ok: false, error: 'Invalid Sonarr series id' };
+    let baseUrl = String(merged.sonarrBaseUrl || '').trim();
+    if (!baseUrl) return { ok: false, error: 'Sonarr Base URL is empty' };
+    if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
+    const parsed = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
+    parsed.pathname = `${String(parsed.pathname || '/').replace(/\/+$/, '')}/series/${seriesId}`;
+    parsed.search = '';
+    parsed.hash = '';
     await shell.openExternal(parsed.toString());
     return { ok: true };
   } catch (err) {
@@ -3654,6 +3776,26 @@ ipcMain.handle('logs-get', async () => ({ ok: true, logs: appLogs }));
 ipcMain.handle('logs-clear', async () => {
   appLogs.length = 0;
   return { ok: true };
+});
+
+ipcMain.handle('open-radarr-movie-page', async (event, payload = {}) => {
+  try {
+    const merged = { ...getRadarrConfig(), ...(payload?.settings || {}) };
+    const movieId = Number(payload?.movieId || 0);
+    if (!movieId) return { ok: false, error: 'Invalid Radarr movie id' };
+    let baseUrl = String(merged.radarrBaseUrl || '').trim();
+    if (!baseUrl) return { ok: false, error: 'Radarr Base URL is empty' };
+    if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
+    const parsed = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
+    parsed.pathname = `${String(parsed.pathname || '/').replace(/\/+$/, '')}/movies/${movieId}`;
+    parsed.search = '';
+    parsed.hash = '';
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('open-library-video', async (event, payload = {}) => {

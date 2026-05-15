@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Download, Pause, Play, Trash2, Loader2, CheckCircle2,
-  ArrowDown, ArrowUp, Users, Clock, Settings2, X, Save, ListChecks, ChevronUp, ChevronDown
+  ArrowDown, ArrowUp, Users, Clock, Settings2, X, Save, ListChecks, ChevronUp, ChevronDown, HardDrive
 } from 'lucide-react';
 import '../styles/Downloads.css';
 

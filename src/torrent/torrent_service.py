@@ -815,13 +815,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "pending_selection": True,
             }
 
-            deadline = time.time() + 30
-            files = None
-            while time.time() < deadline:
-                files = self._collect_files(handle)
-                if files is not None:
-                    break
-                time.sleep(0.2)
+            files = self._collect_files(handle)
 
             try:
                 # Do not download payload before user confirms file selection.
