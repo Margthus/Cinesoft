@@ -1805,17 +1805,6 @@ const SettingsView = ({ settings, setSettings }) => {
           <div className="prowlarr-panel">
             <div className="prowlarr-panel-header">
               <h3>{t.engine}</h3>
-              <Toggle
-                checked={formData.radarrManaged === true}
-                onChange={async (checked) => {
-                  updateRoot({ radarrManaged: checked });
-                  if (checked) {
-                    await handleStartRadarr({ ...getRadarrSettings(), radarrManaged: true });
-                  } else {
-                    await handleStopRadarr();
-                  }
-                }}
-              />
             </div>
             <p className="settings-helper">{t.radarrEngineHint}</p>
 
@@ -2039,17 +2028,6 @@ const SettingsView = ({ settings, setSettings }) => {
           <div className="prowlarr-panel">
             <div className="prowlarr-panel-header">
               <h3>{t.engine}</h3>
-              <Toggle
-                checked={formData.sonarrManaged === true}
-                onChange={async (checked) => {
-                  updateRoot({ sonarrManaged: checked });
-                  if (checked) {
-                    await handleStartSonarr({ ...getSonarrSettings(), sonarrManaged: true });
-                  } else {
-                    await handleStopSonarr();
-                  }
-                }}
-              />
             </div>
             <p className="settings-helper">{t.sonarrEngineHint}</p>
 
@@ -2273,18 +2251,6 @@ const SettingsView = ({ settings, setSettings }) => {
           <div className="prowlarr-panel">
             <div className="prowlarr-panel-header">
               <h3>{t.engine}</h3>
-              <Toggle
-                checked={formData.prowlarr.managed}
-                onChange={async (checked) => {
-                  updateProwlarr({ managed: checked });
-                  if (checked) {
-                    updateRoot({ torrentioEnabled: false });
-                    await handleStartProwlarr({ ...formData.prowlarr, managed: true });
-                  } else {
-                    await handleStopProwlarr();
-                  }
-                }}
-              />
             </div>
             <p className="settings-helper">{t.managed}</p>
 
@@ -2907,7 +2873,7 @@ const getCopy = (language) => ({
     embeddedTorrent: 'Gomulu Torrent',
     embeddedTorrentDesc: 'Uygulama icindeki torrent motorunu kullan.',
     qbittorrent: 'qBittorrent',
-    qbittorrentDesc: 'Harici qBittorrent istemcisine gecis yap.',
+    qbittorrentDesc: 'Radarr/Sonarr ile kullanabilir veya embedded yerine tercih edebilirsin.',
     qbBaseUrl: 'qBittorrent Web UI URL',
     qbUsername: 'qBittorrent Kullanici Adi',
     qbPassword: 'qBittorrent Sifre',
@@ -3195,7 +3161,7 @@ const getCopy = (language) => ({
     embeddedTorrent: 'Embedded Torrent',
     embeddedTorrentDesc: 'Use the built-in torrent engine.',
     qbittorrent: 'qBittorrent',
-    qbittorrentDesc: 'Switch to an external qBittorrent client.',
+    qbittorrentDesc: 'Use it with Radarr/Sonarr or as an alternative to the embedded client.',
     qbBaseUrl: 'qBittorrent Web UI URL',
     qbUsername: 'qBittorrent Username',
     qbPassword: 'qBittorrent Password',
