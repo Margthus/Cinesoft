@@ -481,7 +481,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const buildEngineInstallConfirmData = (appName, status = null) => {
     const meta = getEngineInstallMeta(appName);
-    const targetDir = String(status?.targetDir || `resources/${meta.folderName}`);
+    const targetDir = String(status?.targetDir || `C:\\Users\\<user>\\AppData\\Roaming\\CineSoft\\engines\\${String(meta.folderName || '').toLowerCase()}`);
     const expectedExe = `${targetDir}\\${meta.exeName}`;
     return {
       appName,

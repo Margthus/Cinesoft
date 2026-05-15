@@ -1988,26 +1988,38 @@ app.on('window-all-closed', async () => {
 const getManagedProwlarrDataDir = () => path.join(app.getPath('userData'), 'prowlarr');
 const getManagedRadarrDataDir = () => path.join(app.getPath('userData'), 'radarr');
 const getManagedSonarrDataDir = () => path.join(app.getPath('userData'), 'sonarr');
+const getEngineRootDir = () => path.join(app.getPath('userData'), 'engines');
+const getEngineInstallDir = (engineName = '') => path.join(getEngineRootDir(), String(engineName || '').trim().toLowerCase());
 
-const getBundledEngineExecutable = (folderName, executableName) => {
-  const basePath = app.isPackaged ? process.resourcesPath : __dirname;
-  const resourcesCandidates = [
-    path.join(process.cwd(), 'resources'),
-    path.join(basePath, 'resources'),
-  ];
-  const folderCandidates = [folderName, String(folderName || '').toLowerCase()];
-  for (const resourcesRoot of resourcesCandidates) {
-    for (const folderCandidate of folderCandidates) {
-      const candidate = path.join(resourcesRoot, folderCandidate, executableName);
-      if (fs.existsSync(candidate)) return candidate;
+const findExecutableRecursiveSync = (rootDir, executableName) => {
+  if (!rootDir || !executableName || !fs.existsSync(rootDir)) return '';
+  const targetName = String(executableName).toLowerCase();
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isFile() && String(entry.name).toLowerCase() === targetName) {
+        return full;
+      }
+      if (entry.isDirectory()) stack.push(full);
     }
   }
-  return path.join(resourcesCandidates[0], folderName, executableName);
+  return '';
 };
 
-const getBundledProwlarrExecutable = () => {
+const getInstalledProwlarrExecutable = () => {
   const executable = process.platform === 'win32' ? 'Prowlarr.exe' : 'Prowlarr';
-  return getBundledEngineExecutable('Prowlarr', executable);
+  const installDir = getEngineInstallDir('prowlarr');
+  const direct = path.join(installDir, executable);
+  if (fs.existsSync(direct)) return direct;
+  return findExecutableRecursiveSync(installDir, executable);
 };
 
 const getProwlarrExecutablePath = (config = {}) => {
@@ -2015,34 +2027,40 @@ const getProwlarrExecutablePath = (config = {}) => {
     return config.executablePath;
   }
 
-  const bundled = getBundledProwlarrExecutable();
-  return fs.existsSync(bundled) ? bundled : '';
+  const installed = getInstalledProwlarrExecutable();
+  return fs.existsSync(installed) ? installed : '';
 };
 
-const getBundledRadarrExecutable = () => {
+const getInstalledRadarrExecutable = () => {
   const executable = process.platform === 'win32' ? 'Radarr.exe' : 'Radarr';
-  return getBundledEngineExecutable('Radarr', executable);
+  const installDir = getEngineInstallDir('radarr');
+  const direct = path.join(installDir, executable);
+  if (fs.existsSync(direct)) return direct;
+  return findExecutableRecursiveSync(installDir, executable);
 };
 
 const getRadarrExecutablePath = (config = {}) => {
   if (config.radarrExecutablePath && fs.existsSync(config.radarrExecutablePath)) {
     return config.radarrExecutablePath;
   }
-  const bundled = getBundledRadarrExecutable();
-  return fs.existsSync(bundled) ? bundled : '';
+  const installed = getInstalledRadarrExecutable();
+  return fs.existsSync(installed) ? installed : '';
 };
 
-const getBundledSonarrExecutable = () => {
+const getInstalledSonarrExecutable = () => {
   const executable = process.platform === 'win32' ? 'Sonarr.exe' : 'Sonarr';
-  return getBundledEngineExecutable('Sonarr', executable);
+  const installDir = getEngineInstallDir('sonarr');
+  const direct = path.join(installDir, executable);
+  if (fs.existsSync(direct)) return direct;
+  return findExecutableRecursiveSync(installDir, executable);
 };
 
 const getSonarrExecutablePath = (config = {}) => {
   if (config.sonarrExecutablePath && fs.existsSync(config.sonarrExecutablePath)) {
     return config.sonarrExecutablePath;
   }
-  const bundled = getBundledSonarrExecutable();
-  return fs.existsSync(bundled) ? bundled : '';
+  const installed = getInstalledSonarrExecutable();
+  return fs.existsSync(installed) ? installed : '';
 };
 
 const ensureProwlarrConfigFile = (config = {}) => {
@@ -2268,8 +2286,15 @@ const startManagedProwlarr = (config = {}) => {
   if (existingEntry?.pid) {
     try {
       process.kill(existingEntry.pid, 0);
+      const prepared = ensureProwlarrConfigFile(config);
+      const nextConfig = buildManagedProwlarrConfig({
+        ...config,
+        ...prepared,
+        executablePath: getProwlarrExecutablePath(config) || config.executablePath || '',
+      });
+      store.set('prowlarr', nextConfig);
       console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'prowlarr', pid: existingEntry.pid });
-      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid, ...nextConfig };
     } catch {
       managedProcesses.delete('prowlarr');
     }
@@ -2292,7 +2317,7 @@ const startManagedProwlarr = (config = {}) => {
     return {
       ok: false,
       message: 'Prowlarr executable was not found',
-      expectedPath: getBundledProwlarrExecutable(),
+      expectedPath: path.join(getEngineInstallDir('prowlarr'), process.platform === 'win32' ? 'Prowlarr.exe' : 'Prowlarr'),
     };
   }
 
@@ -2377,8 +2402,16 @@ const startManagedRadarr = (config = {}) => {
   if (existingEntry?.pid) {
     try {
       process.kill(existingEntry.pid, 0);
+      const prepared = ensureRadarrConfigFile(config);
+      const nextConfig = buildManagedRadarrConfig({
+        ...config,
+        radarrApiKey: prepared.apiKey,
+        radarrPort: prepared.port,
+        radarrExecutablePath: getRadarrExecutablePath(config) || config.radarrExecutablePath || '',
+      });
+      Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
       console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'radarr', pid: existingEntry.pid });
-      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid, ...nextConfig };
     } catch {
       managedProcesses.delete('radarr');
     }
@@ -2401,7 +2434,7 @@ const startManagedRadarr = (config = {}) => {
     return {
       ok: false,
       message: 'Radarr executable was not found',
-      expectedPath: getBundledRadarrExecutable(),
+      expectedPath: path.join(getEngineInstallDir('radarr'), process.platform === 'win32' ? 'Radarr.exe' : 'Radarr'),
     };
   }
 
@@ -2474,8 +2507,16 @@ const startManagedSonarr = (config = {}) => {
   if (existingEntry?.pid) {
     try {
       process.kill(existingEntry.pid, 0);
+      const prepared = ensureSonarrConfigFile(config);
+      const nextConfig = buildManagedSonarrConfig({
+        ...config,
+        sonarrApiKey: prepared.apiKey,
+        sonarrPort: prepared.port,
+        sonarrExecutablePath: getSonarrExecutablePath(config) || config.sonarrExecutablePath || '',
+      });
+      Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
       console.log('[EngineLifecycle] start skipped, managed engine already running', { engine: 'sonarr', pid: existingEntry.pid });
-      return { ok: true, alreadyRunning: true, pid: existingEntry.pid };
+      return { ok: true, alreadyRunning: true, pid: existingEntry.pid, ...nextConfig };
     } catch {
       managedProcesses.delete('sonarr');
     }
@@ -2498,7 +2539,7 @@ const startManagedSonarr = (config = {}) => {
     return {
       ok: false,
       message: 'Sonarr executable was not found',
-      expectedPath: getBundledSonarrExecutable(),
+      expectedPath: path.join(getEngineInstallDir('sonarr'), process.platform === 'win32' ? 'Sonarr.exe' : 'Sonarr'),
     };
   }
 
@@ -2551,6 +2592,7 @@ const stopManagedSonarr = () => {
 };
 
 const engineInstaller = createEngineInstallerService({
+  getUserDataPath: () => app.getPath('userData'),
   stopEngineByName: (appName) => {
     const key = String(appName || '').toLowerCase();
     if (key === 'prowlarr') return stopManagedProwlarr();
@@ -2563,8 +2605,42 @@ const engineInstaller = createEngineInstallerService({
 // IPC Handlers
 ipcMain.handle('get-settings', () => {
   const torrentio = store.get('torrentio') || {};
-  const radarr = getRadarrConfig();
-  const sonarr = getSonarrConfig();
+  let prowlarr = store.get('prowlarr') || {};
+  let radarr = getRadarrConfig();
+  let sonarr = getSonarrConfig();
+
+  if (prowlarr?.managed === true) {
+    const prepared = ensureProwlarrConfigFile(prowlarr);
+    prowlarr = buildManagedProwlarrConfig({
+      ...prowlarr,
+      ...prepared,
+      executablePath: getProwlarrExecutablePath(prowlarr) || prowlarr.executablePath || '',
+    });
+    store.set('prowlarr', prowlarr);
+  }
+
+  if (radarr?.radarrManaged === true) {
+    const prepared = ensureRadarrConfigFile(radarr);
+    radarr = buildManagedRadarrConfig({
+      ...radarr,
+      radarrApiKey: prepared.apiKey,
+      radarrPort: prepared.port,
+      radarrExecutablePath: getRadarrExecutablePath(radarr) || radarr.radarrExecutablePath || '',
+    });
+    Object.entries(radarr).forEach(([key, value]) => store.set(key, value));
+  }
+
+  if (sonarr?.sonarrManaged === true) {
+    const prepared = ensureSonarrConfigFile(sonarr);
+    sonarr = buildManagedSonarrConfig({
+      ...sonarr,
+      sonarrApiKey: prepared.apiKey,
+      sonarrPort: prepared.port,
+      sonarrExecutablePath: getSonarrExecutablePath(sonarr) || sonarr.sonarrExecutablePath || '',
+    });
+    Object.entries(sonarr).forEach(([key, value]) => store.set(key, value));
+  }
+
   return {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
@@ -2578,7 +2654,7 @@ ipcMain.handle('get-settings', () => {
     warnIfNoVpnAdapterDetected: store.get('warnIfNoVpnAdapterDetected') === true,
     pauseTorrentOnVpnDisconnect: store.get('pauseTorrentOnVpnDisconnect') === true,
     requireConfirmationWithoutVpn: store.get('requireConfirmationWithoutVpn') === true,
-    prowlarr: store.get('prowlarr'),
+    prowlarr,
     torrentioEnabled: store.get('torrentioEnabled') || false,
     embeddedTorrentEnabled: store.get('embeddedTorrentEnabled') !== false,
     qbittorrentEnabled: store.get('qbittorrentEnabled') !== false,
@@ -3053,7 +3129,7 @@ ipcMain.handle('stop-managed-prowlarr', async () => {
 ipcMain.handle('get-managed-prowlarr-status', async () => {
   return {
     running: Boolean(prowlarrProcess && !prowlarrProcess.killed) || isSystemProwlarrRunning(),
-    expectedPath: getBundledProwlarrExecutable(),
+    expectedPath: path.join(getEngineInstallDir('prowlarr'), process.platform === 'win32' ? 'Prowlarr.exe' : 'Prowlarr'),
     dataDir: getManagedProwlarrDataDir(),
   };
 });
@@ -3087,7 +3163,7 @@ ipcMain.handle('stop-managed-radarr', async () => {
 ipcMain.handle('get-managed-radarr-status', async () => {
   return {
     running: Boolean(radarrProcess && !radarrProcess.killed) || isSystemRadarrRunning(),
-    expectedPath: getBundledRadarrExecutable(),
+    expectedPath: path.join(getEngineInstallDir('radarr'), process.platform === 'win32' ? 'Radarr.exe' : 'Radarr'),
     dataDir: getManagedRadarrDataDir(),
   };
 });
@@ -3128,7 +3204,7 @@ ipcMain.handle('engines:stop-managed', async () => {
 ipcMain.handle('get-managed-sonarr-status', async () => {
   return {
     running: Boolean(sonarrProcess && !sonarrProcess.killed) || isSystemSonarrRunning(),
-    expectedPath: getBundledSonarrExecutable(),
+    expectedPath: path.join(getEngineInstallDir('sonarr'), process.platform === 'win32' ? 'Sonarr.exe' : 'Sonarr'),
     dataDir: getManagedSonarrDataDir(),
   };
 });
@@ -4506,4 +4582,3 @@ ipcMain.handle('open-library-folder', async (event, payload = {}) => {
     return { ok: false, error: err.message };
   }
 });
-

@@ -11,19 +11,19 @@ const ENGINE_META = {
     appName: 'Prowlarr',
     repo: 'Prowlarr/Prowlarr',
     exeName: 'Prowlarr.exe',
-    folderName: 'Prowlarr',
+    folderName: 'prowlarr',
   },
   Radarr: {
     appName: 'Radarr',
     repo: 'Radarr/Radarr',
     exeName: 'Radarr.exe',
-    folderName: 'Radarr',
+    folderName: 'radarr',
   },
   Sonarr: {
     appName: 'Sonarr',
     repo: 'Sonarr/Sonarr',
     exeName: 'Sonarr.exe',
-    folderName: 'Sonarr',
+    folderName: 'sonarr',
   },
 };
 
@@ -47,8 +47,6 @@ const normalizeEngineName = (value = '') => {
   if (normalized === 'sonarr') return 'Sonarr';
   return '';
 };
-
-const getResourcesRoot = () => path.join(process.cwd(), 'resources');
 
 const pathExists = async (targetPath) => {
   if (!targetPath) return false;
@@ -116,8 +114,26 @@ const pickWindowsZipAsset = (assets = []) => {
   return zipAssets.find((asset) => /(x64|amd64)/i.test(String(asset?.name || '').toLowerCase())) || null;
 };
 
-const createEngineInstallerService = ({ stopEngineByName } = {}) => {
+const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}) => {
   const engineStates = new Map();
+  const resolveUserDataDir = () => {
+    if (typeof getUserDataPath === 'function') {
+      const fromCallback = String(getUserDataPath() || '').trim();
+      if (fromCallback) return fromCallback;
+    }
+    return path.join(os.homedir(), 'AppData', 'Roaming', 'CineSoft');
+  };
+  const getEngineRootDir = () => path.join(resolveUserDataDir(), 'engines');
+  const getEngineInstallDir = (appName) => {
+    const canonical = normalizeEngineName(appName);
+    const meta = ENGINE_META[canonical];
+    return path.join(getEngineRootDir(), String(meta?.folderName || '').toLowerCase());
+  };
+  const getEngineDownloadDir = (appName) => {
+    const canonical = normalizeEngineName(appName);
+    const meta = ENGINE_META[canonical];
+    return path.join(resolveUserDataDir(), 'downloads', 'engines', String(meta?.folderName || '').toLowerCase());
+  };
 
   const getState = (appName) => {
     const key = normalizeEngineName(appName);
@@ -148,9 +164,8 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
   const findEngineExe = async (appName) => {
     const canonical = normalizeEngineName(appName);
     if (!canonical || !ENGINE_META[canonical]) return '';
-    const { exeName, folderName } = ENGINE_META[canonical];
-    const resourcesRoot = getResourcesRoot();
-    const targetDir = path.join(resourcesRoot, folderName);
+    const { exeName } = ENGINE_META[canonical];
+    const targetDir = getEngineInstallDir(canonical);
     const directPath = path.join(targetDir, exeName);
     if (await pathExists(directPath)) return directPath;
     return recursiveFindFile(targetDir, exeName);
@@ -166,7 +181,7 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
     const stage = state?.stage || INSTALL_STAGES.IDLE;
     const shouldScanForExe = [INSTALL_STAGES.IDLE, INSTALL_STAGES.COMPLETED, INSTALL_STAGES.ERROR].includes(stage);
     const exePath = shouldScanForExe ? await findEngineExe(canonical) : '';
-    const targetDir = path.join(getResourcesRoot(), meta.folderName);
+    const targetDir = getEngineInstallDir(canonical);
     return {
       ok: true,
       appName: canonical,
@@ -194,14 +209,21 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
 
     const runInstall = async () => {
       const meta = ENGINE_META[canonical];
-      const resourcesRoot = getResourcesRoot();
-      const targetDir = path.join(resourcesRoot, meta.folderName);
-      const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), `cinesoft-${canonical.toLowerCase()}-`));
-      const zipPath = path.join(tempRoot, `${canonical}.zip`);
-      const extractDir = path.join(tempRoot, 'extract');
+      const userDataDir = resolveUserDataDir();
+      const engineRoot = getEngineRootDir();
+      const targetDir = getEngineInstallDir(canonical);
+      const downloadDir = getEngineDownloadDir(canonical);
+      const zipPath = path.join(downloadDir, `${canonical}.zip`);
+      const extractDir = path.join(downloadDir, 'extract');
 
       try {
-        await ensureDir(resourcesRoot);
+        console.log('[EngineInstaller] userData', userDataDir);
+        console.log('[EngineInstaller] engineRoot', engineRoot);
+        console.log('[EngineInstaller] engine install dir', targetDir);
+        console.log('[EngineInstaller] download target', zipPath);
+        console.log('[EngineInstaller] extract target', extractDir);
+        await ensureDir(engineRoot);
+        await ensureDir(downloadDir);
         await ensureDir(extractDir);
 
         setStage(canonical, INSTALL_STAGES.LOOKING_RELEASE, 'latest release araniyor');
@@ -245,6 +267,8 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
 
         setStage(canonical, INSTALL_STAGES.EXTRACTING, 'extract ediliyor');
         try {
+          await fsp.rm(extractDir, { recursive: true, force: true });
+          await ensureDir(extractDir);
           await extract(zipPath, { dir: extractDir });
         } catch (error) {
           throw new Error(`ZIP cikarilamadi: ${error?.message || 'unknown error'}`);
@@ -266,7 +290,7 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
         setStage(canonical, INSTALL_STAGES.CLEANING_OLD, 'eski klasor temizleniyor');
         await fsp.rm(targetDir, { recursive: true, force: true });
 
-        setStage(canonical, INSTALL_STAGES.INSTALLING, 'resources icine kuruluyor');
+        setStage(canonical, INSTALL_STAGES.INSTALLING, 'engine dizinine kuruluyor');
         try {
           await fsp.rename(sourceEngineDir, targetDir);
         } catch (error) {
@@ -281,6 +305,8 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
         if (!finalExe) {
           throw new Error(`Indirme tamamlandi ama ${meta.exeName} bulunamadi.`);
         }
+        console.log('[EngineInstaller] executable path', finalExe);
+        console.log('[EngineInstaller] install completed', { appName: canonical, installDir: targetDir });
 
         setStage(canonical, INSTALL_STAGES.COMPLETED, 'tamamlandi');
         return {
@@ -297,7 +323,8 @@ const createEngineInstallerService = ({ stopEngineByName } = {}) => {
         return { ok: false, error: message, appName: canonical };
       } finally {
         try {
-          await fsp.rm(tempRoot, { recursive: true, force: true });
+          await fsp.rm(extractDir, { recursive: true, force: true });
+          await fsp.rm(zipPath, { force: true });
         } catch {}
       }
     };
