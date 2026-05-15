@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
-import { Home, Film, Tv, Settings as SettingsIcon, Search, Bookmark, Sparkles, Download, Library, ChevronUp, ChevronDown, Cog } from 'lucide-react';
+import {
+  Home,
+  Film,
+  Tv,
+  Settings as SettingsIcon,
+  Search,
+  Bookmark,
+  Sparkles,
+  Download,
+  Library,
+  ChevronUp,
+  ChevronDown,
+  Cog,
+} from 'lucide-react';
 import HomeView from './components/HomeView';
 import MoviesView from './components/MoviesView';
 import TVShowsView from './components/TVShowsView';
@@ -321,6 +334,25 @@ const Sidebar = ({ settings }) => {
     },
   }[settings.language];
   const automationActive = location.pathname.startsWith('/radarr') || location.pathname.startsWith('/sonarr');
+  const discoverItems = [
+    { id: 'home', to: '/', end: true, label: t.home, icon: Home },
+    { id: 'search', to: '/search', label: t.search, icon: Search },
+    { id: 'movies', to: '/movies', label: t.movies, icon: Film },
+    { id: 'tv', to: '/tv', label: t.tv, icon: Tv },
+    { id: 'anime', to: '/anime', label: t.anime, icon: Sparkles },
+  ];
+  const libraryItems = [
+    { id: 'library', to: '/library', label: t.library, icon: Library },
+    { id: 'mylist', to: '/mylist', label: t.myList, icon: Bookmark },
+    { id: 'downloads', to: '/downloads', label: t.downloads, icon: Download },
+  ];
+  const automationItems = [
+    { id: 'radarr', to: '/radarr', label: t.radarr, icon: Film },
+    { id: 'sonarr', to: '/sonarr', label: t.sonarr, icon: Tv },
+  ];
+  const systemItems = [
+    { id: 'settings', to: '/settings', label: t.settings, icon: SettingsIcon },
+  ];
 
   return (
     <nav className="sidebar">
@@ -331,44 +363,30 @@ const Sidebar = ({ settings }) => {
         <section className="sidebar-group">
           <h4 className="sidebar-group-title">{t.discover}</h4>
           <div className="nav-links">
-            <NavLink to="/" end className="nav-item">
-              <Home size={18} />
-              <span>{t.home}</span>
-            </NavLink>
-            <NavLink to="/search" className="nav-item">
-              <Search size={18} />
-              <span>{t.search}</span>
-            </NavLink>
-            <NavLink to="/movies" className="nav-item">
-              <Film size={18} />
-              <span>{t.movies}</span>
-            </NavLink>
-            <NavLink to="/tv" className="nav-item">
-              <Tv size={18} />
-              <span>{t.tv}</span>
-            </NavLink>
-            <NavLink to="/anime" className="nav-item">
-              <Sparkles size={18} />
-              <span>{t.anime}</span>
-            </NavLink>
+            {discoverItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.id} to={item.to} end={item.end === true} className="nav-item">
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
           </div>
         </section>
 
         <section className="sidebar-group">
           <h4 className="sidebar-group-title">{t.librarySection}</h4>
           <div className="nav-links">
-            <NavLink to="/library" className="nav-item">
-              <Library size={18} />
-              <span>{t.library}</span>
-            </NavLink>
-            <NavLink to="/mylist" className="nav-item">
-              <Bookmark size={18} />
-              <span>{t.myList}</span>
-            </NavLink>
-            <NavLink to="/downloads" className="nav-item">
-              <Download size={18} />
-              <span>{t.downloads}</span>
-            </NavLink>
+            {libraryItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.id} to={item.to} className="nav-item">
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
           </div>
         </section>
 
@@ -389,14 +407,15 @@ const Sidebar = ({ settings }) => {
             </button>
             {automationOpen && (
               <div className="automation-submenu">
-                <NavLink to="/radarr" className="automation-item">
-                  <span className="automation-dot" />
-                  <span>{t.radarr}</span>
-                </NavLink>
-                <NavLink to="/sonarr" className="automation-item">
-                  <span className="automation-dot" />
-                  <span>{t.sonarr}</span>
-                </NavLink>
+                {automationItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <NavLink key={item.id} to={item.to} className="automation-item">
+                      <Icon size={14} />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -408,10 +427,15 @@ const Sidebar = ({ settings }) => {
         <section className="sidebar-group sidebar-group-system">
           <h4 className="sidebar-group-title">{t.systemSection}</h4>
           <div className="nav-links">
-            <NavLink to="/settings" className="nav-item">
-              <SettingsIcon size={18} />
-              <span>{t.settings}</span>
-            </NavLink>
+            {systemItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.id} to={item.to} className="nav-item">
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
           </div>
         </section>
       </div>
