@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { fetchDetails } from '../utils/tmdb';
+import { fetchDetails, searchContent } from '../utils/tmdb';
 import { getAniListApiUrl } from '../utils/anilist';
 import { X, Plus, Star, Calendar, Clock, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import SourceSearchPanel from './SourceSearchPanel';
@@ -321,6 +321,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
         adding: 'Adding...',
       };
   const sonarrEnabled = settings.sonarrEnabled === true;
+  const supportsSonarr = type === 'tv' || type === 'anime';
   const sonarrT = isTr
     ? {
         add: "Sonarr'a Ekle",
@@ -418,9 +419,17 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   }, [type, radarrEnabled, data?.id, settings.radarrBaseUrl, settings.radarrApiKey]);
 
   const refreshSonarrPresence = async () => {
-    if (type !== 'tv') return;
+    if (!supportsSonarr) return;
     if (!sonarrEnabled) return;
-    const tmdbId = Number(data?.id);
+    let tmdbId = Number(data?.id);
+    if (type === 'anime') {
+      const titleForSearch = String(data?.original_name || data?.name || data?.title || '').trim();
+      if (settings.apiKey && titleForSearch) {
+        const searchResults = await searchContent(settings.apiKey, 'en', titleForSearch, 1);
+        const tvMatch = (Array.isArray(searchResults) ? searchResults : []).find((item) => item?.media_type === 'tv' || !item?.media_type);
+        tmdbId = Number(tvMatch?.id || 0);
+      }
+    }
     if (!Number.isFinite(tmdbId) || tmdbId <= 0) return;
 
     setSonarrPresence((prev) => ({ ...prev, loading: true }));
@@ -456,7 +465,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
 
   useEffect(() => {
     refreshSonarrPresence().catch(() => {});
-  }, [type, sonarrEnabled, data?.id, settings.sonarrBaseUrl, settings.sonarrApiKey]);
+  }, [type, sonarrEnabled, data?.id, data?.name, data?.title, data?.original_name, settings.sonarrBaseUrl, settings.sonarrApiKey, settings.apiKey, supportsSonarr]);
 
   if (loading) return <div className="loading">Loading details...</div>;
   if (!data) return <div className="error">Could not load details.</div>;
@@ -582,7 +591,15 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   };
 
   const handleAddToSonarr = async () => {
-    const tmdbId = Number(data?.id);
+    let tmdbId = Number(data?.id);
+    if (type === 'anime') {
+      const titleForSearch = String(data?.original_name || data?.name || data?.title || '').trim();
+      if (settings.apiKey && titleForSearch) {
+        const searchResults = await searchContent(settings.apiKey, 'en', titleForSearch, 1);
+        const tvMatch = (Array.isArray(searchResults) ? searchResults : []).find((item) => item?.media_type === 'tv' || !item?.media_type);
+        tmdbId = Number(tvMatch?.id || 0);
+      }
+    }
     if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
       setSonarrErrorMessage('TMDB ID is required to add this series to Sonarr.');
       return;
@@ -609,6 +626,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
         qualityProfileId: Number(sonarrQualityProfileId),
         rootFolderPath: sonarrRootFolder,
         monitored: sonarrMonitored === true,
+        seriesType: type === 'anime' ? 'anime' : String(lookupSeries?.seriesType || 'standard'),
         addOptions: {
           searchForMissingEpisodes: sonarrSearchAfterAdd === true,
         },
@@ -683,7 +701,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                 )}
               </>
             )}
-            {type === 'tv' && (
+            {supportsSonarr && (
               <>
                 {!sonarrPresence.exists && (
                   <button
@@ -714,7 +732,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
               )}
             </div>
           )}
-          {type === 'tv' && sonarrEnabled && (
+          {supportsSonarr && sonarrEnabled && (
             <div style={{ marginTop: '0.85rem', color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.5 }}>
               {sonarrPresence.loading ? (
                 <div>{sonarrT.checking}</div>
