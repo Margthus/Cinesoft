@@ -1174,7 +1174,18 @@ const RadarrView = ({ settings }) => {
               </button>
               <button type="button" className="radarr-edit-btn" onClick={() => openEditModal(activeMovie)}>{t.actionEditMovie}</button>
               <button type="button" className="radarr-remove-btn" onClick={() => handleRemove(activeMovie)}>{t.actionDeleteMovie}</button>
-              <button type="button" className="radarr-edit-btn" onClick={() => window.electronAPI?.openRadarrMoviePage?.({ movieId: Number(activeMovie?.id || 0), settings: getRadarrConnectionSettings() })}>{t.openInRadarr}</button>
+              <button
+                type="button"
+                className="radarr-edit-btn"
+                onClick={() => window.electronAPI?.openRadarrMoviePage?.({
+                  movieId: Number(activeMovie?.id || 0),
+                  tmdbId: Number(activeMovie?.tmdbId || 0),
+                  title: String(activeMovie?.title || activeMovie?.sortTitle || ''),
+                  settings: getRadarrConnectionSettings(),
+                })}
+              >
+                {t.openInRadarr}
+              </button>
             </div>
           </aside>
         </div>

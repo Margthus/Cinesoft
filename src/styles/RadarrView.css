@@ -252,6 +252,9 @@
   border-radius: 14px;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .radarr-poster-wrap {
@@ -343,6 +346,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 0.55rem;
   padding: 0 0.8rem 0.8rem;
+  margin-top: auto;
 }
 
 .radarr-info-list {
@@ -1149,7 +1153,8 @@
   color: var(--text-muted);
   font-size: 0.75rem;
   font-weight: 700;
-  text-align: right;
+  text-align: left;
+  justify-self: start;
   white-space: nowrap;
 }
 
@@ -1684,23 +1689,28 @@
   height: 100%;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(74px, 1fr);
-  gap: 0;
-  overflow: hidden;
+  grid-auto-columns: max-content;
+  gap: 0.15rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(255, 255, 255, 0.065);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.028);
+  padding: 0.22rem;
 }
 
 .sonarr-season-chip {
-  min-width: 0;
+  min-width: 110px;
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
-  padding: 0.68rem 0.5rem;
-  overflow: hidden;
-  text-overflow: clip;
+  padding: 0.56rem 0.62rem;
+  overflow: visible;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1782,6 +1792,13 @@
   min-height: 38px;
 }
 
+.sonarr-head-select-btn {
+  min-height: 26px;
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+}
+
 .sonarr-pack-btn {
   justify-self: stretch;
   background: transparent;
@@ -1851,10 +1868,11 @@
 
 .sonarr-episode-list-wide {
   max-height: none;
+  overflow-x: auto;
 }
 
 .sonarr-episode-row {
-  grid-template-columns: 26px 76px minmax(180px, 1fr) 106px minmax(132px, 0.42fr) 126px;
+  grid-template-columns: 26px 76px minmax(180px, 1fr) 106px minmax(132px, 0.42fr) minmax(148px, 0.55fr) 126px;
   gap: 0.7rem;
   min-height: 42px;
   border: 0;
@@ -1943,6 +1961,82 @@
   justify-self: start;
 }
 
+.sonarr-episode-list-wide .sonarr-episode-row {
+  min-width: 860px;
+}
+
+.sonarr-episode-head span {
+  white-space: nowrap;
+}
+
+.sonarr-episode-download {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+.sonarr-episode-download-empty {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.sonarr-episode-download-done {
+  color: #74d7a0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sonarr-episode-download .qb-episode-progress {
+  min-width: 132px;
+}
+
+.sonarr-episode-download .qb-episode-progress > small {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 0.18rem;
+}
+
+.sonarr-episode-download-live {
+  min-width: 152px;
+}
+
+.sonarr-episode-download-live > small {
+  display: block;
+  font-size: 0.67rem;
+  color: var(--text-muted);
+  margin-bottom: 0.16rem;
+}
+
+.sonarr-episode-download-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.sonarr-episode-download-bar-track {
+  width: 108px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.sonarr-episode-download-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.sonarr-episode-download-bar-row > strong {
+  font-size: 0.7rem;
+  color: var(--text);
+  min-width: 34px;
+  text-align: right;
+}
+
 .sonarr-episode-actions button {
   width: 28px;
   height: 26px;
@@ -2007,19 +2101,8 @@
     max-height: 360px;
   }
 
-  .sonarr-episode-row {
-    grid-template-columns: auto 44px minmax(0, 1fr) auto;
-  }
-
-  .sonarr-episode-row .state,
-  .sonarr-episode-row .air-date {
-    display: none;
-  }
-
-  .sonarr-episode-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    padding-left: 1.7rem;
+  .sonarr-episode-list-wide .sonarr-episode-row {
+    min-width: 860px;
   }
 
   .sonarr-selection-bar {

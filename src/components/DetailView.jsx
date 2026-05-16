@@ -49,6 +49,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
   const [sonarrRootFolder, setSonarrRootFolder] = useState('');
   const [sonarrQualityProfileId, setSonarrQualityProfileId] = useState('');
   const [sonarrMonitored, setSonarrMonitored] = useState(true);
+  const [sonarrSearchAfterAdd, setSonarrSearchAfterAdd] = useState(settings.sonarrSearchAfterAdd !== false);
 
   const castScrollRef = useRef(null);
   const imageScrollRef = useRef(null);
@@ -569,6 +570,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
       setSonarrRootFolder(defaultRoot);
       setSonarrQualityProfileId(defaultProfile);
       setSonarrMonitored(true);
+      setSonarrSearchAfterAdd(sonarrSettings.sonarrSearchAfterAdd !== false);
       if (!rootRes?.ok || !qualityRes?.ok) {
         setSonarrErrorMessage(rootRes?.error || qualityRes?.error || 'Failed to load Sonarr defaults');
       }
@@ -608,7 +610,7 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
         rootFolderPath: sonarrRootFolder,
         monitored: sonarrMonitored === true,
         addOptions: {
-          searchForMissingEpisodes: settings.sonarrSearchAfterAdd !== false,
+          searchForMissingEpisodes: sonarrSearchAfterAdd === true,
         },
       };
       const addRes = await window.electronAPI?.sonarrAddSeries?.({
@@ -903,8 +905,8 @@ const DetailView = ({ settings, myList, onToggleMyList, setSearchState }) => {
                   <span>Monitored</span>
                 </label>
                 <label className="radarr-check">
-                  <input type="checkbox" checked={settings.sonarrSearchAfterAdd !== false} readOnly />
-                  <span>Search After Add ({settings.sonarrSearchAfterAdd !== false ? 'On' : 'Off'})</span>
+                  <input type="checkbox" checked={sonarrSearchAfterAdd} onChange={(event) => setSonarrSearchAfterAdd(event.target.checked)} />
+                  <span>Search After Add ({sonarrSearchAfterAdd ? 'On' : 'Off'})</span>
                 </label>
                 {sonarrErrorMessage && <p className="radarr-error">{sonarrErrorMessage}</p>}
                 {sonarrStatusMessage && <p className="radarr-success">{sonarrStatusMessage}</p>}

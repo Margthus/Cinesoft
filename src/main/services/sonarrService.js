@@ -50,7 +50,10 @@ const buildRequestError = (error, fallback = 'Sonarr request failed.') => {
 const sonarrRequest = async (settings = {}, path = '', options = {}) => {
   const baseUrl = normalizeBaseUrl(settings.sonarrBaseUrl);
   const apiKey = getApiKey(settings);
-  const timeout = getRequestTimeout(settings);
+  const timeoutOverride = Number(options.timeout);
+  const timeout = Number.isFinite(timeoutOverride) && timeoutOverride > 0
+    ? timeoutOverride
+    : getRequestTimeout(settings);
   const method = String(options.method || 'GET').toUpperCase();
   const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
   try {
@@ -167,10 +170,21 @@ const searchSeason = async (settings = {}, seriesId, seasonNumber) => {
 const getEpisodeReleases = async (settings = {}, episodeId) => {
   const id = Number(episodeId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('Valid Sonarr episode id is required.');
-  const rows = await sonarrRequest(settings, '/api/v3/release', {
+  const loadReleases = () => sonarrRequest(settings, '/api/v3/release', {
     params: { episodeId: id },
+    timeout: 30000,
   });
-  return Array.isArray(rows) ? rows : [];
+  try {
+    const rows = await loadReleases();
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    // Sonarr release queries can spike on cold indexer sessions; retry once.
+    if (/timed out/i.test(String(error?.message || ''))) {
+      const rows = await loadReleases();
+      return Array.isArray(rows) ? rows : [];
+    }
+    throw error;
+  }
 };
 
 const grabRelease = async (settings = {}, release = {}) => {
@@ -221,6 +235,7 @@ const grabBestSeasonPack = async (settings = {}, seriesId, seasonNumber) => {
 
   const releases = await sonarrRequest(settings, '/api/v3/release', {
     params: { seriesId: id, seasonNumber: season },
+    timeout: 30000,
   });
   const releaseList = Array.isArray(releases) ? releases : [];
   const best = releaseList

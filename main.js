@@ -1853,6 +1853,155 @@ const getManagedSonarrDataDir = () => path.join(app.getPath('userData'), 'sonarr
 const getEngineRootDir = () => path.join(app.getPath('userData'), 'engines');
 const getEngineInstallDir = (engineName = '') => path.join(getEngineRootDir(), String(engineName || '').trim().toLowerCase());
 
+const uniqExistingPaths = (paths = []) => {
+  const seen = new Set();
+  return paths
+    .filter(Boolean)
+    .map((item) => path.normalize(item))
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const getManagedArrDataDir = (engineName = '') => {
+  const key = String(engineName || '').trim().toLowerCase();
+  if (key === 'prowlarr') return getManagedProwlarrDataDir();
+  if (key === 'radarr') return getManagedRadarrDataDir();
+  if (key === 'sonarr') return getManagedSonarrDataDir();
+  return '';
+};
+
+const getArrDisplayName = (engineName = '') => {
+  const key = String(engineName || '').trim().toLowerCase();
+  if (key === 'prowlarr') return 'Prowlarr';
+  if (key === 'radarr') return 'Radarr';
+  if (key === 'sonarr') return 'Sonarr';
+  return '';
+};
+
+const getArrDefaultPort = (engineName = '') => {
+  const key = String(engineName || '').trim().toLowerCase();
+  if (key === 'prowlarr') return 9696;
+  if (key === 'radarr') return 7878;
+  if (key === 'sonarr') return 8989;
+  return 0;
+};
+
+const getArrDataDirCandidates = (engineName = '') => {
+  const displayName = getArrDisplayName(engineName);
+  const lowerName = displayName.toLowerCase();
+  if (!displayName) return [];
+
+  const candidates = [
+    getManagedArrDataDir(lowerName),
+  ];
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      process.env.PROGRAMDATA ? path.join(process.env.PROGRAMDATA, displayName) : '',
+      process.env.APPDATA ? path.join(process.env.APPDATA, displayName) : '',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, displayName) : '',
+      app.getPath('home') ? path.join(app.getPath('home'), 'AppData', 'Roaming', displayName) : '',
+      app.getPath('home') ? path.join(app.getPath('home'), 'AppData', 'Local', displayName) : '',
+    );
+  } else if (process.platform === 'darwin') {
+    candidates.push(
+      path.join(app.getPath('home'), 'Library', 'Application Support', displayName),
+      path.join(app.getPath('home'), '.config', displayName),
+      path.join(app.getPath('home'), '.config', lowerName),
+    );
+  } else {
+    candidates.push(
+      path.join(app.getPath('home'), '.config', displayName),
+      path.join(app.getPath('home'), '.config', lowerName),
+      path.join('/var/lib', lowerName),
+      path.join('/var/lib', displayName),
+    );
+  }
+
+  return uniqExistingPaths(candidates);
+};
+
+const readArrConfigFromDataDir = (engineName = '', dataDir = '') => {
+  if (!dataDir) return null;
+  const configPath = path.join(dataDir, 'config.xml');
+  if (!fs.existsSync(configPath)) return null;
+
+  try {
+    const xml = fs.readFileSync(configPath, 'utf8');
+    const apiKey = readXmlValue(xml, 'ApiKey');
+    if (!apiKey) return null;
+
+    const enableSsl = /^true$/i.test(readXmlValue(xml, 'EnableSsl'));
+    const port = Number(readXmlValue(xml, enableSsl ? 'SslPort' : 'Port')) || getArrDefaultPort(engineName);
+    const urlBase = String(readXmlValue(xml, 'UrlBase') || '').trim().replace(/^\/+|\/+$/g, '');
+    const protocol = enableSsl ? 'https' : 'http';
+    const basePath = urlBase ? `/${urlBase}` : '';
+
+    return {
+      apiKey,
+      port,
+      baseUrl: `${protocol}://127.0.0.1:${port}${basePath}`,
+      configPath,
+      dataDir,
+    };
+  } catch (error) {
+    console.warn('[EngineConfig] failed to read ARR config', {
+      engine: engineName,
+      configPath,
+      error: error.message,
+    });
+    return null;
+  }
+};
+
+const discoverArrConfig = (engineName = '') => {
+  for (const dataDir of getArrDataDirCandidates(engineName)) {
+    const config = readArrConfigFromDataDir(engineName, dataDir);
+    if (config) return config;
+  }
+  return null;
+};
+
+const applyDiscoveredProwlarrConfig = (config = {}) => {
+  const discovered = discoverArrConfig('prowlarr');
+  if (!discovered) return config;
+  const hasBaseUrl = Boolean(String(config.baseUrl || '').trim());
+  return {
+    ...config,
+    baseUrl: hasBaseUrl ? String(config.baseUrl || '').trim() : discovered.baseUrl,
+    apiKey: String(config.apiKey || '').trim() || discovered.apiKey,
+    port: hasBaseUrl ? (Number(config.port) || discovered.port) : discovered.port,
+  };
+};
+
+const applyDiscoveredRadarrConfig = (config = {}) => {
+  const discovered = discoverArrConfig('radarr');
+  if (!discovered) return config;
+  const hasBaseUrl = Boolean(String(config.radarrBaseUrl || '').trim());
+  return {
+    ...config,
+    radarrBaseUrl: hasBaseUrl ? String(config.radarrBaseUrl || '').trim() : discovered.baseUrl,
+    radarrApiKey: String(config.radarrApiKey || '').trim() || discovered.apiKey,
+    radarrPort: hasBaseUrl ? (Number(config.radarrPort) || discovered.port) : discovered.port,
+  };
+};
+
+const applyDiscoveredSonarrConfig = (config = {}) => {
+  const discovered = discoverArrConfig('sonarr');
+  if (!discovered) return config;
+  const hasBaseUrl = Boolean(String(config.sonarrBaseUrl || '').trim());
+  return {
+    ...config,
+    sonarrBaseUrl: hasBaseUrl ? String(config.sonarrBaseUrl || '').trim() : discovered.baseUrl,
+    sonarrApiKey: String(config.sonarrApiKey || '').trim() || discovered.apiKey,
+    sonarrPort: hasBaseUrl ? (Number(config.sonarrPort) || discovered.port) : discovered.port,
+  };
+};
+
 const findExecutableRecursiveSync = (rootDir, executableName) => {
   if (!rootDir || !executableName || !fs.existsSync(rootDir)) return '';
   const targetName = String(executableName).toLowerCase();
@@ -2165,8 +2314,16 @@ const startManagedProwlarr = (config = {}) => {
   try {
   const externalRunning = isSystemProwlarrRunning() && !(prowlarrProcess && !prowlarrProcess.killed);
   if (externalRunning) {
+    const discovered = applyDiscoveredProwlarrConfig(config);
+    const nextConfig = {
+      ...discovered,
+      enabled: true,
+      managed: false,
+      executablePath: getProwlarrExecutablePath(discovered) || discovered.executablePath || '',
+    };
+    store.set('prowlarr', nextConfig);
     console.log('[EngineLifecycle] skipped external engine', { engine: 'prowlarr' });
-    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true, ...nextConfig };
   }
   const externalProcessStopped = false;
   if (prowlarrProcess && !prowlarrProcess.killed) {
@@ -2282,8 +2439,15 @@ const startManagedRadarr = (config = {}) => {
   try {
   const externalRunning = isSystemRadarrRunning() && !(radarrProcess && !radarrProcess.killed);
   if (externalRunning) {
+    const nextConfig = {
+      ...applyDiscoveredRadarrConfig(config),
+      radarrEnabled: true,
+      radarrManaged: false,
+      radarrExecutablePath: getRadarrExecutablePath(config) || config.radarrExecutablePath || '',
+    };
+    Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
     console.log('[EngineLifecycle] skipped external engine', { engine: 'radarr' });
-    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true, ...nextConfig };
   }
   const externalProcessStopped = false;
   if (radarrProcess && !radarrProcess.killed) {
@@ -2387,8 +2551,15 @@ const startManagedSonarr = (config = {}) => {
   try {
   const externalRunning = isSystemSonarrRunning() && !(sonarrProcess && !sonarrProcess.killed);
   if (externalRunning) {
+    const nextConfig = {
+      ...applyDiscoveredSonarrConfig(config),
+      sonarrEnabled: true,
+      sonarrManaged: false,
+      sonarrExecutablePath: getSonarrExecutablePath(config) || config.sonarrExecutablePath || '',
+    };
+    Object.entries(nextConfig).forEach(([key, value]) => store.set(key, value));
     console.log('[EngineLifecycle] skipped external engine', { engine: 'sonarr' });
-    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true };
+    return { ok: true, alreadyRunning: true, externalProcessStopped: false, externalRunning: true, ...nextConfig };
   }
   const externalProcessStopped = false;
   if (sonarrProcess && !sonarrProcess.killed) {
@@ -2500,6 +2671,21 @@ ipcMain.handle('get-settings', () => {
       sonarrPort: prepared.port,
       sonarrExecutablePath: getSonarrExecutablePath(sonarr) || sonarr.sonarrExecutablePath || '',
     });
+    Object.entries(sonarr).forEach(([key, value]) => store.set(key, value));
+  }
+
+  if (prowlarr?.managed !== true) {
+    prowlarr = applyDiscoveredProwlarrConfig(prowlarr);
+    store.set('prowlarr', prowlarr);
+  }
+
+  if (radarr?.radarrManaged !== true) {
+    radarr = applyDiscoveredRadarrConfig(radarr);
+    Object.entries(radarr).forEach(([key, value]) => store.set(key, value));
+  }
+
+  if (sonarr?.sonarrManaged !== true) {
+    sonarr = applyDiscoveredSonarrConfig(sonarr);
     Object.entries(sonarr).forEach(([key, value]) => store.set(key, value));
   }
 
@@ -3480,14 +3666,50 @@ ipcMain.handle('open-sonarr-web-ui', async (event, sonarrSettings = {}) => {
 ipcMain.handle('open-sonarr-series-page', async (event, payload = {}) => {
   try {
     const merged = { ...getSonarrConfig(), ...(payload?.settings || {}) };
-    const seriesId = Number(payload?.seriesId || 0);
+    let seriesId = Number(payload?.seriesId || 0);
     if (!seriesId) return { ok: false, error: 'Invalid Sonarr series id' };
     let baseUrl = String(merged.sonarrBaseUrl || '').trim();
     if (!baseUrl) return { ok: false, error: 'Sonarr Base URL is empty' };
     if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
     const parsed = new URL(baseUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
-    parsed.pathname = `${String(parsed.pathname || '/').replace(/\/+$/, '')}/series/${seriesId}`;
+
+    const tvdbId = Number(payload?.tvdbId || 0);
+    const tmdbId = Number(payload?.tmdbId || 0);
+    const titleRaw = String(payload?.title || '').trim();
+    const title = titleRaw.toLowerCase();
+    let slug = String(payload?.slug || '').trim();
+    try {
+      const rows = await sonarrService.getSeries(merged);
+      const list = Array.isArray(rows) ? rows : [];
+      const existing = list.find((item) => Number(item?.id || 0) === seriesId) || null;
+      const exists = Boolean(existing);
+      if (exists && !slug) {
+        slug = String(existing?.titleSlug || '').trim();
+      }
+      if (!exists) {
+        const matched = list.find((item) => Number(item?.tvdbId || 0) > 0 && Number(item?.tvdbId || 0) === tvdbId)
+          || list.find((item) => Number(item?.tmdbId || 0) > 0 && Number(item?.tmdbId || 0) === tmdbId)
+          || list.find((item) => String(item?.title || item?.sortTitle || '').trim().toLowerCase() === title);
+        if (matched?.id) {
+          seriesId = Number(matched.id);
+          if (!slug) slug = String(matched?.titleSlug || '').trim();
+        }
+      }
+    } catch {
+      // Keep original id when lookup fails; opening may still succeed.
+    }
+
+    if (!slug) {
+      slug = String(titleRaw || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, ' ')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+    const seriesPathPart = slug || String(seriesId);
+    parsed.pathname = `${String(parsed.pathname || '/').replace(/\/+$/, '')}/series/${seriesPathPart}`;
     parsed.search = '';
     parsed.hash = '';
     await shell.openExternal(parsed.toString());
@@ -4374,13 +4596,31 @@ ipcMain.handle('logs-clear', async () => {
 ipcMain.handle('open-radarr-movie-page', async (event, payload = {}) => {
   try {
     const merged = { ...getRadarrConfig(), ...(payload?.settings || {}) };
-    const movieId = Number(payload?.movieId || 0);
+    let movieId = Number(payload?.movieId || 0);
     if (!movieId) return { ok: false, error: 'Invalid Radarr movie id' };
     let baseUrl = String(merged.radarrBaseUrl || '').trim();
     if (!baseUrl) return { ok: false, error: 'Radarr Base URL is empty' };
     if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `http://${baseUrl}`;
     const parsed = new URL(baseUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'Invalid URL protocol' };
+
+    const tmdbId = Number(payload?.tmdbId || 0);
+    const title = String(payload?.title || '').trim().toLowerCase();
+    try {
+      const rows = await radarrService.getMovies(merged);
+      const list = Array.isArray(rows) ? rows : [];
+      const exists = list.some((item) => Number(item?.id || 0) === movieId);
+      if (!exists) {
+        const matched = list.find((item) => Number(item?.tmdbId || 0) > 0 && Number(item?.tmdbId || 0) === tmdbId)
+          || list.find((item) => String(item?.title || item?.sortTitle || '').trim().toLowerCase() === title);
+        if (matched?.id) {
+          movieId = Number(matched.id);
+        }
+      }
+    } catch {
+      // Keep original id when lookup fails; opening may still succeed.
+    }
+
     parsed.pathname = `${String(parsed.pathname || '/').replace(/\/+$/, '')}/movies/${movieId}`;
     parsed.search = '';
     parsed.hash = '';

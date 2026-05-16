@@ -582,7 +582,7 @@ const SettingsView = ({ settings, setSettings }) => {
     const result = await window.electronAPI?.startManagedRadarr?.(configToStart);
     if (result?.ok) {
       updateRoot({
-        radarrManaged: true,
+        radarrManaged: result.radarrManaged !== false,
         radarrEnabled: true,
         radarrBaseUrl: result.radarrBaseUrl || configToStart.radarrBaseUrl,
         radarrApiKey: result.radarrApiKey || configToStart.radarrApiKey,
@@ -607,7 +607,7 @@ const SettingsView = ({ settings, setSettings }) => {
     const result = await window.electronAPI?.startManagedSonarr?.(configToStart);
     if (result?.ok) {
       updateRoot({
-        sonarrManaged: true,
+        sonarrManaged: result.sonarrManaged !== false,
         sonarrEnabled: true,
         sonarrBaseUrl: result.sonarrBaseUrl || configToStart.sonarrBaseUrl,
         sonarrApiKey: result.sonarrApiKey || configToStart.sonarrApiKey,

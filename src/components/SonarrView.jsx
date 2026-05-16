@@ -74,11 +74,27 @@ const extractEpisodeCode = (text = '') => {
   return `S${String(Number(match[1])).padStart(2, '0')}E${String(Number(match[2])).padStart(2, '0')}`;
 };
 
+const extractSeasonNumber = (text = '') => {
+  const source = String(text || '');
+  const compact = source.match(/\bS(\d{1,2})(?!E)\b/i);
+  if (compact) return Number(compact[1]);
+  const verbose = source.match(/\bseason[\s._-]*(\d{1,2})\b/i);
+  if (verbose) return Number(verbose[1]);
+  return 0;
+};
+
 const buildEpisodeCode = (seasonNumber, episodeNumber) => `S${String(Number(seasonNumber || 0)).padStart(2, '0')}E${String(Number(episodeNumber || 0)).padStart(2, '0')}`;
+
+const normalizeQbProgressPercent = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  const percent = numeric <= 1 ? numeric * 100 : numeric;
+  return Math.max(0, Math.min(100, percent));
+};
 
 const isQbEpisodeCompleted = (qbEpisode = null) => {
   if (!qbEpisode) return false;
-  const progress = Number(qbEpisode?.progress || 0);
+  const progress = normalizeQbProgressPercent(qbEpisode?.progress || 0);
   const state = String(qbEpisode?.state || '').toLowerCase();
   return progress >= 99.9 || state.includes('seed') || state.includes('upload') || state.includes('up') || state.includes('complete');
 };
@@ -354,34 +370,52 @@ const SonarrView = ({ settings }) => {
       if (!seriesId) continue;
       if (match) {
         map[seriesId] = {
-          progress: Math.max(0, Math.min(100, Number(match.progress || 0))),
+          progress: normalizeQbProgressPercent(match.progress || 0),
         };
       }
 
       const episodes = Array.isArray(episodesBySeries[seriesId]) ? episodesBySeries[seriesId] : [];
       if (!episodes.length) continue;
       const episodeByCode = new Map();
+      const episodeIdsBySeason = new Map();
       for (const ep of episodes) {
         const code = buildEpisodeCode(ep?.seasonNumber, ep?.episodeNumber);
         const epId = Number(ep?.id || 0);
-        if (epId) episodeByCode.set(code, epId);
+        const seasonNo = Number(ep?.seasonNumber || 0);
+        if (epId) {
+          episodeByCode.set(code, epId);
+          if (seasonNo > 0) {
+            if (!episodeIdsBySeason.has(seasonNo)) episodeIdsBySeason.set(seasonNo, []);
+            episodeIdsBySeason.get(seasonNo).push(epId);
+          }
+        }
       }
       if (!episodeByCode.size) continue;
       for (const torrent of result.items) {
         if (!isTorrentForSeries(series, torrent?.name || '')) continue;
         const code = extractEpisodeCode(torrent?.name || '');
-        if (!code || !episodeByCode.has(code)) continue;
-        const epId = episodeByCode.get(code);
-        const current = episodeMap[seriesId]?.[epId];
-        const nextProgress = Math.max(0, Math.min(100, Number(torrent?.progress || 0)));
-        if (!episodeMap[seriesId]) episodeMap[seriesId] = {};
-        if (!current || nextProgress > Number(current.progress || 0)) {
-          episodeMap[seriesId][epId] = {
-            progress: nextProgress,
-            state: String(torrent?.state || ''),
-            size: Number(torrent?.size || torrent?.totalSize || torrent?.total_size || 0),
-          };
+        const nextProgress = normalizeQbProgressPercent(torrent?.progress || 0);
+        const applyProgressToEpisode = (epId) => {
+          const current = episodeMap[seriesId]?.[epId];
+          if (!episodeMap[seriesId]) episodeMap[seriesId] = {};
+          if (!current || nextProgress > Number(current.progress || 0)) {
+            episodeMap[seriesId][epId] = {
+              progress: nextProgress,
+              state: String(torrent?.state || ''),
+              size: Number(torrent?.size || torrent?.totalSize || torrent?.total_size || 0),
+            };
+          }
+        };
+        if (code && episodeByCode.has(code)) {
+          applyProgressToEpisode(episodeByCode.get(code));
+          continue;
         }
+        const seasonNo = extractSeasonNumber(torrent?.name || '');
+        if (!seasonNo) continue;
+        const seasonEpisodeIds = episodeIdsBySeason.get(seasonNo) || [];
+        if (!seasonEpisodeIds.length) continue;
+        if (!episodeMap[seriesId]) episodeMap[seriesId] = {};
+        seasonEpisodeIds.forEach((epId) => applyProgressToEpisode(epId));
       }
     }
     setQbProgressBySeries(map);
@@ -820,12 +854,16 @@ const SonarrView = ({ settings }) => {
     });
   };
 
-  const openSeriesInSonarr = async (seriesId) => {
-    const id = Number(seriesId || 0);
+  const openSeriesInSonarr = async (series = null) => {
+    const id = Number(series?.id || 0);
     if (!id) return;
     const result = await window.electronAPI?.openSonarrSeriesPage?.({
       settings: getSonarrConnectionSettings(),
       seriesId: id,
+      tvdbId: Number(series?.tvdbId || 0),
+      tmdbId: Number(series?.tmdbId || 0),
+      slug: String(series?.titleSlug || ''),
+      title: String(series?.title || series?.sortTitle || ''),
     });
     if (!result?.ok) {
       alert(result?.error || 'Could not open Sonarr series page.');
@@ -1164,7 +1202,9 @@ const SonarrView = ({ settings }) => {
           return normalizeMediaText(`S${selectedSeason}E${epNo} ${ep?.title || ''}`).includes(normalizedEpisodeQuery);
         })
       : seasonEpisodes;
+    const displayedEpisodeIds = displayedSeasonEpisodes.map((ep) => Number(ep?.id || 0)).filter(Boolean);
     const selectedIds = Array.isArray(selectedEpisodeIdsBySeries[seriesId]) ? selectedEpisodeIdsBySeries[seriesId] : [];
+    const allDisplayedSelected = displayedEpisodeIds.length > 0 && displayedEpisodeIds.every((id) => selectedIds.includes(id));
     const visibleSelectedIds = seasonEpisodes
       .map((ep) => Number(ep?.id || 0))
       .filter((id) => selectedIds.includes(id));
@@ -1261,7 +1301,7 @@ const SonarrView = ({ settings }) => {
           <button
             type="button"
             className="sonarr-health-pill sonarr-open-pill"
-            onClick={() => openSeriesInSonarr(seriesId)}
+            onClick={() => openSeriesInSonarr(activeSeries)}
           >
             <ExternalLink size={15} />
             <strong>{t.openInSonarr}</strong>
@@ -1412,11 +1452,36 @@ const SonarrView = ({ settings }) => {
                   <>
                     <div className="sonarr-episode-list sonarr-episode-list-wide">
                       <div className="sonarr-episode-row sonarr-episode-head">
-                        <span />
+                        <span>
+                          <button
+                            type="button"
+                            className="sonarr-tool-btn sonarr-head-select-btn"
+                            title={allDisplayedSelected ? t.unselectAll : t.selectAll}
+                            aria-label={allDisplayedSelected ? t.unselectAll : t.selectAll}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSelectedEpisodeIdsBySeries((prev) => {
+                                const current = Array.isArray(prev[seriesId]) ? prev[seriesId] : [];
+                                const currentSet = new Set(current);
+                                if (allDisplayedSelected) {
+                                  for (const id of displayedEpisodeIds) currentSet.delete(id);
+                                } else {
+                                  for (const id of displayedEpisodeIds) currentSet.add(id);
+                                }
+                                return { ...prev, [seriesId]: [...currentSet] };
+                              });
+                            }}
+                            disabled={!displayedEpisodeIds.length}
+                          >
+                            <CheckCircle2 size={14} />
+                          </button>
+                        </span>
                         <span>{t.episodeCode}</span>
                         <span>{t.episodeTitle}</span>
                         <span>{t.airDate}</span>
                         <span>Status</span>
+                        <span>{t.downloadProgress}</span>
                         <span>{t.actions}</span>
                       </div>
                       {displayedSeasonEpisodes.map((ep) => {
@@ -1435,7 +1500,7 @@ const SonarrView = ({ settings }) => {
                             ? (isMonitored ? `${t.fileMissing} + ${t.monitored}` : t.fileMissing)
                             : (isMonitored ? t.autoQueued : t.notAiredYet);
                         const statusClass = resolvedDownloaded ? 'ok' : aired ? 'off' : isMonitored ? 'watch' : 'unaired';
-                        const qbProgressPercent = qbEpisode ? Math.round(Math.max(0, Math.min(100, Number(qbEpisode.progress || 0)))) : 0;
+                        const qbProgressPercent = qbEpisode ? Math.round(normalizeQbProgressPercent(qbEpisode.progress || 0)) : 0;
                         const qbStateRaw = String(qbEpisode?.state || '').toLowerCase();
                         const qbCompleted = isQbEpisodeCompleted(qbEpisode);
                         const qbSizeText = formatBinarySize(Number(qbEpisode?.size || 0));
@@ -1471,19 +1536,27 @@ const SonarrView = ({ settings }) => {
                             <span className="air-date" title={t.airDate}>{airDateText}</span>
                             <span className={`state ${statusClass}`}>
                               <span>{statusText}</span>
-                              {qbEpisode && (
-                                <span className="qb-episode-state">
-                                  {qbCompleted ? (
-                                    <span>{t.torrentDoneWaitingImport} - {qbSizeText}</span>
-                                  ) : (
-                                    <>
-                                      {qbStateText} {qbProgressPercent}%
-                                      <span className="qb-episode-progress">
-                                        <span style={{ width: `${qbProgressPercent}%` }} />
+                            </span>
+                            <span className="sonarr-episode-download">
+                              {qbEpisode ? (
+                                qbCompleted ? (
+                                  <span className="sonarr-episode-download-done">{t.torrentDoneWaitingImport} - {qbSizeText}</span>
+                                ) : (
+                                  <span className="sonarr-episode-download-live">
+                                    <small>{qbStateText}</small>
+                                    <span className="sonarr-episode-download-bar-row">
+                                      <span className="sonarr-episode-download-bar-track">
+                                        <span
+                                          className="sonarr-episode-download-bar-fill"
+                                          style={{ width: `${qbProgressPercent}%` }}
+                                        />
                                       </span>
-                                    </>
-                                  )}
-                                </span>
+                                      <strong>{qbProgressPercent}%</strong>
+                                    </span>
+                                  </span>
+                                )
+                              ) : (
+                                <span className="sonarr-episode-download-empty">-</span>
                               )}
                             </span>
                             <span className="sonarr-episode-actions">
