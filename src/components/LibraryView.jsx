@@ -69,6 +69,8 @@ const buildMetadataQueries = (item) => {
   return Array.from(unique).filter(Boolean).slice(0, 10);
 };
 
+const TITLE_ARTICLES = new Set(['the', 'a', 'an']);
+
 const looksLikeReleaseName = (value = '') => {
   const text = String(value || '');
   return /\bS\d{1,2}\s*E\d{1,3}\b/i.test(text)
@@ -138,6 +140,7 @@ const getSeriesTitleFromPath = (item, season, episode) => {
 
 const parseLibraryMedia = (item) => {
   const fileBase = String(item.fileName || item.title || '');
+  const parentTitle = String(item.title || '');
   const full = `${item.title || ''} ${item.fileName || ''} ${item.fullPath || ''}`;
   const episodeMatch = full.match(/\bS(\d{1,2})\s*E(\d{1,3})\b/i) || full.match(/\b(\d{1,2})x(\d{1,3})\b/i);
   const seasonOnlyMatch = full.match(/\b(?:Season|Sezon)\s*(\d{1,2})\b/i) || full.match(/\bS(\d{1,2})\b/i);
@@ -163,12 +166,14 @@ const parseLibraryMedia = (item) => {
     };
   }
 
-  const query = stripReleaseJunk(fileBase);
+  const fileQuery = stripReleaseJunk(fileBase);
+  const parentQuery = stripReleaseJunk(parentTitle);
+  const query = cleanLibraryTitle(parentQuery, fileQuery, parentTitle, fileBase);
   const isNumericTitle = /^\d{4}$/.test(String(query || '').trim());
   return {
     mediaType: 'movie',
     query,
-    displayTitle: query || titleCase(stripReleaseJunk(item.title || fileBase)) || 'Unknown Movie',
+    displayTitle: query || titleCase(stripReleaseJunk(parentTitle || fileBase)) || 'Unknown Movie',
     season: null,
     episode: null,
     year: isNumericTitle ? null : year,
@@ -229,9 +234,31 @@ const normalizeTitleKey = (value = '') => String(value || '')
 
 const tokenizeTitle = (value = '') => normalizeSearchQuery(value).toLowerCase().split(/\s+/).filter(Boolean);
 
+const normalizeMatchTokens = (value = '') => tokenizeTitle(value)
+  .filter((token) => !/^\d{4}$/.test(token))
+  .filter((token) => !/^\d+$/.test(token));
+
+const stripLeadingArticle = (tokens = []) => {
+  if (!tokens.length) return tokens;
+  if (TITLE_ARTICLES.has(tokens[0])) return tokens.slice(1);
+  return tokens;
+};
+
+const getSeriesCanonicalTitleKey = (...values) => {
+  for (const value of values) {
+    const normalized = normalizeSearchQuery(value)
+      .replace(/\b(19|20)\d{2}\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const key = normalizeTitleKey(normalized);
+    if (key) return key;
+  }
+  return '';
+};
+
 const isLikelyTitleMismatch = (queryValue = '', titleValue = '') => {
-  const queryTokens = tokenizeTitle(queryValue);
-  const titleTokens = tokenizeTitle(titleValue);
+  const queryTokens = normalizeMatchTokens(queryValue);
+  const titleTokens = normalizeMatchTokens(titleValue);
   if (!queryTokens.length || !titleTokens.length) return false;
   const queryKey = queryTokens.join('');
   const titleKey = titleTokens.join('');
@@ -239,7 +266,7 @@ const isLikelyTitleMismatch = (queryValue = '', titleValue = '') => {
 
   if (queryTokens.length === 1) {
     const query = queryTokens[0];
-    const isArticlePrefix = titleTokens.length === 2 && ['the', 'a', 'an'].includes(titleTokens[0]) && titleTokens[1] === query;
+    const isArticlePrefix = titleTokens.length === 2 && TITLE_ARTICLES.has(titleTokens[0]) && titleTokens[1] === query;
     return !isArticlePrefix;
   }
 
@@ -247,6 +274,28 @@ const isLikelyTitleMismatch = (queryValue = '', titleValue = '') => {
   const overlap = queryTokens.filter((token) => titleSet.has(token)).length;
   const overlapRatio = overlap / queryTokens.length;
   return overlapRatio < 0.6;
+};
+
+const isCandidateTitleCompatible = (parsed, result) => {
+  const queryRaw = normalizeSearchQuery(parsed?.query || parsed?.cleanTitle || '');
+  const resultTitle = normalizeSearchQuery(result?.title || result?.name || '');
+  const queryTokens = normalizeMatchTokens(queryRaw);
+  const resultTokens = normalizeMatchTokens(resultTitle);
+  if (!queryTokens.length || !resultTokens.length) return true;
+  const resultTokensNoArticle = stripLeadingArticle(resultTokens);
+
+  if (queryTokens.length === 1) {
+    const token = queryTokens[0];
+    if (token.length >= 4 && resultTokens[0] !== token && resultTokensNoArticle[0] !== token) return false;
+    return true;
+  }
+
+  const resultSet = new Set(resultTokens);
+  const overlap = queryTokens.filter((token) => resultSet.has(token)).length;
+  if (overlap < Math.min(2, queryTokens.length)) return false;
+  const directPrefix = resultTokens.slice(0, queryTokens.length).every((token, index) => token === queryTokens[index]);
+  const articlePrefix = resultTokensNoArticle.slice(0, queryTokens.length).every((token, index) => token === queryTokens[index]);
+  return directPrefix || articlePrefix || overlap === queryTokens.length;
 };
 
 const scoreTmdbResult = (result, parsed) => {
@@ -266,14 +315,23 @@ const scoreTmdbResult = (result, parsed) => {
   const prefixBonus = !exactTitleBonus && queryKey && resultKey.startsWith(queryKey) ? -10 : 0;
   const numericMismatchPenalty = numericTitle && resultTitle && resultTitle !== queryRaw ? 35 : 0;
   const mismatchPenalty = isLikelyTitleMismatch(queryRaw, resultTitle) ? 45 : 0;
-  return yearPenalty + typePenalty + posterPenalty + numericMismatchPenalty + mismatchPenalty + exactTitleBonus + prefixBonus;
+  return yearPenalty
+    + typePenalty
+    + posterPenalty
+    + numericMismatchPenalty
+    + mismatchPenalty
+    + exactTitleBonus
+    + prefixBonus;
 };
 
 const pickBestResult = (results, parsed) => {
-  const usable = (results || []).filter((result) => {
+  const mediaFiltered = (results || []).filter((result) => {
     if (parsed.mediaType === 'tv') return result.media_type === 'tv' || !result.media_type;
     return result.media_type === 'movie' || !result.media_type;
   });
+  if (!mediaFiltered.length) return null;
+  const compatible = mediaFiltered.filter((result) => isCandidateTitleCompatible(parsed, result));
+  const usable = compatible.length ? compatible : mediaFiltered;
   if (!usable.length) return null;
   const ranked = usable
     .map((item) => ({ item, score: scoreTmdbResult(item, parsed) }))
@@ -465,14 +523,18 @@ const LibraryView = ({ settings }) => {
         const torrent = torrentByPath.get(key);
         const torrentFile = torrentFileByPath.get(key);
         const currentItem = currentMap.get(String(item.id)) || {};
-        const numericTitleQuery = /^\d{4}$/.test(String(parsed.query || '').trim());
-        const cacheTitleMismatch = numericTitleQuery
-          && cache?.title
-          && normalizeTitleKey(cache.title) !== normalizeTitleKey(parsed.query);
+        const cacheQuery = cleanLibraryTitle(parsed.query, parsed.displayTitle, item.title, item.fileName);
+        const cacheTitleMismatch = Boolean(
+          cache?.title
+          && cacheQuery
+          && isLikelyTitleMismatch(cacheQuery, cache.title)
+        );
         const safeCacheTmdbId = cacheTitleMismatch ? null : cache?.tmdbId;
         const safeCachePoster = cacheTitleMismatch ? '' : cache?.posterUrl;
-        const tmdbId = Number(safeCacheTmdbId || mediaInfo.tmdbId || currentItem.tmdbId) || null;
-        const poster = mediaInfo.poster || safeCachePoster || currentItem.poster || '';
+        const stateTmdbId = cacheTitleMismatch ? null : currentItem.tmdbId;
+        const statePoster = cacheTitleMismatch ? '' : currentItem.poster;
+        const tmdbId = Number(safeCacheTmdbId || mediaInfo.tmdbId || stateTmdbId) || null;
+        const poster = mediaInfo.poster || safeCachePoster || statePoster || '';
         const torrentSeason = Number(parsed.season || mediaInfo.season) || parsed.season;
         const torrentEpisode = Number(parsed.episode || mediaInfo.episode) || parsed.episode;
         const cleanTitle = parsed.mediaType === 'tv'
@@ -606,11 +668,42 @@ const LibraryView = ({ settings }) => {
 
   const libraryCards = useMemo(() => {
     const seriesMap = new Map();
+    const titleToSeriesKey = new Map();
     const movies = [];
     items.forEach((item) => {
       if (item.mediaType === 'tv') {
-        const key = item.tmdbId ? `tmdb:${item.tmdbId}` : `title:${item.query.toLowerCase()}`;
         const itemTitle = cleanLibraryTitle(item.cleanTitle, item.query, item.displayTitle);
+        const titleKey = getSeriesCanonicalTitleKey(
+          item.cleanTitle,
+          item.query,
+          item.displayTitle,
+          item.title,
+          item.fileName
+        );
+        const tmdbKey = item.tmdbId ? `tmdb:${item.tmdbId}` : '';
+        let key = tmdbKey || (titleKey ? `title:${titleKey}` : `title:${normalizeTitleKey(String(item.query || '').toLowerCase())}`);
+
+        if (!tmdbKey && titleKey && titleToSeriesKey.has(titleKey)) {
+          key = titleToSeriesKey.get(titleKey) || key;
+        }
+
+        if (tmdbKey && titleKey) {
+          const legacyTitleKey = `title:${titleKey}`;
+          if (seriesMap.has(legacyTitleKey) && !seriesMap.has(tmdbKey)) {
+            const legacy = seriesMap.get(legacyTitleKey);
+            seriesMap.delete(legacyTitleKey);
+            seriesMap.set(tmdbKey, {
+              ...legacy,
+              key: tmdbKey,
+              tmdbId: item.tmdbId,
+            });
+          }
+          titleToSeriesKey.set(titleKey, tmdbKey);
+          key = tmdbKey;
+        } else if (titleKey) {
+          titleToSeriesKey.set(titleKey, key);
+        }
+
         const existing = seriesMap.get(key) || {
           key,
           type: 'tv',
