@@ -1460,6 +1460,7 @@ const shouldMinimizeToTrayOnClose = () => store.get('minimizeToTrayOnClose') !==
 const shouldCloseToTray = () => store.get('closeToTray') !== false;
 const shouldStopManagedEnginesOnExit = () => store.get('stopManagedEnginesOnExit') !== false;
 const shouldConfirmExitWhileDownloading = () => store.get('confirmExitWhileDownloading') !== false;
+const ENGINE_STOP_GRACE_MS = 250;
 
 const registerManagedEngine = (name, childProcess) => {
   if (!childProcess || !childProcess.pid) return;
@@ -1513,7 +1514,7 @@ const stopManagedEngineEntry = async (entry) => {
     console.warn('[EngineLifecycle] stop failed', { engine: entry.name, pid: targetPid || null, error: error.message });
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await new Promise((resolve) => setTimeout(resolve, ENGINE_STOP_GRACE_MS));
   if (targetPid > 0) {
     try {
       process.kill(targetPid, 0);
@@ -1540,16 +1541,18 @@ const stopAllManagedEngines = async () => {
   }
   const entries = [...managedProcesses.values()];
   const result = { stopped: [], skipped: [], errors: [] };
-  for (const entry of entries) {
-    try {
-      const stopped = await stopManagedEngineEntry(entry);
-      if (stopped) result.stopped.push(entry.name);
-      else result.skipped.push(entry.name);
-    } catch (error) {
-      result.errors.push({ engine: entry?.name || 'unknown', error: error.message });
-      console.warn('[EngineLifecycle] stop failed', { engine: entry?.name || 'unknown', error: error.message });
+  const settled = await Promise.allSettled(entries.map((entry) => stopManagedEngineEntry(entry)));
+  settled.forEach((state, index) => {
+    const entry = entries[index];
+    if (state.status === 'fulfilled') {
+      if (state.value) result.stopped.push(entry?.name || 'unknown');
+      else result.skipped.push(entry?.name || 'unknown');
+      return;
     }
-  }
+    const error = state.reason;
+    result.errors.push({ engine: entry?.name || 'unknown', error: error?.message || String(error) });
+    console.warn('[EngineLifecycle] stop failed', { engine: entry?.name || 'unknown', error: error?.message || String(error) });
+  });
   return result;
 };
 
