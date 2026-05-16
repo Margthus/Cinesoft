@@ -1364,6 +1364,7 @@ const getSonarrConfig = () => ({
 let prowlarrProcess = null;
 let radarrProcess = null;
 let sonarrProcess = null;
+let forceQuitTimer = null;
 const managedProcesses = new Map();
 const startingEngines = new Set();
 const getStoredAuthUser = () => store.get('authUser') || null;
@@ -1396,6 +1397,15 @@ if (!store.has('stopManagedEnginesOnExit')) {
 }
 if (!store.has('confirmExitWhileDownloading')) {
   store.set('confirmExitWhileDownloading', true);
+}
+if (!store.has('prowlarrAutoStartDisabled')) {
+  store.set('prowlarrAutoStartDisabled', false);
+}
+if (!store.has('radarrAutoStartDisabled')) {
+  store.set('radarrAutoStartDisabled', false);
+}
+if (!store.has('sonarrAutoStartDisabled')) {
+  store.set('sonarrAutoStartDisabled', false);
 }
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
@@ -1612,6 +1622,15 @@ const performAppQuit = async (reason = 'unknown') => {
     await stopAllManagedEngines();
   }
   isQuitting = true;
+  if (forceQuitTimer) clearTimeout(forceQuitTimer);
+  forceQuitTimer = setTimeout(() => {
+    console.warn('[AppLifecycle] force exit fallback triggered');
+    try {
+      app.exit(0);
+    } catch {
+      // no-op
+    }
+  }, 4000);
   app.quit();
 };
 
@@ -1801,6 +1820,10 @@ app.on('before-quit', () => {
     console.log('[AppLifecycle] cleanup already started, skipping duplicate');
   }
   isQuitting = true;
+  if (forceQuitTimer) {
+    clearTimeout(forceQuitTimer);
+    forceQuitTimer = null;
+  }
   if (appTray) {
     appTray.destroy();
     appTray = null;
@@ -1844,6 +1867,13 @@ app.on('window-all-closed', async () => {
     torrentManager = null;
   } else {
     pruneCompletedPersistedDownloads([]);
+  }
+  if (forceQuitTimer) {
+    clearTimeout(forceQuitTimer);
+    forceQuitTimer = null;
+  }
+  if (process.platform !== 'darwin') {
+    app.exit(0);
   }
 });
 
@@ -2698,6 +2728,9 @@ ipcMain.handle('get-settings', () => {
     closeToTray: store.get('closeToTray') !== false,
     stopManagedEnginesOnExit: store.get('stopManagedEnginesOnExit') !== false,
     confirmExitWhileDownloading: store.get('confirmExitWhileDownloading') !== false,
+    prowlarrAutoStartDisabled: store.get('prowlarrAutoStartDisabled') === true,
+    radarrAutoStartDisabled: store.get('radarrAutoStartDisabled') === true,
+    sonarrAutoStartDisabled: store.get('sonarrAutoStartDisabled') === true,
     prowlarr,
     torrentioEnabled: store.get('torrentioEnabled') || false,
     embeddedTorrentEnabled: store.get('embeddedTorrentEnabled') !== false,
@@ -3156,10 +3189,15 @@ ipcMain.handle('select-prowlarr-executable', async () => {
 });
 
 ipcMain.handle('start-managed-prowlarr', async (event, prowlarrConfig) => {
-  return startManagedProwlarr(prowlarrConfig || getProwlarrConfig());
+  const result = await startManagedProwlarr(prowlarrConfig || getProwlarrConfig());
+  if (result?.ok) {
+    store.set('prowlarrAutoStartDisabled', false);
+  }
+  return result;
 });
 
 ipcMain.handle('stop-managed-prowlarr', async () => {
+  store.set('prowlarrAutoStartDisabled', true);
   return {
     ok: true,
     stopped: stopManagedProwlarr(),
@@ -3190,10 +3228,15 @@ ipcMain.handle('select-radarr-executable', async () => {
 });
 
 ipcMain.handle('start-managed-radarr', async (event, radarrConfig) => {
-  return startManagedRadarr(radarrConfig || getRadarrConfig());
+  const result = await startManagedRadarr(radarrConfig || getRadarrConfig());
+  if (result?.ok) {
+    store.set('radarrAutoStartDisabled', false);
+  }
+  return result;
 });
 
 ipcMain.handle('stop-managed-radarr', async () => {
+  store.set('radarrAutoStartDisabled', true);
   return {
     ok: true,
     stopped: stopManagedRadarr(),
@@ -3224,10 +3267,15 @@ ipcMain.handle('select-sonarr-executable', async () => {
 });
 
 ipcMain.handle('start-managed-sonarr', async (event, sonarrConfig) => {
-  return startManagedSonarr(sonarrConfig || getSonarrConfig());
+  const result = await startManagedSonarr(sonarrConfig || getSonarrConfig());
+  if (result?.ok) {
+    store.set('sonarrAutoStartDisabled', false);
+  }
+  return result;
 });
 
 ipcMain.handle('stop-managed-sonarr', async () => {
+  store.set('sonarrAutoStartDisabled', true);
   return {
     ok: true,
     stopped: stopManagedSonarr(),
@@ -3236,6 +3284,9 @@ ipcMain.handle('stop-managed-sonarr', async () => {
 
 ipcMain.handle('engines:stop-managed', async () => {
   console.log('[IPC] engines:stop-managed requested');
+  store.set('prowlarrAutoStartDisabled', true);
+  store.set('radarrAutoStartDisabled', true);
+  store.set('sonarrAutoStartDisabled', true);
   const result = await stopAllManagedEngines();
   console.log('[IPC] engines:stop-managed result', result);
   return result;

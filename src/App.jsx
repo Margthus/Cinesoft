@@ -63,6 +63,9 @@ const App = () => {
     minimizeToTrayOnClose: true,
     stopManagedEnginesOnExit: true,
     confirmExitWhileDownloading: true,
+    prowlarrAutoStartDisabled: false,
+    radarrAutoStartDisabled: false,
+    sonarrAutoStartDisabled: false,
     prowlarr: DEFAULT_PROWLARR_CONFIG,
     embeddedTorrentEnabled: true,
     qbittorrentEnabled: true,
@@ -117,6 +120,9 @@ const App = () => {
             minimizeToTrayOnClose: savedSettings.minimizeToTrayOnClose !== false,
             stopManagedEnginesOnExit: savedSettings.stopManagedEnginesOnExit !== false,
             confirmExitWhileDownloading: savedSettings.confirmExitWhileDownloading !== false,
+            prowlarrAutoStartDisabled: savedSettings.prowlarrAutoStartDisabled === true,
+            radarrAutoStartDisabled: savedSettings.radarrAutoStartDisabled === true,
+            sonarrAutoStartDisabled: savedSettings.sonarrAutoStartDisabled === true,
             prowlarr: savedSettings.prowlarr || DEFAULT_PROWLARR_CONFIG,
             torrentioEnabled: savedSettings.torrentioEnabled || false,
             embeddedTorrentEnabled: savedSettings.embeddedTorrentEnabled !== false,
@@ -149,13 +155,13 @@ const App = () => {
             sonarrSearchAfterAdd: savedSettings.sonarrSearchAfterAdd !== false,
           });
 
-          if (savedSettings.prowlarr?.managed && savedSettings.prowlarr?.enabled && !savedSettings.torrentioEnabled) {
+          if (savedSettings.prowlarr?.managed && savedSettings.prowlarr?.enabled && !savedSettings.torrentioEnabled && savedSettings.prowlarrAutoStartDisabled !== true) {
             window.electronAPI?.startManagedProwlarr?.(savedSettings.prowlarr);
           }
-          if (savedSettings.radarrManaged === true && savedSettings.radarrEnabled === true) {
+          if (savedSettings.radarrManaged === true && savedSettings.radarrEnabled === true && savedSettings.radarrAutoStartDisabled !== true) {
             window.electronAPI?.startManagedRadarr?.(savedSettings);
           }
-          if (savedSettings.sonarrManaged === true && savedSettings.sonarrEnabled === true) {
+          if (savedSettings.sonarrManaged === true && savedSettings.sonarrEnabled === true && savedSettings.sonarrAutoStartDisabled !== true) {
             window.electronAPI?.startManagedSonarr?.(savedSettings);
           }
         }
