@@ -930,12 +930,54 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _handle_pause(self):
         data = self._read_json()
-        tid = data.get("id")
-        if tid and tid in torrents:
-            torrents[tid]["handle"].pause()
-            self._send_json({"ok": True})
-        else:
+        raw_tid = data.get("id")
+        if raw_tid is None:
             self._send_json({"ok": False, "error": "Not found"}, 404)
+            return
+        tid = normalize_info_hash(raw_tid)
+        if not tid or tid not in torrents:
+            self._send_json({"ok": False, "error": "Not found"}, 404)
+            return
+
+        handle = torrents[tid].get("handle")
+        if not is_handle_valid(handle):
+            self._send_json({"ok": False, "error": "Torrent removed"}, 410)
+            return
+
+        try:
+            # Explicit handle-level pause for this torrent only.
+            handle.pause()
+        except Exception as exc:
+            self._send_json({"ok": False, "error": f"Pause failed: {exc}"}, 500)
+            return
+
+        deadline = time.time() + 2.0
+        paused_flag = False
+        state = None
+        download_rate = 0
+        upload_rate = 0
+        while time.time() < deadline:
+            try:
+                st = handle.status()
+                paused_flag = bool(st.flags & lt.torrent_flags.paused)
+                state = int(st.state)
+                download_rate = int(st.download_rate or 0)
+                upload_rate = int(st.upload_rate or 0)
+                if paused_flag and download_rate <= 1024:
+                    break
+            except Exception as exc:
+                log_warning("pause_status_poll_failed", torrent=tid, error=str(exc))
+                break
+            time.sleep(0.1)
+
+        self._send_json({
+            "ok": True,
+            "paused": paused_flag,
+            "isPaused": paused_flag,
+            "state": state,
+            "downloadRate": download_rate,
+            "uploadRate": upload_rate,
+        })
 
     def _handle_resume(self):
         data = self._read_json()

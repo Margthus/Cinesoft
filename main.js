@@ -1826,7 +1826,13 @@ function createWindow() {
   win.on('restore', () => syncNativeHostVisibilityAndBounds(win, 'show'));
   win.on('hide', () => syncNativeHostVisibilityAndBounds(win, 'hide'));
   win.on('show', () => syncNativeHostVisibilityAndBounds(win, 'show'));
-  win.on('close', () => syncNativeHostVisibilityAndBounds(win, 'close'));
+  win.on('close', () => {
+    if (isQuitting) {
+      syncNativeHostVisibilityAndBounds(win, 'close');
+    } else {
+      syncNativeHostVisibilityAndBounds(win, 'hide');
+    }
+  });
 
   win.on('closed', () => {
     if (mainWindow === win) {
@@ -1892,6 +1898,7 @@ app.on('before-quit', () => {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
   }
+  embeddedTorrentStreamService?.shutdown?.().catch(() => {});
   mpvPlayerService.shutdown().catch(() => {});
   localStreamServer.stop().catch(() => {});
   streamSessionManager.closeAll();
@@ -4911,9 +4918,9 @@ ipcMain.handle('stream:start-embedded-torrent', async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle('stream:stop-embedded-torrent', async (event, streamId) => {
+ipcMain.handle('stream:stop-embedded-torrent', async (event, payload = {}) => {
   try {
-    return await embeddedTorrentStreamService.stopEmbeddedTorrentStream(streamId);
+    return await embeddedTorrentStreamService.stopEmbeddedTorrentStream(payload);
   } catch (error) {
     return { ok: false, error: error?.message || 'Failed to stop embedded torrent stream.' };
   }

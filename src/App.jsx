@@ -129,6 +129,7 @@ const App = () => {
   const [embeddedTorrentSource, setEmbeddedTorrentSource] = useState('');
   const [embeddedTorrentSourceKind, setEmbeddedTorrentSourceKind] = useState('magnet');
   const [embeddedTorrentStreamStatus, setEmbeddedTorrentStreamStatus] = useState(null);
+  const [embeddedStopResult, setEmbeddedStopResult] = useState(null);
   const showMpvDebugPanel = window.electronAPI?.isDev === true;
   const mpvNativeSlotRef = useRef(null);
   const mpvBoundsThrottleRef = useRef(null);
@@ -495,6 +496,7 @@ const App = () => {
       if (!result?.ok) return;
       setEmbeddedTorrentStreamStatus({
         status: String(result?.status || 'idle'),
+        streamId: result?.streamId || null,
         torrentId: result?.torrentId || null,
         fileIndex: result?.fileIndex ?? null,
         selectedFileName: result?.selectedFileName || null,
@@ -505,6 +507,13 @@ const App = () => {
         missingPiecesCount: result?.missingPiecesCount ?? null,
         elapsedMs: result?.elapsedMs ?? 0,
         activeStreamCount: Number(result?.activeStreamCount || 0),
+        activeStreams: Array.isArray(result?.activeStreams) ? result.activeStreams : [],
+        torrentPaused: result?.torrentPaused ?? null,
+        torrentState: result?.torrentState ?? null,
+        torrentDownloadRate: result?.torrentDownloadRate ?? null,
+        torrentUploadRate: result?.torrentUploadRate ?? null,
+        pauseVerified: result?.pauseVerified ?? null,
+        stopReason: result?.stopReason || '',
         lastError: result?.lastError || '',
       });
     } catch {
@@ -537,6 +546,50 @@ const App = () => {
       setMpvDebugBusy(false);
     }
   };
+
+  const handleStopEmbeddedTorrentStream = async (mode) => {
+    if (!window.electronAPI?.stopEmbeddedTorrentStream) return;
+    setMpvDebugBusy(true);
+    try {
+      const payload = {
+        streamId: resolvedEmbeddedStreamId || undefined,
+        mode,
+        removeFiles: false,
+      };
+      const result = await window.electronAPI.stopEmbeddedTorrentStream(payload);
+      if (!result?.ok && !result?.stopped) {
+        throw new Error(result?.error || 'Failed to stop embedded torrent stream.');
+      }
+      setEmbeddedStopResult(result);
+      setMpvDebugStreamSessionId('');
+      setMpvDebugStreamUrl('');
+      await refreshEmbeddedTorrentStatus();
+      await refreshStreamServerStatus();
+      await window.electronAPI?.torrentGetAll?.();
+      const statusResult = await window.electronAPI?.getMpvStatus?.();
+      setMpvDebugStatus(String(statusResult?.status || 'stopped'));
+      setMpvDebugError(String(result?.warning || result?.error || ''));
+    } catch (error) {
+      setMpvDebugError(String(error?.message || 'Failed to stop embedded torrent stream.'));
+      await refreshEmbeddedTorrentStatus();
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const resolvedEmbeddedStreamId = (() => {
+    if (mpvDebugStreamSessionId) return mpvDebugStreamSessionId;
+    if (embeddedTorrentStreamStatus?.streamId) return String(embeddedTorrentStreamStatus.streamId);
+    if (Array.isArray(embeddedTorrentStreamStatus?.activeStreams) && embeddedTorrentStreamStatus.activeStreams.length > 0) {
+      return String(embeddedTorrentStreamStatus.activeStreams[0]?.streamId || '');
+    }
+    return '';
+  })();
+  const showEmbeddedStopControls = Boolean(
+    embeddedTorrentStreamStatus?.activeStreamCount > 0
+    || embeddedTorrentStreamStatus?.status === 'playing'
+    || embeddedTorrentStreamStatus?.streamId
+  );
 
   useEffect(() => {
     if (!showMpvDebugPanel) return;
@@ -612,8 +665,25 @@ const App = () => {
                 {embeddedTorrentStreamStatus.prebufferEnd != null ? <span>prebufferEnd: {embeddedTorrentStreamStatus.prebufferEnd}</span> : null}
                 <span>prebufferReady: {String(embeddedTorrentStreamStatus.prebufferReady)}</span>
                 {embeddedTorrentStreamStatus.missingPiecesCount != null ? <span>missingPieces: {embeddedTorrentStreamStatus.missingPiecesCount}</span> : null}
+                {embeddedTorrentStreamStatus.pauseVerified != null ? <span>pauseVerified: {String(embeddedTorrentStreamStatus.pauseVerified)}</span> : null}
+                {embeddedTorrentStreamStatus.torrentPaused != null ? <span>torrentPaused: {String(embeddedTorrentStreamStatus.torrentPaused)}</span> : null}
+                {embeddedTorrentStreamStatus.torrentState != null ? <span>torrentState: {embeddedTorrentStreamStatus.torrentState}</span> : null}
+                {embeddedTorrentStreamStatus.torrentDownloadRate != null ? <span>downloadRate: {embeddedTorrentStreamStatus.torrentDownloadRate}</span> : null}
+                {embeddedTorrentStreamStatus.torrentUploadRate != null ? <span>uploadRate: {embeddedTorrentStreamStatus.torrentUploadRate}</span> : null}
                 <span>embeddedElapsedMs: {embeddedTorrentStreamStatus.elapsedMs}</span>
+                {embeddedTorrentStreamStatus.stopReason ? <span>embeddedStopReason: {embeddedTorrentStreamStatus.stopReason}</span> : null}
                 {embeddedTorrentStreamStatus.lastError ? <span>embeddedError: {embeddedTorrentStreamStatus.lastError}</span> : null}
+              </>
+            ) : null}
+            {embeddedStopResult ? (
+              <>
+                <span>stop.torrentAction: {String(embeddedStopResult.torrentAction || '-')}</span>
+                {embeddedStopResult.pauseVerified != null ? <span>stop.pauseVerified: {String(embeddedStopResult.pauseVerified)}</span> : null}
+                {embeddedStopResult.torrentPaused != null ? <span>stop.torrentPaused: {String(embeddedStopResult.torrentPaused)}</span> : null}
+                {embeddedStopResult.torrentState != null ? <span>stop.torrentState: {embeddedStopResult.torrentState}</span> : null}
+                {embeddedStopResult.downloadRate != null ? <span>stop.downloadRate: {embeddedStopResult.downloadRate}</span> : null}
+                {embeddedStopResult.removeFiles != null ? <span>stop.removeFiles: {String(embeddedStopResult.removeFiles)}</span> : null}
+                {embeddedStopResult.filesRemoved != null ? <span>stop.filesRemoved: {String(embeddedStopResult.filesRemoved)}</span> : null}
               </>
             ) : null}
             <input
@@ -707,6 +777,40 @@ const App = () => {
                 Close Stream Session
               </button>
             </div>
+            {showEmbeddedStopControls ? (
+              <>
+                <strong>Embedded Stream Controls</strong>
+                <span>streamId: {resolvedEmbeddedStreamId || '-'}</span>
+                <div className="mpv-debug-actions mpv-debug-actions-embedded">
+                  <button
+                    type="button"
+                    onClick={() => handleStopEmbeddedTorrentStream('playback-only')}
+                    disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}
+                  >
+                    Stop Playback Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')}
+                    disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}
+                  >
+                    Stop + Pause Torrent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')}
+                    disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}
+                  >
+                    Stop + Remove Torrent
+                  </button>
+                </div>
+                <small className="mpv-debug-note">
+                  {settings.language === 'tr'
+                    ? 'Torrent listeden silinir, dosyalar kalir.'
+                    : 'Removes torrent from list, keeps downloaded files.'}
+                </small>
+              </>
+            ) : null}
           </aside>
         )}
         <div className="app-toast-stack" aria-live="polite" aria-atomic="true">

@@ -7,6 +7,32 @@ const PREBUFFER_POLL_MS = 1000;
 const PREBUFFER_DEADLINE_MS = 1000;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const PAUSE_VERIFY_TIMEOUT_MS = 5000;
+const PAUSE_VERIFY_POLL_MS = 500;
+const PAUSE_VERIFY_MAX_DOWNLOAD_RATE = 1024;
+
+const normalizeTorrentStatus = (status = {}) => {
+  const paused = Boolean(status?.isPaused ?? status?.paused);
+  const state = Number.isInteger(status?.state) ? status.state : Number(status?.state ?? NaN);
+  const downloadRate = Number(
+    status?.downloadRate
+    ?? status?.downloadSpeed
+    ?? status?.dlRate
+    ?? 0,
+  );
+  const uploadRate = Number(
+    status?.uploadRate
+    ?? status?.uploadSpeed
+    ?? status?.ulRate
+    ?? 0,
+  );
+  return {
+    paused,
+    state: Number.isNaN(state) ? null : state,
+    downloadRate: Number.isFinite(downloadRate) ? downloadRate : 0,
+    uploadRate: Number.isFinite(uploadRate) ? uploadRate : 0,
+  };
+};
 
 class EmbeddedTorrentStreamService {
   constructor({
@@ -33,6 +59,12 @@ class EmbeddedTorrentStreamService {
       missingPiecesCount: null,
       elapsedMs: 0,
       lastError: null,
+      stopReason: null,
+      torrentPaused: null,
+      torrentState: null,
+      torrentDownloadRate: null,
+      torrentUploadRate: null,
+      pauseVerified: null,
     };
   }
 
@@ -129,6 +161,12 @@ class EmbeddedTorrentStreamService {
         missingPiecesCount: null,
         elapsedMs: 0,
         lastError: null,
+        stopReason: null,
+        torrentPaused: null,
+        torrentState: null,
+        torrentDownloadRate: null,
+        torrentUploadRate: null,
+        pauseVerified: null,
       });
 
       const tm = await this.getTorrentManager();
@@ -296,18 +334,23 @@ class EmbeddedTorrentStreamService {
         missingPiecesCount: 0,
         elapsedMs: Date.now() - startedAt,
         lastError: null,
+        torrentPaused: null,
+        torrentState: null,
+        torrentDownloadRate: null,
+        torrentUploadRate: null,
+        pauseVerified: null,
       });
       this.activeStreams.set(session.streamId, {
         streamId: session.streamId,
-        sourceKind,
-        source,
         torrentId,
-        selectedFileIndex: picked.index,
-        selectedFilePath: picked.path,
+        fileIndex: picked.index,
         localFilePath,
         streamUrl,
-        title,
-        createdAt: Date.now(),
+        mpvStarted: true,
+        startedAt: Date.now(),
+        status: 'playing',
+        stopReason: null,
+        selectedFileName: path.basename(picked.path || ''),
       });
 
       console.info('[EmbeddedTorrentStream] started', {
@@ -343,15 +386,134 @@ class EmbeddedTorrentStreamService {
     }
   }
 
-  async stopEmbeddedTorrentStream(streamId) {
-    const id = String(streamId || '').trim();
-    const active = this.activeStreams.get(id);
-    if (!active) {
-      return { ok: true, stopped: false };
+  getActiveStreamEntry(streamId) {
+    const requestedId = String(streamId || '').trim();
+    if (requestedId && this.activeStreams.has(requestedId)) {
+      return { streamId: requestedId, stream: this.activeStreams.get(requestedId) };
     }
-    await this.mpvPlayerService.stopMpvPlayback();
-    this.streamSessionManager.closeSession(id);
-    this.activeStreams.delete(id);
+    const first = this.activeStreams.entries().next();
+    if (!first.done) {
+      const [id, stream] = first.value;
+      return { streamId: id, stream };
+    }
+    return { streamId: '', stream: null };
+  }
+
+  async stopEmbeddedTorrentStream(options = {}) {
+    const streamId = typeof options === 'string' ? options : options?.streamId;
+    const modeRaw = typeof options === 'string' ? 'playback-only' : String(options?.mode || 'playback-only').trim();
+    const mode = ['playback-only', 'pause-torrent', 'remove-torrent'].includes(modeRaw) ? modeRaw : 'playback-only';
+    const removeFiles = options?.removeFiles === true;
+
+    const { streamId: targetId, stream: active } = this.getActiveStreamEntry(streamId);
+    if (!active) {
+      return {
+        ok: true,
+        stopped: false,
+        stoppedMpv: false,
+        closedSession: false,
+        torrentAction: 'none',
+      };
+    }
+
+    let stoppedMpv = false;
+    let closedSession = false;
+    let torrentAction = 'none';
+    let pauseVerified = null;
+    let torrentPaused = null;
+    let torrentState = null;
+    let torrentDownloadRate = null;
+    let torrentUploadRate = null;
+    let warning = null;
+    let filesRemoved = null;
+    const errors = [];
+
+    try {
+      const stopResult = await this.mpvPlayerService.stopMpvPlayback();
+      stoppedMpv = Boolean(stopResult?.ok);
+      if (!stopResult?.ok) {
+        errors.push(String(stopResult?.error || 'Failed to stop MPV playback.'));
+      }
+    } catch (error) {
+      errors.push(String(error?.message || 'Failed to stop MPV playback.'));
+    }
+
+    try {
+      closedSession = Boolean(this.streamSessionManager.closeSession(targetId));
+    } catch (error) {
+      errors.push(String(error?.message || 'Failed to close stream session.'));
+    }
+
+    if (mode !== 'playback-only' && active.torrentId) {
+      try {
+        const tm = await this.getTorrentManager();
+        if (mode === 'pause-torrent') {
+          const verifyStartedAt = Date.now();
+          const pauseResult = await tm.pause(active.torrentId);
+          console.info('[EmbeddedTorrentStream:PauseVerify]', {
+            torrentId: active.torrentId,
+            phase: 'pause-request',
+            pauseResult,
+          });
+          let pauseStatus = null;
+          let elapsedMs = 0;
+          if (pauseResult?.ok) {
+            while ((Date.now() - verifyStartedAt) <= PAUSE_VERIFY_TIMEOUT_MS) {
+              pauseStatus = await tm.getStatus(active.torrentId);
+              const normalized = normalizeTorrentStatus(pauseStatus);
+              torrentPaused = normalized.paused;
+              torrentState = normalized.state;
+              torrentDownloadRate = normalized.downloadRate;
+              torrentUploadRate = normalized.uploadRate;
+              elapsedMs = Date.now() - verifyStartedAt;
+              pauseVerified = torrentPaused && torrentDownloadRate <= PAUSE_VERIFY_MAX_DOWNLOAD_RATE;
+              console.info('[EmbeddedTorrentStream:PauseVerify]', {
+                torrentId: active.torrentId,
+                phase: 'pause-status-poll',
+                paused: torrentPaused,
+                state: torrentState,
+                downloadRate: torrentDownloadRate,
+                uploadRate: torrentUploadRate,
+                elapsedMs,
+                pauseVerified,
+              });
+              if (pauseVerified) break;
+              await delay(PAUSE_VERIFY_POLL_MS);
+            }
+            if (!pauseVerified) {
+              warning = 'pause requested but torrent still active';
+              errors.push(warning);
+              console.info('[EmbeddedTorrentStream:PauseVerify]', {
+                torrentId: active.torrentId,
+                phase: 'pause-timeout',
+                paused: torrentPaused,
+                state: torrentState,
+                downloadRate: torrentDownloadRate,
+                uploadRate: torrentUploadRate,
+                elapsedMs: Date.now() - verifyStartedAt,
+                pauseVerified: false,
+              });
+            }
+          }
+          torrentAction = pauseResult?.ok ? 'paused' : 'pause-failed';
+          if (!pauseResult?.ok) {
+            pauseVerified = false;
+            warning = warning || 'Failed to pause torrent.';
+            errors.push(String(pauseResult?.error || 'Failed to pause torrent.'));
+          }
+        } else if (mode === 'remove-torrent') {
+          const removeResult = await tm.remove(active.torrentId, removeFiles === true);
+          torrentAction = removeResult?.ok ? 'removed' : 'remove-failed';
+          filesRemoved = removeFiles === true;
+          if (!removeResult?.ok) errors.push(String(removeResult?.error || 'Failed to remove torrent.'));
+        }
+      } catch (error) {
+        torrentAction = mode === 'pause-torrent' ? 'pause-failed' : 'remove-failed';
+        errors.push(String(error?.message || 'Torrent action failed.'));
+      }
+    }
+
+    this.activeStreams.delete(targetId);
     this.setStatus({
       status: 'idle',
       torrentId: null,
@@ -363,17 +525,69 @@ class EmbeddedTorrentStreamService {
       prebufferReady: false,
       missingPiecesCount: null,
       elapsedMs: 0,
-      lastError: this.lastError,
+      stopReason: mode,
+      lastError: errors.length ? errors.join(' | ') : null,
+      torrentPaused,
+      torrentState,
+      torrentDownloadRate,
+      torrentUploadRate,
+      pauseVerified,
     });
-    console.info('[EmbeddedTorrentStream] stopped', { streamId: id, torrentId: active.torrentId });
+    if (errors.length) this.lastError = errors.join(' | ');
+    console.info('[EmbeddedTorrentStream] stopped', {
+      streamId: targetId,
+      torrentId: active.torrentId,
+      mode,
+      stoppedMpv,
+      closedSession,
+      torrentAction,
+      removeFiles,
+      partialErrors: errors,
+      pauseVerified,
+      torrentPaused,
+      torrentState,
+      downloadRate: torrentDownloadRate,
+      uploadRate: torrentUploadRate,
+      warning,
+      filesRemoved,
+    });
     return {
-      ok: true,
+      ok: errors.length === 0,
       stopped: true,
-      streamId: id,
+      streamId: targetId,
+      stoppedMpv,
+      closedSession,
+      torrentAction,
+      pauseVerified,
+      torrentPaused,
+      torrentState,
+      downloadRate: torrentDownloadRate,
+      uploadRate: torrentUploadRate,
+      warning,
+      removeFiles,
+      filesRemoved,
+      error: errors.length ? errors.join(' | ') : undefined,
     };
   }
 
+  async shutdown() {
+    const activeIds = Array.from(this.activeStreams.keys());
+    for (const id of activeIds) {
+      await this.stopEmbeddedTorrentStream({ streamId: id, mode: 'playback-only' });
+    }
+  }
+
   getEmbeddedTorrentStreamStatus() {
+    const mpvStatus = this.mpvPlayerService.getMpvStatus?.();
+    if (this.activeStreams.size > 0 && mpvStatus?.status && ['stopped', 'error', 'unavailable'].includes(mpvStatus.status)) {
+      const reason = mpvStatus.status === 'error' ? 'mpv_error' : 'mpv_stopped';
+      this.activeStreams.clear();
+      this.setStatus({
+        status: mpvStatus.status === 'error' ? 'error' : 'idle',
+        stopReason: reason,
+        lastError: mpvStatus?.lastError || this.currentStatus.lastError,
+      });
+    }
     return {
       ok: true,
       status: this.currentStatus.status,
@@ -386,8 +600,14 @@ class EmbeddedTorrentStreamService {
       prebufferReady: this.currentStatus.prebufferReady,
       missingPiecesCount: this.currentStatus.missingPiecesCount,
       elapsedMs: this.currentStatus.elapsedMs,
+      stopReason: this.currentStatus.stopReason,
       activeStreamCount: this.activeStreams.size,
       activeStreams: Array.from(this.activeStreams.values()),
+      torrentPaused: this.currentStatus.torrentPaused,
+      torrentState: this.currentStatus.torrentState,
+      torrentDownloadRate: this.currentStatus.torrentDownloadRate,
+      torrentUploadRate: this.currentStatus.torrentUploadRate,
+      pauseVerified: this.currentStatus.pauseVerified,
       lastError: this.currentStatus.lastError || this.lastError,
     };
   }

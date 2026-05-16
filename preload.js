@@ -130,7 +130,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLocalStreamServerStatus: () => ipcRenderer.invoke('stream:get-server-status'),
   getActiveStreamSessions: () => ipcRenderer.invoke('stream:get-active-sessions'),
   startEmbeddedTorrentStream: (payload) => ipcRenderer.invoke('stream:start-embedded-torrent', payload),
-  stopEmbeddedTorrentStream: (streamId) => ipcRenderer.invoke('stream:stop-embedded-torrent', streamId),
+  stopEmbeddedTorrentStream: (payload) => ipcRenderer.invoke('stream:stop-embedded-torrent', payload),
   getEmbeddedTorrentStreamStatus: () => ipcRenderer.invoke('stream:get-embedded-torrent-status'),
   isDev: IS_DEV,
 });

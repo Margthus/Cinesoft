@@ -225,7 +225,19 @@ class TorrentManager {
 
   /** Pause a torrent. */
   async pause(id) {
-    return this._request('POST', '/pause', { id });
+    const requestId = String(id || '').trim();
+    const result = await this._request('POST', '/pause', { id: requestId });
+    console.info('[TorrentManager:Pause]', {
+      id: requestId,
+      ok: Boolean(result?.ok),
+      paused: result?.paused ?? result?.isPaused ?? null,
+      state: result?.state ?? null,
+      downloadRate: result?.downloadRate ?? null,
+      uploadRate: result?.uploadRate ?? null,
+      error: result?.error || null,
+      raw: result,
+    });
+    return result;
   }
 
   /** Resume a torrent. */
