@@ -3,7 +3,6 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
-const os = require('os');
 const http = require('http');
 const https = require('https');
 const axios = require('axios');
@@ -31,7 +30,6 @@ let completionNotificationBootstrapped = false;
 const completedTorrentNotified = new Set();
 const appLogs = [];
 const MAX_APP_LOGS = 500;
-let vpnDisconnectPauseNotified = false;
 let mainWindow = null;
 let appTray = null;
 let trayAvailable = false;
@@ -1078,112 +1076,6 @@ const saveTorrentSettings = (nextSettings = {}) => {
   return merged;
 };
 
-const getPrivacyNetworkSettings = () => ({
-  showVpnReminderBeforeTorrentDownload: store.get('showVpnReminderBeforeTorrentDownload') === true,
-  warnIfNoVpnAdapterDetected: store.get('warnIfNoVpnAdapterDetected') === true,
-  pauseTorrentOnVpnDisconnect: store.get('pauseTorrentOnVpnDisconnect') === true,
-  requireConfirmationWithoutVpn: store.get('requireConfirmationWithoutVpn') === true,
-});
-
-const VPN_LIKE_ADAPTER_KEYWORDS = [
-  'vpn',
-  'wireguard',
-  'wintun',
-  'openvpn',
-  'tap',
-  'tun',
-  'nordlynx',
-  'tailscale',
-  'zerotier',
-  'proton',
-  'expressvpn',
-  'surfshark',
-  'mullvad',
-];
-
-const detectVpnLikeNetworkAdapter = () => {
-  const interfaces = os.networkInterfaces() || {};
-  const names = Object.keys(interfaces);
-  const activeNames = names.filter((name) => {
-    const rows = Array.isArray(interfaces[name]) ? interfaces[name] : [];
-    return rows.some((entry) => entry && entry.internal === false);
-  });
-  const detectedName = activeNames.find((name) => {
-    const normalized = String(name || '').toLowerCase();
-    return VPN_LIKE_ADAPTER_KEYWORDS.some((keyword) => normalized.includes(keyword));
-  }) || '';
-  return {
-    detected: Boolean(detectedName),
-    detectedName,
-    activeNames,
-  };
-};
-
-const askVpnAwareDownloadConfirmation = async (event, actionLabel = 'torrent download') => {
-  const privacy = getPrivacyNetworkSettings();
-  if (
-    !privacy.showVpnReminderBeforeTorrentDownload
-    && !privacy.warnIfNoVpnAdapterDetected
-    && !privacy.requireConfirmationWithoutVpn
-  ) {
-    return { ok: true };
-  }
-
-  const isTr = String(store.get('language') || 'tr') === 'tr';
-  const ownerWindow = BrowserWindow.fromWebContents(event?.sender) || mainWindow || undefined;
-
-  if (privacy.showVpnReminderBeforeTorrentDownload) {
-    const reminder = await dialog.showMessageBox(ownerWindow, {
-      type: 'info',
-      buttons: isTr ? ['Devam Et', 'Iptal'] : ['Continue', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-      title: 'CineSoft',
-      message: isTr ? 'Torrent indirme oncesi VPN kullanmaniz onerilir.' : 'Using a VPN is recommended before starting torrent downloads.',
-      detail: isTr
-        ? `${actionLabel} islemi baslatilacak. Devam etmek istiyor musunuz?`
-        : `${actionLabel} will be started. Do you want to continue?`,
-    });
-    if (reminder.response !== 0) {
-      return { ok: false, cancelled: true, error: isTr ? 'Indirme iptal edildi.' : 'Download cancelled.' };
-    }
-  }
-
-  const vpnStatus = detectVpnLikeNetworkAdapter();
-  if (!vpnStatus.detected && privacy.warnIfNoVpnAdapterDetected) {
-    await dialog.showMessageBox(ownerWindow, {
-      type: 'warning',
-      buttons: [isTr ? 'Tamam' : 'OK'],
-      defaultId: 0,
-      noLink: true,
-      title: 'CineSoft',
-      message: isTr ? 'VPN benzeri bir ag bagdastiricisi tespit edilemedi.' : 'No VPN-like network adapter was detected.',
-      detail: isTr
-        ? 'VPN olmadan torrent indirmeye devam etmek gizlilik acisindan riskli olabilir.'
-        : 'Continuing torrent downloads without VPN may be a privacy risk.',
-    });
-  }
-
-  if (!vpnStatus.detected && privacy.requireConfirmationWithoutVpn) {
-    const confirm = await dialog.showMessageBox(ownerWindow, {
-      type: 'warning',
-      buttons: isTr ? ['VPN olmadan devam et', 'Iptal'] : ['Continue without VPN', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-      title: 'CineSoft',
-      message: isTr ? 'VPN baglantisi olmadan indirme baslatilacak.' : 'Download will start without a VPN connection.',
-      detail: isTr ? 'Yine de devam etmek istiyor musunuz?' : 'Do you still want to continue?',
-    });
-    if (confirm.response !== 0) {
-      return { ok: false, cancelled: true, error: isTr ? 'Indirme iptal edildi.' : 'Download cancelled.' };
-    }
-  }
-
-  return { ok: true };
-};
-
 let torrentRulesInterval = null;
 let shutdownTriggeredForCompletion = false;
 
@@ -1209,29 +1101,8 @@ const enforceTorrentRules = async () => {
   if (!torrentManager) return;
   try {
     const settings = getTorrentSettings();
-    const privacy = getPrivacyNetworkSettings();
     const all = await torrentManager.getAll();
     const torrents = Array.isArray(all?.torrents) ? all.torrents : [];
-
-    if (privacy.pauseTorrentOnVpnDisconnect) {
-      const vpnStatus = detectVpnLikeNetworkAdapter();
-      if (!vpnStatus.detected) {
-        const activeTorrents = torrents.filter((torrent) => !torrent.done && !torrent.paused);
-        for (const torrent of activeTorrents) {
-          await torrentManager.pause(torrent.id);
-        }
-        if (activeTorrents.length > 0 && !vpnDisconnectPauseNotified) {
-          vpnDisconnectPauseNotified = true;
-          logSafeEvent('torrent', 'vpn_disconnected', 'Active torrents paused because VPN-like adapter was not detected', {
-            pausedCount: activeTorrents.length,
-          });
-        }
-      } else {
-        vpnDisconnectPauseNotified = false;
-      }
-    } else {
-      vpnDisconnectPauseNotified = false;
-    }
 
     updateCompletionNotifications(torrents);
     const manuallyPausedIds = getManuallyPausedIds();
@@ -1525,18 +1396,6 @@ if (!store.has('stopManagedEnginesOnExit')) {
 }
 if (!store.has('confirmExitWhileDownloading')) {
   store.set('confirmExitWhileDownloading', true);
-}
-if (!store.has('showVpnReminderBeforeTorrentDownload')) {
-  store.set('showVpnReminderBeforeTorrentDownload', false);
-}
-if (!store.has('warnIfNoVpnAdapterDetected')) {
-  store.set('warnIfNoVpnAdapterDetected', false);
-}
-if (!store.has('pauseTorrentOnVpnDisconnect')) {
-  store.set('pauseTorrentOnVpnDisconnect', false);
-}
-if (!store.has('requireConfirmationWithoutVpn')) {
-  store.set('requireConfirmationWithoutVpn', false);
 }
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
@@ -2650,10 +2509,6 @@ ipcMain.handle('get-settings', () => {
     closeToTray: store.get('closeToTray') !== false,
     stopManagedEnginesOnExit: store.get('stopManagedEnginesOnExit') !== false,
     confirmExitWhileDownloading: store.get('confirmExitWhileDownloading') !== false,
-    showVpnReminderBeforeTorrentDownload: store.get('showVpnReminderBeforeTorrentDownload') === true,
-    warnIfNoVpnAdapterDetected: store.get('warnIfNoVpnAdapterDetected') === true,
-    pauseTorrentOnVpnDisconnect: store.get('pauseTorrentOnVpnDisconnect') === true,
-    requireConfirmationWithoutVpn: store.get('requireConfirmationWithoutVpn') === true,
     prowlarr,
     torrentioEnabled: store.get('torrentioEnabled') || false,
     embeddedTorrentEnabled: store.get('embeddedTorrentEnabled') !== false,
@@ -2780,10 +2635,6 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('closeToTray', settings.closeToTray !== false);
   store.set('stopManagedEnginesOnExit', settings.stopManagedEnginesOnExit !== false);
   store.set('confirmExitWhileDownloading', settings.confirmExitWhileDownloading !== false);
-  store.set('showVpnReminderBeforeTorrentDownload', settings.showVpnReminderBeforeTorrentDownload === true);
-  store.set('warnIfNoVpnAdapterDetected', settings.warnIfNoVpnAdapterDetected === true);
-  store.set('pauseTorrentOnVpnDisconnect', settings.pauseTorrentOnVpnDisconnect === true);
-  store.set('requireConfirmationWithoutVpn', settings.requireConfirmationWithoutVpn === true);
   store.set('prowlarr', settings.prowlarr || {});
   store.set('torrentioEnabled', settings.torrentioEnabled || false);
   store.set('embeddedTorrentEnabled', settings.embeddedTorrentEnabled !== false);
@@ -3689,12 +3540,6 @@ ipcMain.handle('prowlarr:syncSonarr', async () => {
 
 ipcMain.handle('torrent-add', async (event, opts) => {
   try {
-    if (opts?.mode === 'download') {
-      const policy = await askVpnAwareDownloadConfirmation(event, 'torrent download');
-      if (!policy.ok) {
-        return { ok: false, cancelled: policy.cancelled === true, error: policy.error || 'Download cancelled' };
-      }
-    }
     const tm = await ensureTorrentManager();
     const result = await tm.add(opts);
     if (result?.ok && opts?.mode === 'download') {
@@ -3736,12 +3581,6 @@ ipcMain.handle('torrent-get-files', async (event, id) => {
 
 ipcMain.handle('torrent-select-files', async (event, id, fileIndexes = [], resume = true, sequentialDownload = false) => {
   try {
-    if (resume) {
-      const policy = await askVpnAwareDownloadConfirmation(event, 'torrent download');
-      if (!policy.ok) {
-        return { ok: false, cancelled: policy.cancelled === true, error: policy.error || 'Download cancelled' };
-      }
-    }
     const tm = await ensureTorrentManager();
     const result = await tm.selectFiles(id, fileIndexes, resume, sequentialDownload);
     if (result?.ok && id) {
@@ -3853,10 +3692,6 @@ ipcMain.handle('torrent-pause', async (event, id) => {
 
 ipcMain.handle('torrent-resume', async (event, id) => {
   try {
-    const policy = await askVpnAwareDownloadConfirmation(event, 'torrent download');
-    if (!policy.ok) {
-      return { ok: false, cancelled: policy.cancelled === true, error: policy.error || 'Download cancelled' };
-    }
     const tm = await ensureTorrentManager();
     const result = await tm.resume(id);
     if (result?.ok) {
