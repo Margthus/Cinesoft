@@ -996,6 +996,8 @@ class APIHandler(BaseHTTPRequestHandler):
     def _handle_pause(self):
         data = self._read_json()
         raw_tid = data.get("id")
+        force = bool(data.get("force", False))
+        reason = str(data.get("reason") or "").strip()
         if raw_tid is None:
             self._send_json({"ok": False, "error": "Not found"}, 404)
             return
@@ -1009,9 +1011,16 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "Torrent removed"}, 410)
             return
 
+        auto_managed_disabled = False
         try:
             # Explicit handle-level pause for this torrent only.
             handle.pause()
+            if force:
+                try:
+                    handle.unset_flags(lt.torrent_flags.auto_managed)
+                    auto_managed_disabled = True
+                except Exception as exc:
+                    log_warning("pause_force_unset_auto_managed_failed", torrent=tid, error=str(exc))
         except Exception as exc:
             self._send_json({"ok": False, "error": f"Pause failed: {exc}"}, 500)
             return
@@ -1042,6 +1051,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "state": state,
             "downloadRate": download_rate,
             "uploadRate": upload_rate,
+            "force": force,
+            "reason": reason,
+            "autoManagedDisabled": auto_managed_disabled if force else False,
         })
 
     def _handle_resume(self):
@@ -1210,6 +1222,7 @@ class APIHandler(BaseHTTPRequestHandler):
         start_raw = data.get("start")
         end_raw = data.get("end")
         deadline_ms_raw = data.get("deadlineMs", 1000)
+        allow_resume_raw = data.get("allowResume", True)
 
         if not torrent_id:
             self._send_json({"ok": False, "ready": False, "error": "torrentId is required"}, 400)
@@ -1223,6 +1236,7 @@ class APIHandler(BaseHTTPRequestHandler):
             start = int(start_raw)
             end = int(end_raw)
             deadline_ms = max(1, int(deadline_ms_raw))
+            allow_resume = bool(allow_resume_raw)
         except Exception:
             self._send_json({"ok": False, "ready": False, "error": "fileIndex/start/end/deadlineMs must be integers"}, 400)
             return
@@ -1248,24 +1262,26 @@ class APIHandler(BaseHTTPRequestHandler):
             response["deadlineErrors"] = []
             response["resumed"] = False
             response["sequentialEnabled"] = False
+            response["allowResume"] = allow_resume
             self._send_json(response)
             return
 
         resumed = False
         sequential_enabled = False
-        try:
-            handle.unset_flags(lt.torrent_flags.paused)
-        except Exception:
-            pass
-        try:
-            handle.unset_flags(lt.torrent_flags.upload_mode)
-        except Exception:
-            pass
-        try:
-            handle.resume()
-            resumed = True
-        except Exception as exc:
-            log_warning("stream_ensure_resume_failed", torrent=torrent_id, error=str(exc))
+        if allow_resume:
+            try:
+                handle.unset_flags(lt.torrent_flags.paused)
+            except Exception:
+                pass
+            try:
+                handle.unset_flags(lt.torrent_flags.upload_mode)
+            except Exception:
+                pass
+            try:
+                handle.resume()
+                resumed = True
+            except Exception as exc:
+                log_warning("stream_ensure_resume_failed", torrent=torrent_id, error=str(exc))
         try:
             handle.set_flags(lt.torrent_flags.sequential_download)
             sequential_enabled = True
@@ -1328,6 +1344,7 @@ class APIHandler(BaseHTTPRequestHandler):
         response["deadlineMs"] = deadline_ms
         response["resumed"] = resumed
         response["sequentialEnabled"] = sequential_enabled
+        response["allowResume"] = allow_resume
         self._send_json(response)
 
 

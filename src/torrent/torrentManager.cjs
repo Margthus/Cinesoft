@@ -250,7 +250,7 @@ class TorrentManager {
   }
 
   /** Ensure torrent pieces for a byte range are prioritized/deadlined. */
-  async ensureRange({ torrentId, fileIndex, start, end, deadlineMs = 1000 } = {}) {
+  async ensureRange({ torrentId, fileIndex, start, end, deadlineMs = 1000, allowResume = true } = {}) {
     try {
       const result = await this._request('POST', '/stream/ensure-range', {
         torrentId,
@@ -258,6 +258,7 @@ class TorrentManager {
         start,
         end,
         deadlineMs,
+        allowResume,
       }, 10000);
       const isMinimum = Number(start) === 0 && Number(end) <= (2 * 1024 * 1024 - 1);
       if (DEBUG_STREAM_SERVER || isMinimum) {
@@ -267,6 +268,7 @@ class TorrentManager {
           start,
           end,
           deadlineMs,
+          allowResume,
           raw: compactEnsureDebug(result),
         });
       }
@@ -282,11 +284,18 @@ class TorrentManager {
 
 
   /** Pause a torrent. */
-  async pause(id) {
+  async pause(id, options = {}) {
     const requestId = String(id || '').trim();
-    const result = await this._request('POST', '/pause', { id: requestId });
+    const payload = {
+      id: requestId,
+      force: options?.force === true,
+      reason: String(options?.reason || '').trim() || undefined,
+    };
+    const result = await this._request('POST', '/pause', payload);
     console.info('[TorrentManager:Pause]', {
       id: requestId,
+      force: payload.force === true,
+      reason: payload.reason || null,
       ok: Boolean(result?.ok),
       paused: result?.paused ?? result?.isPaused ?? null,
       state: result?.state ?? null,

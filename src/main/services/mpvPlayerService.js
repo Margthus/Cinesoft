@@ -55,6 +55,7 @@ const sanitizeStartOptions = (options = {}) => {
   if (typeof options.mode === 'string') safe.mode = String(options.mode).trim().toLowerCase();
   if (typeof options.embedded === 'boolean') safe.embedded = options.embedded;
   if (typeof options.renderMode === 'string') safe.renderMode = String(options.renderMode).trim().toLowerCase();
+  if (typeof options.isPlayerMode === 'boolean') safe.isPlayerMode = options.isPlayerMode;
   if (options.bounds && typeof options.bounds === 'object' && !Array.isArray(options.bounds)) {
     safe.bounds = sanitizeBounds(options.bounds);
   }
@@ -498,6 +499,18 @@ class MpvPlayerService {
     }
 
     if (mode === 'native-host') {
+      const hasIncomingBounds = Boolean(safeOptions.bounds && typeof safeOptions.bounds === 'object');
+      console.info('[MpvPlayer:NativeHostBounds]', {
+        phase: 'start-request',
+        bounds: hasIncomingBounds ? sanitizeBounds(safeOptions.bounds) : null,
+        fallbackUsed: !hasIncomingBounds,
+        isPlayerMode: safeOptions.isPlayerMode === true,
+      });
+      if (safeOptions.isPlayerMode === true && !hasIncomingBounds) {
+        this.setStatus(MPV_STATUSES.ERROR);
+        this.lastError = 'Missing fullscreen bounds for player mode.';
+        return { ok: false, status: this.status, error: this.lastError };
+      }
       // TODO: Embedded libtorrent streaming servisi hazir oldugunda local stream URL burada kullanılacak.
       // startNativeHostPlayback({ sourceType:'embedded-stream-url', source: streamUrl })
       // TODO: Embedded downloader ile inmis video dosyasi bu modelle oynatilacak.
@@ -684,6 +697,7 @@ class MpvPlayerService {
       return { ok: false, status: this.status, error: this.lastError };
     }
 
+    const fallbackUsed = !(bounds && typeof bounds === 'object');
     const launchBounds = bounds && typeof bounds === 'object'
       ? sanitizeBounds(bounds)
       : this.getLastNativeHostBounds();
@@ -737,6 +751,11 @@ class MpvPlayerService {
     this.lastHostOutput = '';
     this.lastProcessOutput = '';
     this.hostStartedAt = Date.now();
+    console.info('[MpvPlayer:NativeHostBounds]', {
+      phase: 'final-spawn',
+      bounds: this.lastNativeHostBounds,
+      fallbackUsed,
+    });
     console.info('[MpvPlayer] spawning native host process', {
       shell: spawnOptions.shell,
       windowsHide: spawnOptions.windowsHide,
@@ -963,3 +982,4 @@ module.exports = {
   mpvPlayerService,
   MPV_STATUSES,
 };
+

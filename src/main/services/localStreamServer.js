@@ -54,6 +54,7 @@ class LocalStreamServer {
     this.port = null;
     this.torrentRangeChecker = null;
     this.torrentEnsureRange = null;
+    this.torrentPausedLockChecker = null;
   }
 
   setTorrentRangeChecker(checker) {
@@ -62,6 +63,10 @@ class LocalStreamServer {
 
   setTorrentEnsureRange(ensurer) {
     this.torrentEnsureRange = typeof ensurer === 'function' ? ensurer : null;
+  }
+
+  setTorrentPausedLockChecker(checker) {
+    this.torrentPausedLockChecker = typeof checker === 'function' ? checker : null;
   }
 
   shouldSkipDuplicateEnsure(sessionRef, rangeKey) {
@@ -106,12 +111,38 @@ class LocalStreamServer {
         continue;
       }
       sessionRef.lastPrefetchAt = Date.now();
+      const liveSession = this.streamSessionManager.getSession(streamId, { raw: true });
+      if (!liveSession) {
+        console.info('[LocalStreamServer:Prefetch]', {
+          streamId,
+          torrentId,
+          fileIndex,
+          baseStart,
+          baseEnd,
+          prefetchStart,
+          prefetchEnd,
+          chunkIndex,
+          skippedDuplicate: false,
+          skippedClosedSession: true,
+        });
+        continue;
+      }
+      if (this.torrentPausedLockChecker?.(torrentId)) {
+        console.info('[EmbeddedTorrentStream:PausedLock]', {
+          torrentId,
+          phase: 'prefetch',
+          action: 'skip ensure/prefetch',
+          streamId,
+        });
+        continue;
+      }
       this.torrentEnsureRange({
         torrentId,
         fileIndex,
         start: prefetchStart,
         end: prefetchEnd,
         deadlineMs: 1000,
+        allowResume: false,
       }).then((result) => {
         console.info('[LocalStreamServer:Prefetch]', {
           streamId,
@@ -475,6 +506,14 @@ class LocalStreamServer {
             });
             if (!pieceReady) {
               if (this.torrentEnsureRange) {
+                if (this.torrentPausedLockChecker?.(torrentId)) {
+                  console.info('[EmbeddedTorrentStream:PausedLock]', {
+                    torrentId,
+                    phase: 'request',
+                    action: 'skip ensure/prefetch',
+                    streamId,
+                  });
+                } else {
                 const ensureKey = `${torrentId}:${fileIndex}:${start}:${end}`;
                 const skippedDuplicate = this.shouldSkipDuplicateEnsure(sessionRef, ensureKey);
                 try {
@@ -485,6 +524,7 @@ class LocalStreamServer {
                       start,
                       end,
                       deadlineMs: 1000,
+                      allowResume: false,
                     });
                     console.info('[TorrentEnsureRange]', {
                       torrentId,
@@ -516,6 +556,7 @@ class LocalStreamServer {
                     end,
                     error: String(ensureError?.message || ensureError),
                   });
+                }
                 }
               }
               sendWithLog(503, {

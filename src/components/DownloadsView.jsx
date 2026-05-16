@@ -66,6 +66,23 @@ const formatTorrentTitle = (torrent) => {
   return torrent.title || torrent.name || torrent.mediaInfo?.title || torrent.mediaInfo?.name || 'Torrent';
 };
 
+const normalizeTorrentUiState = (torrent = {}) => {
+  const paused = Boolean(
+    torrent?.paused === true
+    || torrent?.isPaused === true
+    || String(torrent?.status || '').toLowerCase() === 'paused'
+  );
+  const errored = Boolean(String(torrent?.status || '').toLowerCase() === 'error');
+  const progress = Number(torrent?.progress || 0);
+  const done = Boolean(torrent?.done) || progress >= 100;
+  const downloadRate = Number(torrent?.downloadSpeed ?? torrent?.downloadRate ?? 0) || 0;
+  if (paused) return 'paused';
+  if (errored) return 'error';
+  if (done) return 'completed';
+  if (downloadRate > 0) return 'downloading';
+  return 'idle';
+};
+
 const DownloadsView = ({ settings }) => {
   const isTr = settings.language === 'tr';
   const nativeStreamEnabled = (window.electronAPI?.isDev === true)
@@ -475,10 +492,27 @@ const TorrentSection = ({ title, count, icon, children }) => (
 const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown, canStream, onStream }) => {
   const [showFileProgress, setShowFileProgress] = useState(false);
   const posterUrl = torrent.mediaInfo?.poster || '';
-  const isDone = torrent.done;
-  const isPaused = torrent.paused;
-  const statusText = isPaused ? t.paused : isDone ? t.seeding : t.downloading;
-  const statusClass = isPaused ? 'status-paused' : isDone ? 'status-completed' : 'status-downloading';
+  const uiState = normalizeTorrentUiState(torrent);
+  const isDone = uiState === 'completed';
+  const isPaused = uiState === 'paused';
+  const statusText = isPaused
+    ? t.paused
+    : isDone
+      ? t.seeding
+      : uiState === 'error'
+        ? 'Error'
+        : uiState === 'idle'
+          ? 'Idle'
+          : t.downloading;
+  const statusClass = isPaused
+    ? 'status-paused'
+    : isDone
+      ? 'status-completed'
+      : uiState === 'error'
+        ? 'status-error'
+        : 'status-downloading';
+  const displayDownloadSpeed = isPaused ? 0 : (Number(torrent.downloadSpeed || 0) || 0);
+  const displayUploadSpeed = isPaused ? 0 : (Number(torrent.uploadSpeed || 0) || 0);
   const selectedVideoFiles = Array.isArray(torrent.selectedVideoFiles) ? torrent.selectedVideoFiles : [];
   const streamable = canStream && Boolean(
     torrent?.mediaInfo?.magnet
@@ -516,8 +550,8 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
           </div>
         )}
         <div className="torrent-stats">
-          <TorrentStat icon={<ArrowDown size={13} />} text={formatSpeed(torrent.downloadSpeed)} />
-          <TorrentStat icon={<ArrowUp size={13} />} text={formatSpeed(torrent.uploadSpeed)} />
+          <TorrentStat icon={<ArrowDown size={13} />} text={formatSpeed(displayDownloadSpeed)} />
+          <TorrentStat icon={<ArrowUp size={13} />} text={formatSpeed(displayUploadSpeed)} />
           <TorrentStat icon={<Users size={13} />} text={`${torrent.numPeers} ${t.peers}`} />
           {!isDone && <TorrentStat icon={<Clock size={13} />} text={formatETA(torrent.timeRemaining)} />}
           <TorrentStat icon={<HardDrive size={13} />} text={`${formatSize(torrent.downloaded)} / ${formatSize(torrent.totalSize)}`} />

@@ -1346,10 +1346,13 @@ localStreamServer.setTorrentRangeChecker(async ({ torrentId, fileIndex, start, e
   const tm = await ensureTorrentManager();
   return tm.checkRangeStatus({ torrentId, fileIndex, start, end });
 });
-localStreamServer.setTorrentEnsureRange(async ({ torrentId, fileIndex, start, end, deadlineMs }) => {
+localStreamServer.setTorrentEnsureRange(async ({ torrentId, fileIndex, start, end, deadlineMs, allowResume }) => {
   const tm = await ensureTorrentManager();
-  return tm.ensureRange({ torrentId, fileIndex, start, end, deadlineMs });
+  return tm.ensureRange({ torrentId, fileIndex, start, end, deadlineMs, allowResume });
 });
+localStreamServer.setTorrentPausedLockChecker((torrentId) => (
+  embeddedTorrentStreamService?.isTorrentLocked?.(torrentId) === true
+));
 
 embeddedTorrentStreamService = new EmbeddedTorrentStreamService({
   getTorrentManager: ensureTorrentManager,
@@ -4048,6 +4051,9 @@ ipcMain.handle('torrent-resume', async (event, id) => {
     const tm = await ensureTorrentManager();
     const result = await tm.resume(id);
     if (result?.ok) {
+      embeddedTorrentStreamService?.onTorrentResumed?.(id);
+    }
+    if (result?.ok) {
       const all = await tm.getAll();
       const current = (all?.torrents || []).find((torrent) => torrent.id === id);
       if (current) {
@@ -4912,6 +4918,13 @@ ipcMain.handle('stream:get-active-sessions', async () => {
 
 ipcMain.handle('stream:start-embedded-torrent', async (event, payload = {}) => {
   try {
+    console.info('[IPC:StartEmbeddedTorrentStream]', {
+      sourceKind: payload?.sourceKind || null,
+      title: payload?.title || null,
+      isPlayerMode: payload?.isPlayerMode === true,
+      bounds: payload?.bounds || null,
+      hasBounds: Boolean(payload?.bounds && typeof payload.bounds === 'object'),
+    });
     return await embeddedTorrentStreamService.startEmbeddedTorrentStream(payload);
   } catch (error) {
     return { ok: false, error: error?.message || 'Failed to start embedded torrent stream.' };

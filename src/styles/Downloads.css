@@ -294,6 +294,12 @@
   color: #7cf0b2;
 }
 
+.status-error {
+  background: rgba(255, 70, 70, 0.12);
+  border-color: rgba(255, 70, 70, 0.24);
+  color: #ff9d9d;
+}
+
 .torrent-progress-container {
   display: flex;
   align-items: center;

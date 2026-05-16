@@ -611,7 +611,7 @@
 
 .mpv-debug-panel {
   position: fixed;
-  top: 16px;
+  top: 52px;
   right: 16px;
   z-index: 9500;
   display: flex;
@@ -629,6 +629,38 @@
   line-height: 1.35;
   pointer-events: auto;
   backdrop-filter: blur(6px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.mpv-debug-panel.closed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(18px);
+}
+
+.mpv-debug-panel.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.mpv-debug-toggle {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9600;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 8px;
+  background: rgba(5, 10, 20, 0.92);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.mpv-debug-toggle:hover {
+  background: rgba(12, 22, 40, 0.95);
 }
 
 .mpv-debug-input {
@@ -690,6 +722,119 @@
 
 .mpv-native-slot-wrap {
   padding: 1rem 1rem 0;
+}
+
+.player-mode-active {
+  overflow: hidden;
+}
+
+.cinesoft-player-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cinesoft-player-topbar {
+  height: 52px;
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: rgba(0, 0, 0, 0.92);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 10002;
+}
+
+.player-topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.player-title {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50vw;
+}
+
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.player-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fullscreen-player-slot {
+  position: relative;
+  width: 100vw;
+  height: calc(100vh - 52px);
+  max-height: calc(100vh - 52px);
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: #000;
+  border: 0;
+  border-radius: 0;
+  max-width: none;
+  aspect-ratio: auto;
+}
+
+.player-close-button {
+  position: static;
+  z-index: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.player-overlay-status {
+  position: absolute;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.player-overlay-status span {
+  color: #fff;
+  font-size: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.58);
 }
 
 .embedded-player-controls {

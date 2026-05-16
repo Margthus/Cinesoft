@@ -6,6 +6,8 @@ const MINIMUM_PREBUFFER_BYTES = STREAM_CHUNK_SIZE_BYTES;
 const TARGET_PREBUFFER_BYTES = 8 * 1024 * 1024;
 const PREBUFFER_TIMEOUT_MS = 30000;
 const PREBUFFER_POLL_MS = 1000;
+const NO_PROGRESS_TIMEOUT_MS = 30000;
+const MAX_PREBUFFER_WAIT_MS = 180000;
 const MINIMUM_DEADLINE_MS = 250;
 const TARGET_DEADLINE_MS = 1000;
 const MINIMUM_ENSURE_INTERVAL_MS = 1000;
@@ -15,6 +17,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PAUSE_VERIFY_TIMEOUT_MS = 5000;
 const PAUSE_VERIFY_POLL_MS = 500;
 const PAUSE_VERIFY_MAX_DOWNLOAD_RATE = 1024;
+const PAUSE_VERIFY_MAX_ATTEMPTS = 3;
 
 const normalizeTorrentStatus = (status = {}) => {
   const paused = Boolean(status?.isPaused ?? status?.paused);
@@ -51,8 +54,16 @@ class EmbeddedTorrentStreamService {
     this.localStreamServer = localStreamServer;
     this.mpvPlayerService = mpvPlayerService;
     this.activeStreams = new Map();
+    this.runCounter = 0;
+    this.currentRunId = null;
+    this.cancelledRuns = new Map();
+    this.pausedByStream = new Set();
+    this.pauseWatchdogs = new Map();
     this.lastError = null;
     this.currentStatus = {
+      runId: null,
+      cancelled: false,
+      stopRequested: false,
       status: 'idle',
       torrentId: null,
       fileIndex: null,
@@ -88,6 +99,19 @@ class EmbeddedTorrentStreamService {
       torrentDownloadRate: null,
       torrentUploadRate: null,
       pauseVerified: null,
+      waitingForFirstPiece: false,
+      firstPiece: null,
+      pieceLength: null,
+      firstPieceAvailability: null,
+      totalWantedDone: null,
+      lastProgressAt: null,
+      noProgressElapsedMs: null,
+      lastPauseAttemptAt: null,
+      pauseRetryCount: 0,
+      pausedByStream: false,
+      pauseWatchdogActive: false,
+      pauseWatchdogRepauses: 0,
+      lastPauseWatchdogAt: null,
     };
   }
 
@@ -96,6 +120,113 @@ class EmbeddedTorrentStreamService {
       ...this.currentStatus,
       ...next,
     };
+  }
+
+  createRunId() {
+    this.runCounter += 1;
+    return `run-${Date.now()}-${this.runCounter}`;
+  }
+
+  startRun(runId) {
+    this.currentRunId = runId;
+    this.cancelledRuns.delete(runId);
+  }
+
+  cancelRun(runId, reason = 'stop-requested') {
+    if (!runId) return;
+    this.cancelledRuns.set(runId, { cancelled: true, reason, at: Date.now() });
+  }
+
+  isRunActive(runId) {
+    if (!runId) return false;
+    if (this.currentRunId !== runId) return false;
+    if (this.cancelledRuns.has(runId)) return false;
+    return true;
+  }
+
+  throwIfRunCancelled(runId) {
+    if (!this.isRunActive(runId)) {
+      const info = this.cancelledRuns.get(runId) || {};
+      const err = new Error(`stream cancelled (${String(info.reason || 'unknown')})`);
+      err.code = 'RUN_CANCELLED';
+      throw err;
+    }
+  }
+
+  isTorrentLocked(torrentId) {
+    const id = String(torrentId || '').trim();
+    return id ? this.pausedByStream.has(id) : false;
+  }
+
+  clearPausedLock(torrentId) {
+    const id = String(torrentId || '').trim();
+    if (!id) return;
+    this.pausedByStream.delete(id);
+    const watchdog = this.pauseWatchdogs.get(id);
+    if (watchdog?.timer) clearInterval(watchdog.timer);
+    this.pauseWatchdogs.delete(id);
+  }
+
+  startPauseWatchdog(torrentId) {
+    const id = String(torrentId || '').trim();
+    if (!id) return;
+    const existing = this.pauseWatchdogs.get(id);
+    if (existing?.timer) {
+      clearInterval(existing.timer);
+    }
+    const startedAt = Date.now();
+    const state = { timer: null, repauses: 0, startedAt, lastAt: startedAt };
+    state.timer = setInterval(async () => {
+      if (!this.pausedByStream.has(id)) {
+        if (state.timer) clearInterval(state.timer);
+        this.pauseWatchdogs.delete(id);
+        return;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > 20000) {
+        if (state.timer) clearInterval(state.timer);
+        this.pauseWatchdogs.delete(id);
+        this.setStatus({ pauseWatchdogActive: false });
+        return;
+      }
+      try {
+        const tm = await this.getTorrentManager();
+        const st = await tm.getStatus(id);
+        const normalized = normalizeTorrentStatus(st);
+        if (!normalized.paused || normalized.downloadRate > 1024) {
+          state.repauses += 1;
+          state.lastAt = Date.now();
+          await tm.pause(id, { force: true, reason: 'pause-watchdog' });
+          console.info('[EmbeddedTorrentStream:PauseWatchdog]', {
+            torrentId: id,
+            phase: 're-paused',
+            repauses: state.repauses,
+            paused: normalized.paused,
+            downloadRate: normalized.downloadRate,
+          });
+          this.setStatus({
+            pauseWatchdogRepauses: state.repauses,
+            lastPauseWatchdogAt: state.lastAt,
+          });
+        }
+      } catch (error) {
+        console.warn('[EmbeddedTorrentStream:PauseWatchdog]', {
+          torrentId: id,
+          phase: 'error',
+          error: String(error?.message || error),
+        });
+      }
+    }, 2000);
+    this.pauseWatchdogs.set(id, state);
+    this.setStatus({
+      pauseWatchdogActive: true,
+      pauseWatchdogRepauses: 0,
+      lastPauseWatchdogAt: startedAt,
+    });
+  }
+
+  onTorrentResumed(torrentId) {
+    this.clearPausedLock(torrentId);
   }
 
   normalizeSourceInput(options = {}) {
@@ -126,11 +257,16 @@ class EmbeddedTorrentStreamService {
     return payload;
   }
 
-  async resolveTorrentFiles(tm, torrentId, prepareResult) {
+  async resolveTorrentFiles(tm, torrentId, prepareResult, shouldContinue = null) {
     let files = Array.isArray(prepareResult?.files) ? prepareResult.files : [];
     if (files.length) return files;
 
     for (let i = 0; i < 60; i += 1) {
+      if (typeof shouldContinue === 'function' && !shouldContinue()) {
+        const err = new Error('stream cancelled (resolve-files)');
+        err.code = 'RUN_CANCELLED';
+        throw err;
+      }
       const latest = await tm.getFiles(torrentId);
       if (latest?.ok && Array.isArray(latest.files) && latest.files.length) {
         return latest.files;
@@ -167,12 +303,28 @@ class EmbeddedTorrentStreamService {
 
   async startEmbeddedTorrentStream(options = {}) {
     try {
+      const runId = this.createRunId();
+      this.startRun(runId);
       const { source, sourceKind } = this.normalizeSourceInput(options);
       const title = String(options?.title || 'Embedded Torrent Stream').trim();
       const bounds = options?.bounds && typeof options.bounds === 'object' ? options.bounds : undefined;
+      const isPlayerMode = options?.isPlayerMode === true;
+      console.info('[EmbeddedTorrentStream:StartBounds]', {
+        sourceKind,
+        title,
+        isPlayerMode,
+        bounds: bounds || null,
+        fallbackUsed: !bounds,
+      });
+      if (isPlayerMode && !bounds) {
+        console.warn('[EmbeddedTorrentStream:StartBounds] Missing fullscreen bounds for player mode');
+      }
       const startedAt = Date.now();
       console.info('[EmbeddedTorrentStream] start requested', { sourceKind });
       this.setStatus({
+        runId,
+        cancelled: false,
+        stopRequested: false,
         status: 'preparing',
         torrentId: null,
         fileIndex: null,
@@ -208,16 +360,36 @@ class EmbeddedTorrentStreamService {
         torrentDownloadRate: null,
         torrentUploadRate: null,
         pauseVerified: null,
+        waitingForFirstPiece: false,
+        firstPiece: null,
+        pieceLength: null,
+        firstPieceAvailability: null,
+        totalWantedDone: null,
+        lastProgressAt: null,
+        noProgressElapsedMs: null,
+        lastPauseAttemptAt: null,
+        pauseRetryCount: 0,
       });
 
       const tm = await this.getTorrentManager();
+      this.throwIfRunCancelled(runId);
       const preparePayload = this.buildPreparePayload({ source, sourceKind, title });
       const prepareResult = await tm.prepare(preparePayload);
+      this.throwIfRunCancelled(runId);
       if (!prepareResult?.ok || !prepareResult?.id) {
         throw new Error(prepareResult?.error || 'torrent-prepare failed.');
       }
       const torrentId = String(prepareResult.id);
-      const files = await this.resolveTorrentFiles(tm, torrentId, prepareResult);
+      if (this.isTorrentLocked(torrentId)) {
+        this.clearPausedLock(torrentId);
+      }
+      const files = await this.resolveTorrentFiles(
+        tm,
+        torrentId,
+        prepareResult,
+        () => this.isRunActive(runId),
+      );
+      this.throwIfRunCancelled(runId);
       if (!files.length) {
         throw new Error('TODO: Metadata/files not ready for stream yet.');
       }
@@ -227,6 +399,7 @@ class EmbeddedTorrentStreamService {
         throw new Error('No playable video file found in torrent.');
       }
       this.setStatus({
+        runId,
         status: 'selecting-file',
         torrentId,
         fileIndex: picked.index,
@@ -238,11 +411,13 @@ class EmbeddedTorrentStreamService {
       });
 
       const selectResult = await tm.selectFiles(torrentId, [picked.index], true, true);
+      this.throwIfRunCancelled(runId);
       if (!selectResult?.ok) {
         throw new Error(selectResult?.error || 'torrent-select-files failed.');
       }
 
       const status = await tm.getStatus(torrentId);
+      this.throwIfRunCancelled(runId);
       const savePath = String(status?.savePath || '').trim();
       if (!savePath || !picked.path) {
         throw new Error('TODO: Could not resolve local file path from torrent status.');
@@ -254,6 +429,7 @@ class EmbeddedTorrentStreamService {
       }
 
       await this.localStreamServer.start();
+      this.throwIfRunCancelled(runId);
       // TODO: currentSize-based readiness in LocalStreamServer is not true piece readiness.
       // Sparse/preallocated torrent files can report misleading readable size.
       // Next phase should query torrent_service.py for piece/range readiness.
@@ -273,6 +449,9 @@ class EmbeddedTorrentStreamService {
       const targetPrebufferStart = 0;
       const targetPrebufferEnd = Math.min(expectedSize - 1, TARGET_PREBUFFER_BYTES - 1);
       this.setStatus({
+        runId,
+        cancelled: false,
+        stopRequested: false,
         status: 'prebuffering',
         torrentId,
         fileIndex: picked.index,
@@ -300,7 +479,9 @@ class EmbeddedTorrentStreamService {
           start: targetPrebufferStart,
           end: targetPrebufferEnd,
           deadlineMs: TARGET_DEADLINE_MS,
+          allowResume: true,
         });
+        this.throwIfRunCancelled(runId);
         console.info('[EmbeddedTorrentStream:PrebufferEnsure]', {
           phase: 'target',
           torrentId,
@@ -363,22 +544,38 @@ class EmbeddedTorrentStreamService {
       }
 
       const prebufferStartAt = Date.now();
+      let prebufferDeadlineAt = prebufferStartAt + PREBUFFER_TIMEOUT_MS;
+      const maxPrebufferDeadlineAt = prebufferStartAt + MAX_PREBUFFER_WAIT_MS;
       let lastMinimumEnsureAt = 0;
       let lastTargetEnsureAt = 0;
       let minimumPrebufferReady = false;
       let minimumMissingPiecesCount = null;
       let targetPrebufferReady = false;
       let targetMissingPiecesCount = null;
-      while ((Date.now() - prebufferStartAt) < PREBUFFER_TIMEOUT_MS) {
+      let lastProgressBytes = 0;
+      let lastProgressAt = prebufferStartAt;
+      let lastObservedFirstPieceAvailability = null;
+      while (Date.now() < prebufferDeadlineAt && Date.now() < maxPrebufferDeadlineAt) {
         const elapsedMs = Date.now() - prebufferStartAt;
         if (!minimumPrebufferReady && (elapsedMs - lastMinimumEnsureAt) >= MINIMUM_ENSURE_INTERVAL_MS) {
+          if (this.isTorrentLocked(torrentId)) {
+            console.info('[EmbeddedTorrentStream:PausedLock]', {
+              torrentId,
+              phase: 'minimum-ensure',
+              action: 'skip ensure',
+            });
+            await delay(PREBUFFER_POLL_MS);
+            continue;
+          }
           const minimumEnsure = await tm.ensureRange({
             torrentId,
             fileIndex: picked.index,
             start: minimumPrebufferStart,
             end: minimumPrebufferEnd,
             deadlineMs: MINIMUM_DEADLINE_MS,
+            allowResume: true,
           });
+          this.throwIfRunCancelled(runId);
           lastMinimumEnsureAt = elapsedMs;
           console.info('[EmbeddedTorrentStream:PrebufferEnsure]', {
             phase: 'minimum',
@@ -436,13 +633,22 @@ class EmbeddedTorrentStreamService {
           });
         }
         if (!targetPrebufferReady && (elapsedMs - lastTargetEnsureAt) >= TARGET_ENSURE_INTERVAL_MS) {
+          if (this.isTorrentLocked(torrentId)) {
+            console.info('[EmbeddedTorrentStream:PausedLock]', {
+              torrentId,
+              phase: 'target-ensure',
+              action: 'skip ensure',
+            });
+          } else {
           const targetEnsure = await tm.ensureRange({
             torrentId,
             fileIndex: picked.index,
             start: targetPrebufferStart,
             end: targetPrebufferEnd,
             deadlineMs: TARGET_DEADLINE_MS,
+            allowResume: true,
           });
+          this.throwIfRunCancelled(runId);
           lastTargetEnsureAt = elapsedMs;
           console.info('[EmbeddedTorrentStream:PrebufferEnsure]', {
             phase: 'target',
@@ -497,6 +703,7 @@ class EmbeddedTorrentStreamService {
             },
             lastTargetEnsureResult: targetEnsure || null,
           });
+          }
         }
         const minimumRangeStatus = await tm.checkRangeStatus({
           torrentId,
@@ -519,8 +726,33 @@ class EmbeddedTorrentStreamService {
           ? targetRangeStatus.missingPieces.length
           : null;
         const torrentStatus = await tm.getStatus(torrentId);
+        this.throwIfRunCancelled(runId);
         const prebufferDownloadRate = Number(torrentStatus?.downloadRate ?? torrentStatus?.downloadSpeed ?? 0) || 0;
         const prebufferPeerCount = Number(torrentStatus?.numPeers ?? 0) || 0;
+        const totalWantedDone = Number(torrentStatus?.totalWantedDone ?? 0) || 0;
+        if (totalWantedDone > lastProgressBytes) {
+          lastProgressBytes = totalWantedDone;
+          lastProgressAt = Date.now();
+        }
+        const firstPiece = Number.isFinite(Number(minimumRangeStatus?.firstPiece))
+          ? Number(minimumRangeStatus.firstPiece)
+          : null;
+        const pieceLength = Number.isFinite(Number(minimumRangeStatus?.pieceLength))
+          ? Number(minimumRangeStatus.pieceLength)
+          : null;
+        const pieceAvailability = Array.isArray(minimumRangeStatus?.pieceAvailability)
+          ? minimumRangeStatus.pieceAvailability
+          : [];
+        const firstPieceAvailability = pieceAvailability.length > 0
+          ? Number(pieceAvailability[0]?.availability ?? pieceAvailability[0] ?? 0) || 0
+          : 0;
+        lastObservedFirstPieceAvailability = firstPieceAvailability;
+        const waitingForFirstPiece = !minimumPrebufferReady && Number(minimumMissingPiecesCount || 0) > 0;
+        const noProgressElapsedMs = Date.now() - lastProgressAt;
+        const hasActiveSignals = prebufferPeerCount > 0 || prebufferDownloadRate > 0 || firstPieceAvailability > 0;
+        if (!minimumPrebufferReady && hasActiveSignals) {
+          prebufferDeadlineAt = Math.min(maxPrebufferDeadlineAt, Date.now() + NO_PROGRESS_TIMEOUT_MS);
+        }
         console.info('[EmbeddedTorrentStream:Prebuffer]', {
           phase: 'minimum',
           torrentId,
@@ -529,6 +761,14 @@ class EmbeddedTorrentStreamService {
           end: minimumPrebufferEnd,
           ready: minimumPrebufferReady,
           missingPiecesCount: minimumMissingPiecesCount,
+          firstPiece,
+          firstPieceAvailability,
+          pieceLength,
+          downloadRate: prebufferDownloadRate,
+          peerCount: prebufferPeerCount,
+          totalWantedDone,
+          waitingForFirstPiece,
+          noProgressElapsedMs,
           elapsedMs,
           timeout: false,
         });
@@ -544,6 +784,9 @@ class EmbeddedTorrentStreamService {
           timeout: false,
         });
         this.setStatus({
+          runId,
+          cancelled: false,
+          stopRequested: false,
           status: minimumPrebufferReady ? 'ready' : 'prebuffering',
           torrentId,
           fileIndex: picked.index,
@@ -566,9 +809,23 @@ class EmbeddedTorrentStreamService {
           fileOffset: minimumRangeStatus?.fileOffset ?? targetRangeStatus?.fileOffset ?? null,
           prebufferDownloadRate,
           prebufferPeerCount,
+          waitingForFirstPiece,
+          firstPiece,
+          pieceLength,
+          firstPieceAvailability,
+          totalWantedDone,
+          lastProgressAt,
+          noProgressElapsedMs,
           elapsedMs: Date.now() - startedAt,
         });
         if (minimumPrebufferReady) break;
+        if (waitingForFirstPiece && noProgressElapsedMs >= NO_PROGRESS_TIMEOUT_MS) {
+          this.streamSessionManager.closeSession(session.streamId);
+          if (prebufferPeerCount <= 0 && firstPieceAvailability <= 0) {
+            throw new Error('first piece unavailable');
+          }
+          throw new Error('prebuffer stalled');
+        }
         await delay(PREBUFFER_POLL_MS);
       }
 
@@ -582,6 +839,7 @@ class EmbeddedTorrentStreamService {
           end: minimumPrebufferEnd,
           ready: false,
           missingPiecesCount: minimumMissingPiecesCount,
+          firstPieceAvailability: lastObservedFirstPieceAvailability,
           elapsedMs,
           timeout: true,
         });
@@ -597,9 +855,10 @@ class EmbeddedTorrentStreamService {
           timeout: true,
         });
         this.streamSessionManager.closeSession(session.streamId);
-        throw new Error('minimum prebuffer timeout');
+        throw new Error('prebuffer stalled');
       }
 
+      this.throwIfRunCancelled(runId);
       const mpvResult = await this.mpvPlayerService.startMpvPlayback({
         sourceType: 'embedded-stream-url',
         source: streamUrl,
@@ -607,6 +866,7 @@ class EmbeddedTorrentStreamService {
         title,
         mode: 'native-host',
         bounds,
+        isPlayerMode,
       });
       if (!mpvResult?.ok) {
         this.streamSessionManager.closeSession(session.streamId);
@@ -615,6 +875,9 @@ class EmbeddedTorrentStreamService {
 
       this.lastError = null;
       this.setStatus({
+        runId,
+        cancelled: false,
+        stopRequested: false,
         status: 'playing',
         torrentId,
         fileIndex: picked.index,
@@ -643,8 +906,18 @@ class EmbeddedTorrentStreamService {
         torrentDownloadRate: null,
         torrentUploadRate: null,
         pauseVerified: null,
+        waitingForFirstPiece: false,
+        firstPiece: null,
+        pieceLength: null,
+        firstPieceAvailability: null,
+        totalWantedDone: null,
+        lastProgressAt: null,
+        noProgressElapsedMs: null,
       });
       this.activeStreams.set(session.streamId, {
+        runId,
+        cancelled: false,
+        stopRequested: false,
         streamId: session.streamId,
         torrentId,
         fileIndex: picked.index,
@@ -677,6 +950,13 @@ class EmbeddedTorrentStreamService {
       };
     } catch (error) {
       const message = String(error?.message || 'Embedded torrent stream start failed.');
+      if (error?.code === 'RUN_CANCELLED') {
+        return {
+          ok: false,
+          cancelled: true,
+          error: message,
+        };
+      }
       this.lastError = message;
       this.setStatus({
         status: 'error',
@@ -730,7 +1010,25 @@ class EmbeddedTorrentStreamService {
     let torrentUploadRate = null;
     let warning = null;
     let filesRemoved = null;
+    let pauseRetryCount = 0;
+    let lastPauseAttemptAt = null;
     const errors = [];
+
+    if (active?.runId) {
+      this.cancelRun(active.runId, mode);
+    } else if (this.currentRunId) {
+      this.cancelRun(this.currentRunId, mode);
+    }
+    this.setStatus({
+      runId: active?.runId || this.currentRunId || null,
+      cancelled: true,
+      stopRequested: true,
+      stopReason: mode,
+    });
+    if (mode === 'pause-torrent' && active?.torrentId) {
+      this.pausedByStream.add(String(active.torrentId));
+      this.setStatus({ pausedByStream: true });
+    }
 
     try {
       const stopResult = await this.mpvPlayerService.stopMpvPlayback();
@@ -744,6 +1042,9 @@ class EmbeddedTorrentStreamService {
 
     try {
       closedSession = Boolean(this.streamSessionManager.closeSession(targetId));
+      if (active && typeof active === 'object') {
+        active.pendingEnsureRanges = {};
+      }
     } catch (error) {
       errors.push(String(error?.message || 'Failed to close stream session.'));
     }
@@ -753,10 +1054,13 @@ class EmbeddedTorrentStreamService {
         const tm = await this.getTorrentManager();
         if (mode === 'pause-torrent') {
           const verifyStartedAt = Date.now();
-          const pauseResult = await tm.pause(active.torrentId);
+          const pauseResult = await tm.pause(active.torrentId, { force: true, reason: 'stream-close' });
+          pauseRetryCount = 1;
+          lastPauseAttemptAt = Date.now();
           console.info('[EmbeddedTorrentStream:PauseVerify]', {
             torrentId: active.torrentId,
             phase: 'pause-request',
+            attempt: pauseRetryCount,
             pauseResult,
           });
           let pauseStatus = null;
@@ -774,6 +1078,7 @@ class EmbeddedTorrentStreamService {
               console.info('[EmbeddedTorrentStream:PauseVerify]', {
                 torrentId: active.torrentId,
                 phase: 'pause-status-poll',
+                attempt: pauseRetryCount,
                 paused: torrentPaused,
                 state: torrentState,
                 downloadRate: torrentDownloadRate,
@@ -782,7 +1087,27 @@ class EmbeddedTorrentStreamService {
                 pauseVerified,
               });
               if (pauseVerified) break;
+              if (pauseRetryCount < PAUSE_VERIFY_MAX_ATTEMPTS && elapsedMs >= pauseRetryCount * 1500) {
+                pauseRetryCount += 1;
+                lastPauseAttemptAt = Date.now();
+                const retryResult = await tm.pause(active.torrentId, { force: true, reason: 'stream-close-retry' });
+                console.info('[EmbeddedTorrentStream:PauseVerify]', {
+                  torrentId: active.torrentId,
+                  phase: 'pause-retry',
+                  attempt: pauseRetryCount,
+                  pauseResult: retryResult,
+                });
+              }
               await delay(PAUSE_VERIFY_POLL_MS);
+            }
+            if (pauseVerified) {
+              console.info('[EmbeddedTorrentStream:PauseVerify]', {
+                torrentId: active.torrentId,
+                phase: 'pause-verified',
+                pauseVerified: true,
+                pauseRetryCount,
+                lastPauseAttemptAt,
+              });
             }
             if (!pauseVerified) {
               warning = 'pause requested but torrent still active';
@@ -790,6 +1115,7 @@ class EmbeddedTorrentStreamService {
               console.info('[EmbeddedTorrentStream:PauseVerify]', {
                 torrentId: active.torrentId,
                 phase: 'pause-timeout',
+                pauseRetryCount,
                 paused: torrentPaused,
                 state: torrentState,
                 downloadRate: torrentDownloadRate,
@@ -798,6 +1124,7 @@ class EmbeddedTorrentStreamService {
                 pauseVerified: false,
               });
             }
+            this.startPauseWatchdog(active.torrentId);
           }
           torrentAction = pauseResult?.ok ? 'paused' : 'pause-failed';
           if (!pauseResult?.ok) {
@@ -806,6 +1133,7 @@ class EmbeddedTorrentStreamService {
             errors.push(String(pauseResult?.error || 'Failed to pause torrent.'));
           }
         } else if (mode === 'remove-torrent') {
+          this.clearPausedLock(active.torrentId);
           const removeResult = await tm.remove(active.torrentId, removeFiles === true);
           torrentAction = removeResult?.ok ? 'removed' : 'remove-failed';
           filesRemoved = removeFiles === true;
@@ -818,7 +1146,13 @@ class EmbeddedTorrentStreamService {
     }
 
     this.activeStreams.delete(targetId);
+    if (active?.runId && this.currentRunId === active.runId) {
+      this.currentRunId = null;
+    }
     this.setStatus({
+      runId: active?.runId || null,
+      cancelled: true,
+      stopRequested: true,
       status: 'idle',
       torrentId: null,
       fileIndex: null,
@@ -854,6 +1188,19 @@ class EmbeddedTorrentStreamService {
       torrentDownloadRate,
       torrentUploadRate,
       pauseVerified,
+      lastPauseAttemptAt,
+      pauseRetryCount,
+      waitingForFirstPiece: false,
+      firstPiece: null,
+      pieceLength: null,
+      firstPieceAvailability: null,
+      totalWantedDone: null,
+      lastProgressAt: null,
+      noProgressElapsedMs: null,
+      pausedByStream: Boolean(active?.torrentId && this.isTorrentLocked(active.torrentId)),
+      pauseWatchdogActive: Boolean(active?.torrentId && this.pauseWatchdogs.has(String(active.torrentId))),
+      pauseWatchdogRepauses: this.currentStatus.pauseWatchdogRepauses || 0,
+      lastPauseWatchdogAt: this.currentStatus.lastPauseWatchdogAt || null,
     });
     if (errors.length) this.lastError = errors.join(' | ');
     console.info('[EmbeddedTorrentStream] stopped', {
@@ -870,6 +1217,8 @@ class EmbeddedTorrentStreamService {
       torrentState,
       downloadRate: torrentDownloadRate,
       uploadRate: torrentUploadRate,
+      lastPauseAttemptAt,
+      pauseRetryCount,
       warning,
       filesRemoved,
     });
@@ -885,6 +1234,8 @@ class EmbeddedTorrentStreamService {
       torrentState,
       downloadRate: torrentDownloadRate,
       uploadRate: torrentUploadRate,
+      lastPauseAttemptAt,
+      pauseRetryCount,
       warning,
       removeFiles,
       filesRemoved,
@@ -912,6 +1263,9 @@ class EmbeddedTorrentStreamService {
     }
     return {
       ok: true,
+      runId: this.currentStatus.runId,
+      cancelled: this.currentStatus.cancelled,
+      stopRequested: this.currentStatus.stopRequested,
       status: this.currentStatus.status,
       torrentId: this.currentStatus.torrentId,
       fileIndex: this.currentStatus.fileIndex,
@@ -948,6 +1302,19 @@ class EmbeddedTorrentStreamService {
       torrentDownloadRate: this.currentStatus.torrentDownloadRate,
       torrentUploadRate: this.currentStatus.torrentUploadRate,
       pauseVerified: this.currentStatus.pauseVerified,
+      waitingForFirstPiece: this.currentStatus.waitingForFirstPiece,
+      firstPiece: this.currentStatus.firstPiece,
+      pieceLength: this.currentStatus.pieceLength,
+      firstPieceAvailability: this.currentStatus.firstPieceAvailability,
+      totalWantedDone: this.currentStatus.totalWantedDone,
+      lastProgressAt: this.currentStatus.lastProgressAt,
+      noProgressElapsedMs: this.currentStatus.noProgressElapsedMs,
+      lastPauseAttemptAt: this.currentStatus.lastPauseAttemptAt,
+      pauseRetryCount: this.currentStatus.pauseRetryCount,
+      pausedByStream: this.currentStatus.pausedByStream,
+      pauseWatchdogActive: this.currentStatus.pauseWatchdogActive,
+      pauseWatchdogRepauses: this.currentStatus.pauseWatchdogRepauses,
+      lastPauseWatchdogAt: this.currentStatus.lastPauseWatchdogAt,
       lastError: this.currentStatus.lastError || this.lastError,
     };
   }
