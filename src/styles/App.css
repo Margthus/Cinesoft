@@ -692,6 +692,56 @@
   padding: 1rem 1rem 0;
 }
 
+.embedded-player-controls {
+  margin: 0 1.5rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.embedded-player-controls-header {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.embedded-player-actions {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.embedded-player-actions button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.embedded-player-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.embedded-player-note {
+  display: block;
+  margin-top: 0.55rem;
+  color: var(--text-dim);
+}
+
+.embedded-player-error {
+  display: block;
+  margin-top: 0.45rem;
+  color: #ff6b6b;
+}
+
 .mpv-native-slot {
   width: min(1100px, calc(100vw - 320px));
   aspect-ratio: 16 / 9;

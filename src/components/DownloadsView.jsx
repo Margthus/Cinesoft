@@ -18,6 +18,7 @@ const DEFAULT_TORRENT_SETTINGS = {
   lowSpeedThresholdKbps: 100,
   lowSpeedDurationMinutes: 10,
 };
+const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
 
 const formatSize = (bytes) => {
   if (!bytes) return '0 B';
@@ -67,6 +68,8 @@ const formatTorrentTitle = (torrent) => {
 
 const DownloadsView = ({ settings }) => {
   const isTr = settings.language === 'tr';
+  const nativeStreamEnabled = (window.electronAPI?.isDev === true)
+    || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
   const [torrents, setTorrents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [speedLimitInput, setSpeedLimitInput] = useState('1024');
@@ -99,6 +102,12 @@ const DownloadsView = ({ settings }) => {
     fetchTorrents();
     const interval = setInterval(fetchTorrents, 2000);
     return () => clearInterval(interval);
+  }, [fetchTorrents]);
+
+  useEffect(() => {
+    const onRefresh = () => fetchTorrents();
+    window.addEventListener('cinesoft:torrents-refresh', onRefresh);
+    return () => window.removeEventListener('cinesoft:torrents-refresh', onRefresh);
   }, [fetchTorrents]);
 
   useEffect(() => {
@@ -137,6 +146,23 @@ const DownloadsView = ({ settings }) => {
   const handleReorder = async (id, direction) => {
     await window.electronAPI?.torrentReorder?.(id, direction);
     fetchTorrents();
+  };
+
+  const handleStream = (torrent) => {
+    if (!nativeStreamEnabled || typeof window === 'undefined') return;
+    const media = torrent?.mediaInfo || {};
+    const source = media.magnet || media.torrentUrl || media.infoHash || '';
+    if (!source) return;
+    let sourceKind = 'magnet';
+    if (media.torrentUrl) sourceKind = 'torrent-url';
+    else if (!media.magnet && media.infoHash) sourceKind = 'infohash';
+    window.dispatchEvent(new CustomEvent(NATIVE_STREAM_EVENT, {
+      detail: {
+        source: String(source),
+        sourceKind,
+        title: String(formatTorrentTitle(torrent)),
+      },
+    }));
   };
 
   const applySpeedLimit = async (nextValue, enabled) => {
@@ -261,6 +287,8 @@ const DownloadsView = ({ settings }) => {
                   key={torrent.id}
                   torrent={torrent}
                   t={t}
+                  canStream={nativeStreamEnabled}
+                  onStream={handleStream}
                   onPause={handlePause}
                   onResume={handleResume}
                   onRemove={handleRemove}
@@ -275,7 +303,7 @@ const DownloadsView = ({ settings }) => {
           {completedTorrents.length > 0 && (
             <TorrentSection title={t.completed} count={completedTorrents.length} icon={<CheckCircle2 size={18} />}>
               {completedTorrents.map((torrent) => (
-                <TorrentCard key={torrent.id} torrent={torrent} t={t} onPause={handlePause} onResume={handleResume} onRemove={handleRemove} onFiles={openFileModal} />
+                <TorrentCard key={torrent.id} torrent={torrent} t={t} canStream={nativeStreamEnabled} onStream={handleStream} onPause={handlePause} onResume={handleResume} onRemove={handleRemove} onFiles={openFileModal} />
               ))}
             </TorrentSection>
           )}
@@ -444,7 +472,7 @@ const TorrentSection = ({ title, count, icon, children }) => (
   </div>
 );
 
-const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown }) => {
+const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown, canStream, onStream }) => {
   const [showFileProgress, setShowFileProgress] = useState(false);
   const posterUrl = torrent.mediaInfo?.poster || '';
   const isDone = torrent.done;
@@ -452,6 +480,11 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
   const statusText = isPaused ? t.paused : isDone ? t.seeding : t.downloading;
   const statusClass = isPaused ? 'status-paused' : isDone ? 'status-completed' : 'status-downloading';
   const selectedVideoFiles = Array.isArray(torrent.selectedVideoFiles) ? torrent.selectedVideoFiles : [];
+  const streamable = canStream && Boolean(
+    torrent?.mediaInfo?.magnet
+    || torrent?.mediaInfo?.torrentUrl
+    || torrent?.mediaInfo?.infoHash
+  );
   const displayTitle = formatTorrentTitle(torrent);
   const displaySubtitle = torrent.name || torrent.title || '';
 
@@ -524,6 +557,12 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
           </div>
         )}
         <div className="torrent-actions">
+          {streamable && (
+            <button className="torrent-action-btn" onClick={() => onStream(torrent)}>
+              <Play size={15} />
+              <span>{t.stream}</span>
+            </button>
+          )}
           <button className="torrent-action-btn" onClick={() => onFiles(torrent)}>
             <ListChecks size={15} />
             <span>{t.files}</span>
@@ -587,6 +626,7 @@ const getCopy = (isTr) => isTr ? {
   files: 'Dosyalar',
   fileDownloading: 'Iniyor',
   fileReady: 'Hazir',
+  stream: 'Stream',
   pause: 'Duraklat',
   resume: 'Devam Et',
   speedLimit: 'Hiz Limiti',
@@ -630,6 +670,7 @@ const getCopy = (isTr) => isTr ? {
   files: 'Files',
   fileDownloading: 'Downloading',
   fileReady: 'Ready',
+  stream: 'Stream',
   pause: 'Pause',
   resume: 'Resume',
   speedLimit: 'Speed Limit',

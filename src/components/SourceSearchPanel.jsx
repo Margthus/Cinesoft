@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ShieldAlert, Download, Loader2, X } from 'lucide-react';
+import { Search, ShieldAlert, Download, Loader2, X, Play } from 'lucide-react';
 import {
   DEFAULT_PROWLARR_CONFIG,
   searchStreamSourcesForEpisode,
@@ -11,6 +11,7 @@ import { fetchSeasonDetails, searchContent, fetchDetails } from '../utils/tmdb';
 const TORRENTIO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TORRENTIO_CACHE_MAX_ENTRIES = 1500;
 const APP_TOAST_EVENT = 'cinesoft:toast';
+const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
 const torrentioSearchCache = new Map();
 
 const buildTorrentioCacheKey = (payload = {}) => JSON.stringify(payload);
@@ -93,6 +94,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
   const autoSearchDoneRef = useRef('');
 
   const prowlarrConfig = settings.prowlarr || DEFAULT_PROWLARR_CONFIG;
+  const nativeStreamEnabled = (window.electronAPI?.isDev === true)
+    || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
   const activeCount = prowlarrConfig.enabled ? 1 : 0;
   const isEpisodic = type === 'tv' || type === 'anime';
   const notify = (message, tone = 'info', durationMs) => {
@@ -242,6 +245,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       name: 'Isme gore',
       indexers: 'Dizinler',
       download: 'İndir',
+      stream: 'Stream',
+      watchNow: 'Hemen Oynat',
       starting: 'Başlatılıyor...',
     },
     en: {
@@ -256,6 +261,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       name: 'By Name',
       indexers: 'Indexers',
       download: 'Download',
+      stream: 'Stream',
+      watchNow: 'Watch Now',
       starting: 'Starting...',
     },
   }[settings.language || 'tr'];
@@ -521,6 +528,9 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
           episode: looksLikePackSource ? null : (expectedEpisode || null),
           quality: source.quality,
           provider: source.provider,
+          magnet: source.magnet || '',
+          infoHash: source.infoHash || '',
+          torrentUrl: source.torrentUrl || '',
         },
       });
       if (!prepared?.ok || !prepared?.id) {
@@ -612,6 +622,22 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         console.error('Failed to cleanup pending torrent:', e);
       }
     }
+  };
+
+  const handleStreamStart = (source) => {
+    if (!nativeStreamEnabled || typeof window === 'undefined') return;
+    const sourceValue = source?.magnet || source?.torrentUrl || source?.infoHash || source?.downloadUrl || '';
+    if (!sourceValue) return;
+    let sourceKind = 'magnet';
+    if (source?.torrentUrl) sourceKind = 'torrent-url';
+    else if (!source?.magnet && source?.infoHash) sourceKind = 'infohash';
+    window.dispatchEvent(new CustomEvent(NATIVE_STREAM_EVENT, {
+      detail: {
+        source: String(sourceValue),
+        sourceKind,
+        title: String(source?.title || item?.title || item?.name || 'CineSoft Embedded Torrent Stream'),
+      },
+    }));
   };
 
   const confirmSelectedFiles = async () => {
@@ -1051,6 +1077,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
           {filteredAndSortedResults.map((source) => {
             const isLoadingAction = actionLoading[source.id];
             const hasTorrentData = source.magnet || source.infoHash || source.torrentUrl || source.downloadUrl;
+            const canStream = nativeStreamEnabled && Boolean(source.magnet || source.torrentUrl || source.infoHash);
 
             return (
               <div className="source-row" key={source.id}>
@@ -1066,6 +1093,17 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
                 </div>
                 {hasTorrentData && (
                   <div className="source-actions">
+                    {canStream && (
+                      <button
+                        className="source-action-btn"
+                        onClick={() => handleStreamStart(source)}
+                        disabled={!!isLoadingAction}
+                        title={t.watchNow}
+                      >
+                        <Play size={16} />
+                        <span>{t.stream}</span>
+                      </button>
+                    )}
                     <button
                       className="source-action-btn download-btn"
                       onClick={() => handleTorrentDownload(source)}

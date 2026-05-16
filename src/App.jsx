@@ -46,6 +46,7 @@ const DEFAULT_PAGE_ROUTE_MAP = {
   settings: '/settings',
 };
 const APP_TOAST_EVENT = 'cinesoft:toast';
+const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
 let appToastId = 0;
 
 export const showAppToast = (detail = {}) => {
@@ -130,6 +131,10 @@ const App = () => {
   const [embeddedTorrentSourceKind, setEmbeddedTorrentSourceKind] = useState('magnet');
   const [embeddedTorrentStreamStatus, setEmbeddedTorrentStreamStatus] = useState(null);
   const [embeddedStopResult, setEmbeddedStopResult] = useState(null);
+  const [embeddedUiStatus, setEmbeddedUiStatus] = useState('idle');
+  const [embeddedUiError, setEmbeddedUiError] = useState('');
+  const nativeStreamEnabled = (window.electronAPI?.isDev === true)
+    || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
   const showMpvDebugPanel = window.electronAPI?.isDev === true;
   const mpvNativeSlotRef = useRef(null);
   const mpvBoundsThrottleRef = useRef(null);
@@ -265,7 +270,7 @@ const App = () => {
   }, [showMpvDebugPanel]);
 
   useEffect(() => {
-    if (!showMpvDebugPanel || !mpvNativeSlotRef.current) return undefined;
+    if (!nativeStreamEnabled || !mpvNativeSlotRef.current) return undefined;
 
     const emitBounds = () => {
       const slot = mpvNativeSlotRef.current;
@@ -304,7 +309,7 @@ const App = () => {
         mpvBoundsThrottleRef.current = null;
       }
     };
-  }, [showMpvDebugPanel]);
+  }, [nativeStreamEnabled]);
 
   useEffect(() => {
     const onToast = (event) => {
@@ -505,6 +510,24 @@ const App = () => {
         prebufferEnd: result?.prebufferEnd ?? null,
         prebufferReady: Boolean(result?.prebufferReady),
         missingPiecesCount: result?.missingPiecesCount ?? null,
+        minimumPrebufferStart: result?.minimumPrebufferStart ?? null,
+        minimumPrebufferEnd: result?.minimumPrebufferEnd ?? null,
+        minimumPrebufferReady: result?.minimumPrebufferReady ?? null,
+        minimumMissingPiecesCount: result?.minimumMissingPiecesCount ?? null,
+        targetPrebufferStart: result?.targetPrebufferStart ?? null,
+        targetPrebufferEnd: result?.targetPrebufferEnd ?? null,
+        targetPrebufferReady: result?.targetPrebufferReady ?? null,
+        targetMissingPiecesCount: result?.targetMissingPiecesCount ?? null,
+        prebufferDownloadRate: result?.prebufferDownloadRate ?? null,
+        prebufferPeerCount: result?.prebufferPeerCount ?? null,
+        lastEnsureResult: result?.lastEnsureResult ?? null,
+        lastMinimumRangeStatus: result?.lastMinimumRangeStatus ?? null,
+        lastMinimumEnsureResult: result?.lastMinimumEnsureResult ?? null,
+        lastTargetEnsureResult: result?.lastTargetEnsureResult ?? null,
+        lastTargetRangeStatus: result?.lastTargetRangeStatus ?? null,
+        selectedFileIndex: result?.selectedFileIndex ?? null,
+        selectedFileSize: result?.selectedFileSize ?? null,
+        fileOffset: result?.fileOffset ?? null,
         elapsedMs: result?.elapsedMs ?? 0,
         activeStreamCount: Number(result?.activeStreamCount || 0),
         activeStreams: Array.isArray(result?.activeStreams) ? result.activeStreams : [],
@@ -521,30 +544,48 @@ const App = () => {
     }
   };
 
-  const handleStartEmbeddedTorrentStream = async () => {
+  const startEmbeddedTorrentStreamFromUi = async (payload = {}) => {
     if (!window.electronAPI?.startEmbeddedTorrentStream) return;
-    if (!embeddedTorrentSource.trim()) return;
+    const source = String(payload?.source || '').trim();
+    const sourceKind = String(payload?.sourceKind || 'magnet');
+    if (!source) return;
     setMpvDebugBusy(true);
+    setEmbeddedUiError('');
+    setEmbeddedUiStatus('preparing');
     try {
+      setEmbeddedUiStatus('selecting-file');
       const result = await window.electronAPI.startEmbeddedTorrentStream({
-        source: embeddedTorrentSource.trim(),
-        sourceKind: embeddedTorrentSourceKind,
-        title: 'CineSoft Embedded Torrent Stream',
-        bounds: mpvSlotBounds,
+        source,
+        sourceKind,
+        title: String(payload?.title || 'CineSoft Embedded Torrent Stream'),
+        bounds: payload?.bounds || mpvSlotBounds,
       });
       if (!result?.ok) {
         throw new Error(result?.error || 'Embedded torrent stream start failed.');
       }
       setMpvDebugStreamSessionId(String(result.streamId || ''));
       setMpvDebugStreamUrl(String(result.streamUrl || ''));
+      setEmbeddedUiStatus('prebuffering');
       await refreshStreamServerStatus();
       await refreshEmbeddedTorrentStatus();
+      setEmbeddedUiStatus('playing');
     } catch (error) {
       setMpvDebugError(String(error?.message || 'Failed to start embedded torrent stream.'));
+      setEmbeddedUiError(String(error?.message || 'Stream hazırlanamadı, yeterli parça indirilemedi.'));
+      setEmbeddedUiStatus('error');
       await refreshEmbeddedTorrentStatus();
     } finally {
       setMpvDebugBusy(false);
     }
+  };
+
+  const handleStartEmbeddedTorrentStream = async () => {
+    await startEmbeddedTorrentStreamFromUi({
+      source: embeddedTorrentSource.trim(),
+      sourceKind: embeddedTorrentSourceKind,
+      title: 'CineSoft Embedded Torrent Stream',
+      bounds: mpvSlotBounds,
+    });
   };
 
   const handleStopEmbeddedTorrentStream = async (mode) => {
@@ -563,9 +604,11 @@ const App = () => {
       setEmbeddedStopResult(result);
       setMpvDebugStreamSessionId('');
       setMpvDebugStreamUrl('');
+      setEmbeddedUiStatus(mode === 'playback-only' ? 'idle' : 'stopped');
       await refreshEmbeddedTorrentStatus();
       await refreshStreamServerStatus();
       await window.electronAPI?.torrentGetAll?.();
+      window.dispatchEvent(new CustomEvent('cinesoft:torrents-refresh'));
       const statusResult = await window.electronAPI?.getMpvStatus?.();
       setMpvDebugStatus(String(statusResult?.status || 'stopped'));
       setMpvDebugError(String(result?.warning || result?.error || ''));
@@ -592,10 +635,49 @@ const App = () => {
   );
 
   useEffect(() => {
-    if (!showMpvDebugPanel) return;
+    if (!nativeStreamEnabled) return;
     refreshStreamServerStatus();
     refreshEmbeddedTorrentStatus();
-  }, [showMpvDebugPanel]);
+  }, [nativeStreamEnabled]);
+
+  useEffect(() => {
+    if (!nativeStreamEnabled) return undefined;
+    const onStartNativeStream = async (event) => {
+      const detail = event?.detail || {};
+      await startEmbeddedTorrentStreamFromUi({
+        source: detail.source || '',
+        sourceKind: detail.sourceKind || 'magnet',
+        title: detail.title || 'CineSoft Embedded Torrent Stream',
+        bounds: mpvSlotBounds,
+      });
+      if (typeof window !== 'undefined') {
+        try {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch {
+          window.scrollTo(0, 0);
+        }
+      }
+    };
+    window.addEventListener(NATIVE_STREAM_EVENT, onStartNativeStream);
+    return () => window.removeEventListener(NATIVE_STREAM_EVENT, onStartNativeStream);
+  }, [nativeStreamEnabled, mpvSlotBounds]);
+
+  useEffect(() => {
+    if (!embeddedTorrentStreamStatus) return;
+    const status = String(embeddedTorrentStreamStatus.status || '').toLowerCase();
+    if (status === 'playing') setEmbeddedUiStatus('playing');
+    else if (status === 'prebuffering') setEmbeddedUiStatus('prebuffering');
+    else if (status === 'stopped') setEmbeddedUiStatus('stopped');
+    if (embeddedTorrentStreamStatus.lastError) {
+      const message = String(embeddedTorrentStreamStatus.lastError);
+      setEmbeddedUiStatus('error');
+      setEmbeddedUiError(
+        message.toLowerCase().includes('minimum prebuffer timeout')
+          ? 'Stream hazırlanamadı, başlangıç parçası indirilemedi.'
+          : message,
+      );
+    }
+  }, [embeddedTorrentStreamStatus]);
 
   if (loading) return <div className="loading">Loading...</div>;
   const defaultRoute = DEFAULT_PAGE_ROUTE_MAP[settings.defaultPage] || '/';
@@ -605,11 +687,41 @@ const App = () => {
       <div className="app-container">
         <Sidebar settings={settings} />
         <main className="main-content">
-          {showMpvDebugPanel && (
+          {nativeStreamEnabled && (
             <section className="mpv-native-slot-wrap">
               <div ref={mpvNativeSlotRef} className="mpv-native-slot">
                 <span>Native MPV Player Slot</span>
               </div>
+            </section>
+          )}
+          {nativeStreamEnabled && (
+            <section className="embedded-player-controls" aria-live="polite">
+              <div className="embedded-player-controls-header">
+                <strong>{settings.language === 'tr' ? 'Embedded Stream' : 'Embedded Stream'}</strong>
+                <span>
+                  {settings.language === 'tr' ? 'Durum' : 'Status'}: {embeddedUiStatus}
+                </span>
+                {embeddedTorrentStreamStatus?.torrentDownloadRate != null ? (
+                  <span>DL: {embeddedTorrentStreamStatus.torrentDownloadRate}</span>
+                ) : null}
+              </div>
+              {embeddedUiError ? <small className="embedded-player-error">{embeddedUiError}</small> : null}
+              <div className="embedded-player-actions">
+                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('playback-only')} disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                  {settings.language === 'tr' ? 'Stop Playback' : 'Stop Playback'}
+                </button>
+                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')} disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                  {settings.language === 'tr' ? 'Pause Torrent' : 'Pause Torrent'}
+                </button>
+                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')} disabled={mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                  {settings.language === 'tr' ? 'Remove Torrent' : 'Remove Torrent'}
+                </button>
+              </div>
+              <small className="embedded-player-note">
+                {settings.language === 'tr'
+                  ? 'Torrent listeden silinir, dosyalar kalir.'
+                  : 'Removes torrent from list, keeps downloaded files.'}
+              </small>
             </section>
           )}
           <Routes>
@@ -665,6 +777,39 @@ const App = () => {
                 {embeddedTorrentStreamStatus.prebufferEnd != null ? <span>prebufferEnd: {embeddedTorrentStreamStatus.prebufferEnd}</span> : null}
                 <span>prebufferReady: {String(embeddedTorrentStreamStatus.prebufferReady)}</span>
                 {embeddedTorrentStreamStatus.missingPiecesCount != null ? <span>missingPieces: {embeddedTorrentStreamStatus.missingPiecesCount}</span> : null}
+                {embeddedTorrentStreamStatus.minimumPrebufferStart != null ? <span>minimumPrebufferStart: {embeddedTorrentStreamStatus.minimumPrebufferStart}</span> : null}
+                {embeddedTorrentStreamStatus.minimumPrebufferEnd != null ? <span>minimumPrebufferEnd: {embeddedTorrentStreamStatus.minimumPrebufferEnd}</span> : null}
+                {embeddedTorrentStreamStatus.minimumPrebufferReady != null ? <span>minimumPrebufferReady: {String(embeddedTorrentStreamStatus.minimumPrebufferReady)}</span> : null}
+                {embeddedTorrentStreamStatus.minimumMissingPiecesCount != null ? <span>minimumMissingPieces: {embeddedTorrentStreamStatus.minimumMissingPiecesCount}</span> : null}
+                {embeddedTorrentStreamStatus.targetPrebufferStart != null ? <span>targetPrebufferStart: {embeddedTorrentStreamStatus.targetPrebufferStart}</span> : null}
+                {embeddedTorrentStreamStatus.targetPrebufferEnd != null ? <span>targetPrebufferEnd: {embeddedTorrentStreamStatus.targetPrebufferEnd}</span> : null}
+                {embeddedTorrentStreamStatus.targetPrebufferReady != null ? <span>targetPrebufferReady: {String(embeddedTorrentStreamStatus.targetPrebufferReady)}</span> : null}
+                {embeddedTorrentStreamStatus.targetMissingPiecesCount != null ? <span>targetMissingPieces: {embeddedTorrentStreamStatus.targetMissingPiecesCount}</span> : null}
+                {embeddedTorrentStreamStatus.prebufferDownloadRate != null ? <span>prebufferDownloadRate: {embeddedTorrentStreamStatus.prebufferDownloadRate}</span> : null}
+                {embeddedTorrentStreamStatus.prebufferPeerCount != null ? <span>prebufferPeerCount: {embeddedTorrentStreamStatus.prebufferPeerCount}</span> : null}
+                {embeddedTorrentStreamStatus.lastEnsureResult ? (
+                  <span>
+                    lastEnsure: phase={embeddedTorrentStreamStatus.lastEnsureResult.phase || '-'} ok={String(embeddedTorrentStreamStatus.lastEnsureResult.ok)} ready={String(embeddedTorrentStreamStatus.lastEnsureResult.ready)} missing={embeddedTorrentStreamStatus.lastEnsureResult.missingPiecesCount ?? '-'} prioritized={embeddedTorrentStreamStatus.lastEnsureResult.prioritizedPieces ?? '-'} deadlineMs={embeddedTorrentStreamStatus.lastEnsureResult.deadlineMs ?? '-'}
+                  </span>
+                ) : null}
+                {embeddedTorrentStreamStatus.fileOffset != null ? <span>fileOffset: {embeddedTorrentStreamStatus.fileOffset}</span> : null}
+                {embeddedTorrentStreamStatus.selectedFileIndex != null ? <span>selectedFileIndex: {embeddedTorrentStreamStatus.selectedFileIndex}</span> : null}
+                {embeddedTorrentStreamStatus.selectedFileSize != null ? <span>selectedFileSize: {embeddedTorrentStreamStatus.selectedFileSize}</span> : null}
+                {embeddedTorrentStreamStatus.lastMinimumRangeStatus ? (
+                  <span>
+                    minRange: piece={embeddedTorrentStreamStatus.lastMinimumRangeStatus.firstPiece ?? '-'}-{embeddedTorrentStreamStatus.lastMinimumRangeStatus.lastPiece ?? '-'} missing={embeddedTorrentStreamStatus.lastMinimumRangeStatus.missingPiecesCount ?? '-'} dl={embeddedTorrentStreamStatus.lastMinimumRangeStatus.downloadRate ?? '-'} peers={embeddedTorrentStreamStatus.lastMinimumRangeStatus.numPeers ?? '-'} state={embeddedTorrentStreamStatus.lastMinimumRangeStatus.state ?? '-'} uploadMode={String(embeddedTorrentStreamStatus.lastMinimumRangeStatus.uploadMode ?? '-')}
+                  </span>
+                ) : null}
+                {embeddedTorrentStreamStatus.lastMinimumEnsureResult ? (
+                  <span>
+                    minEnsure: piece={embeddedTorrentStreamStatus.lastMinimumEnsureResult.firstPiece ?? '-'}-{embeddedTorrentStreamStatus.lastMinimumEnsureResult.lastPiece ?? '-'} missing={JSON.stringify((embeddedTorrentStreamStatus.lastMinimumEnsureResult.missingPieces || []).slice(0, 20))} prio={JSON.stringify((embeddedTorrentStreamStatus.lastMinimumEnsureResult.piecePriorities || []).slice(0, 20))} avail={JSON.stringify((embeddedTorrentStreamStatus.lastMinimumEnsureResult.pieceAvailability || []).slice(0, 20))} dl={embeddedTorrentStreamStatus.lastMinimumEnsureResult.downloadRate ?? '-'} peers={embeddedTorrentStreamStatus.lastMinimumEnsureResult.numPeers ?? '-'} state={embeddedTorrentStreamStatus.lastMinimumEnsureResult.state ?? '-'} uploadMode={String(embeddedTorrentStreamStatus.lastMinimumEnsureResult.uploadMode ?? '-')} deadlineApplied={embeddedTorrentStreamStatus.lastMinimumEnsureResult.deadlineAppliedPieces ?? '-'} pErr={(embeddedTorrentStreamStatus.lastMinimumEnsureResult.priorityErrors || []).length} dErr={(embeddedTorrentStreamStatus.lastMinimumEnsureResult.deadlineErrors || []).length}
+                  </span>
+                ) : null}
+                {embeddedTorrentStreamStatus.lastTargetEnsureResult ? (
+                  <span>
+                    targetEnsure: piece={embeddedTorrentStreamStatus.lastTargetEnsureResult.firstPiece ?? '-'}-{embeddedTorrentStreamStatus.lastTargetEnsureResult.lastPiece ?? '-'} missing={embeddedTorrentStreamStatus.lastTargetEnsureResult.missingPiecesCount ?? '-'} dl={embeddedTorrentStreamStatus.lastTargetEnsureResult.downloadRate ?? '-'} peers={embeddedTorrentStreamStatus.lastTargetEnsureResult.numPeers ?? '-'} state={embeddedTorrentStreamStatus.lastTargetEnsureResult.state ?? '-'} uploadMode={String(embeddedTorrentStreamStatus.lastTargetEnsureResult.uploadMode ?? '-')}
+                  </span>
+                ) : null}
                 {embeddedTorrentStreamStatus.pauseVerified != null ? <span>pauseVerified: {String(embeddedTorrentStreamStatus.pauseVerified)}</span> : null}
                 {embeddedTorrentStreamStatus.torrentPaused != null ? <span>torrentPaused: {String(embeddedTorrentStreamStatus.torrentPaused)}</span> : null}
                 {embeddedTorrentStreamStatus.torrentState != null ? <span>torrentState: {embeddedTorrentStreamStatus.torrentState}</span> : null}

@@ -770,6 +770,57 @@ class APIHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             return {"ok": False, "status": 500, "error": f"Could not check pieces: {exc}"}
 
+        piece_priorities = []
+        try:
+            for piece_idx in range(first_piece, last_piece + 1):
+                try:
+                    prio = int(handle.piece_priority(int(piece_idx)))
+                except Exception:
+                    prio = None
+                piece_priorities.append({"piece": int(piece_idx), "priority": prio})
+        except Exception as exc:
+            log_warning("piece_priority_read_failed", torrent=torrent_id, error=str(exc))
+
+        piece_availability = []
+        try:
+            availability_all = handle.piece_availability()
+            for piece_idx in range(first_piece, last_piece + 1):
+                avail = None
+                if availability_all is not None and piece_idx < len(availability_all):
+                    try:
+                        avail = int(availability_all[piece_idx])
+                    except Exception:
+                        avail = None
+                piece_availability.append({"piece": int(piece_idx), "availability": avail})
+        except Exception as exc:
+            log_warning("piece_availability_read_failed", torrent=torrent_id, error=str(exc))
+
+        state = None
+        paused = False
+        upload_mode = False
+        download_rate = 0
+        upload_rate = 0
+        num_peers = 0
+        total_wanted_done = 0
+        total_wanted = 0
+        progress = 0.0
+        try:
+            st = handle.status()
+            state = int(st.state)
+            paused = bool(st.flags & lt.torrent_flags.paused)
+            try:
+                upload_mode = bool(st.flags & lt.torrent_flags.upload_mode)
+            except Exception:
+                upload_mode = False
+            download_rate = int(st.download_rate or 0)
+            upload_rate = int(st.upload_rate or 0)
+            num_peers = int(st.num_peers or 0)
+            total_wanted_done = int(getattr(st, "total_wanted_done", 0) or 0)
+            total_wanted = int(getattr(st, "total_wanted", 0) or 0)
+            progress = float(st.progress or 0.0)
+        except Exception as exc:
+            log_warning("range_status_handle_status_failed", torrent=torrent_id, error=str(exc))
+
         return {
             "ok": True,
             "ready": len(missing_pieces) == 0,
@@ -777,11 +828,25 @@ class APIHandler(BaseHTTPRequestHandler):
             "fileIndex": file_index,
             "start": start,
             "end": end,
+            "fileOffset": int(file_offset),
+            "fileSize": int(file_size),
             "pieceLength": piece_length,
             "firstPiece": first_piece,
             "lastPiece": last_piece,
-            "missingPieces": missing_pieces,
+            "missingPieces": missing_pieces[:20],
+            "missingPiecesCount": len(missing_pieces),
             "checkedPieces": checked_pieces,
+            "piecePriorities": piece_priorities,
+            "pieceAvailability": piece_availability,
+            "state": state,
+            "paused": paused,
+            "uploadMode": upload_mode,
+            "downloadRate": download_rate,
+            "uploadRate": upload_rate,
+            "numPeers": num_peers,
+            "totalWantedDone": total_wanted_done,
+            "totalWanted": total_wanted,
+            "progress": progress,
         }
 
     def _handle_add(self):
@@ -1168,43 +1233,102 @@ class APIHandler(BaseHTTPRequestHandler):
 
         entry = torrents[torrent_id]
         handle = entry.get("handle")
-        status = self._compute_range_piece_status(handle, torrent_id, file_index, start, end)
-        if not status.get("ok"):
-            self._send_json({"ok": False, "ready": False, "error": status.get("error", "Ensure range failed")}, int(status.get("status", 500)))
+        before_status = self._compute_range_piece_status(handle, torrent_id, file_index, start, end)
+        if not before_status.get("ok"):
+            self._send_json({"ok": False, "ready": False, "error": before_status.get("error", "Ensure range failed")}, int(before_status.get("status", 500)))
             return
-        if status.get("ready") is True:
-            status["prioritizedPieces"] = 0
-            status["deadlineMs"] = deadline_ms
-            self._send_json(status)
+        if before_status.get("ready") is True:
+            response = dict(before_status)
+            response["prioritizedPieces"] = 0
+            response["deadlineAppliedPieces"] = 0
+            response["deadlineMs"] = deadline_ms
+            response["beforeStatus"] = dict(before_status)
+            response["afterStatus"] = dict(before_status)
+            response["priorityErrors"] = []
+            response["deadlineErrors"] = []
+            response["resumed"] = False
+            response["sequentialEnabled"] = False
+            self._send_json(response)
             return
+
+        resumed = False
+        sequential_enabled = False
+        try:
+            handle.unset_flags(lt.torrent_flags.paused)
+        except Exception:
+            pass
+        try:
+            handle.unset_flags(lt.torrent_flags.upload_mode)
+        except Exception:
+            pass
+        try:
+            handle.resume()
+            resumed = True
+        except Exception as exc:
+            log_warning("stream_ensure_resume_failed", torrent=torrent_id, error=str(exc))
+        try:
+            handle.set_flags(lt.torrent_flags.sequential_download)
+            sequential_enabled = True
+        except Exception:
+            try:
+                handle.set_sequential_download(True)
+                sequential_enabled = True
+            except Exception as exc:
+                log_warning("stream_ensure_sequential_failed", torrent=torrent_id, error=str(exc))
 
         try:
-            paused = bool(handle.status().flags & lt.torrent_flags.paused)
-        except Exception:
-            paused = False
-        if paused:
-            status["prioritizedPieces"] = 0
-            status["ready"] = False
-            status["deadlineMs"] = deadline_ms
-            status["error"] = "Torrent is paused"
-            self._send_json(status)
-            return
+            ti = handle.torrent_file()
+            if ti and file_index < ti.files().num_files():
+                current = []
+                try:
+                    current = list(handle.get_file_priorities())
+                except Exception:
+                    current = []
+                if current and file_index < len(current):
+                    if int(current[file_index]) < 7:
+                        current[file_index] = 7
+                        try:
+                            handle.prioritize_files(current)
+                        except Exception as exc:
+                            log_warning("stream_ensure_file_priority_failed", torrent=torrent_id, fileIndex=file_index, error=str(exc))
+        except Exception as exc:
+            log_warning("stream_ensure_priority_prep_failed", torrent=torrent_id, fileIndex=file_index, error=str(exc))
 
         prioritized = 0
-        for piece_idx in status.get("missingPieces", []):
+        deadline_applied = 0
+        priority_errors = []
+        deadline_errors = []
+        for piece_idx in before_status.get("missingPieces", []):
             try:
                 handle.piece_priority(int(piece_idx), 7)
                 prioritized += 1
             except Exception as exc:
                 log_warning("piece_priority_failed", torrent=torrent_id, piece=int(piece_idx), error=str(exc))
+                priority_errors.append({"piece": int(piece_idx), "error": str(exc)})
             try:
-                handle.set_piece_deadline(int(piece_idx), deadline_ms)
+                # Prefer availability alert when supported by current libtorrent binding.
+                try:
+                    handle.set_piece_deadline(int(piece_idx), deadline_ms, lt.deadline_flags_t.alert_when_available)
+                    deadline_applied += 1
+                except TypeError:
+                    handle.set_piece_deadline(int(piece_idx), deadline_ms)
+                    deadline_applied += 1
             except Exception as exc:
                 log_warning("piece_deadline_failed", torrent=torrent_id, piece=int(piece_idx), deadlineMs=deadline_ms, error=str(exc))
+                deadline_errors.append({"piece": int(piece_idx), "error": str(exc)})
 
-        status["prioritizedPieces"] = prioritized
-        status["deadlineMs"] = deadline_ms
-        self._send_json(status)
+        after_status = self._compute_range_piece_status(handle, torrent_id, file_index, start, end)
+        response = dict(after_status)
+        response["beforeStatus"] = before_status
+        response["afterStatus"] = after_status
+        response["prioritizedPieces"] = prioritized
+        response["deadlineAppliedPieces"] = deadline_applied
+        response["priorityErrors"] = priority_errors
+        response["deadlineErrors"] = deadline_errors
+        response["deadlineMs"] = deadline_ms
+        response["resumed"] = resumed
+        response["sequentialEnabled"] = sequential_enabled
+        self._send_json(response)
 
 
 def main():

@@ -7,6 +7,52 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { app } = require('electron');
+const DEBUG_STREAM_SERVER = String(process.env.DEBUG_STREAM_SERVER || '').toLowerCase() === 'true';
+
+const limitArray = (value, max = 20) => (Array.isArray(value) ? value.slice(0, max) : []);
+const compactEnsureDebug = (result = {}) => ({
+  ok: result?.ok ?? null,
+  ready: result?.ready ?? null,
+  fileOffset: result?.fileOffset ?? null,
+  fileSize: result?.fileSize ?? null,
+  pieceLength: result?.pieceLength ?? null,
+  firstPiece: result?.firstPiece ?? null,
+  lastPiece: result?.lastPiece ?? null,
+  checkedPieces: result?.checkedPieces ?? null,
+  missingPiecesCount: result?.missingPiecesCount ?? null,
+  missingPieces: limitArray(result?.missingPieces),
+  piecePriorities: limitArray(result?.piecePriorities),
+  pieceAvailability: limitArray(result?.pieceAvailability),
+  state: result?.state ?? null,
+  paused: result?.paused ?? null,
+  uploadMode: result?.uploadMode ?? null,
+  downloadRate: result?.downloadRate ?? null,
+  uploadRate: result?.uploadRate ?? null,
+  numPeers: result?.numPeers ?? null,
+  totalWantedDone: result?.totalWantedDone ?? null,
+  totalWanted: result?.totalWanted ?? null,
+  progress: result?.progress ?? null,
+  prioritizedPieces: result?.prioritizedPieces ?? null,
+  deadlineAppliedPieces: result?.deadlineAppliedPieces ?? null,
+  priorityErrors: limitArray(result?.priorityErrors),
+  deadlineErrors: limitArray(result?.deadlineErrors),
+  resumed: result?.resumed ?? null,
+  sequentialEnabled: result?.sequentialEnabled ?? null,
+  beforeStatus: result?.beforeStatus ? {
+    firstPiece: result.beforeStatus.firstPiece ?? null,
+    lastPiece: result.beforeStatus.lastPiece ?? null,
+    missingPiecesCount: result.beforeStatus.missingPiecesCount ?? null,
+    state: result.beforeStatus.state ?? null,
+    uploadMode: result.beforeStatus.uploadMode ?? null,
+  } : null,
+  afterStatus: result?.afterStatus ? {
+    firstPiece: result.afterStatus.firstPiece ?? null,
+    lastPiece: result.afterStatus.lastPiece ?? null,
+    missingPiecesCount: result.afterStatus.missingPiecesCount ?? null,
+    state: result.afterStatus.state ?? null,
+    uploadMode: result.afterStatus.uploadMode ?? null,
+  } : null,
+});
 
 class TorrentManager {
   constructor(downloadDir) {
@@ -206,13 +252,25 @@ class TorrentManager {
   /** Ensure torrent pieces for a byte range are prioritized/deadlined. */
   async ensureRange({ torrentId, fileIndex, start, end, deadlineMs = 1000 } = {}) {
     try {
-      return await this._request('POST', '/stream/ensure-range', {
+      const result = await this._request('POST', '/stream/ensure-range', {
         torrentId,
         fileIndex,
         start,
         end,
         deadlineMs,
       }, 10000);
+      const isMinimum = Number(start) === 0 && Number(end) <= (2 * 1024 * 1024 - 1);
+      if (DEBUG_STREAM_SERVER || isMinimum) {
+        console.info('[TorrentManager:EnsureRangeRaw]', {
+          torrentId,
+          fileIndex,
+          start,
+          end,
+          deadlineMs,
+          raw: compactEnsureDebug(result),
+        });
+      }
+      return result;
     } catch (error) {
       return {
         ok: false,
