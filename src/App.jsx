@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -105,6 +105,33 @@ const App = () => {
   const [animeState, setAnimeState] = useState({ anime: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [showWelcome, setShowWelcome] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [mpvDebugStatus, setMpvDebugStatus] = useState('idle');
+  const [mpvDebugAvailable, setMpvDebugAvailable] = useState(false);
+  const [mpvDebugError, setMpvDebugError] = useState('');
+  const [mpvDebugPath, setMpvDebugPath] = useState('');
+  const [mpvDebugProbePath, setMpvDebugProbePath] = useState('');
+  const [mpvDebugVersion, setMpvDebugVersion] = useState('');
+  const [mpvDebugSource, setMpvDebugSource] = useState('');
+  const [mpvDebugBusy, setMpvDebugBusy] = useState(false);
+  const [mpvDebugMode, setMpvDebugMode] = useState('native-host');
+  const [mpvDebugSourceType, setMpvDebugSourceType] = useState('embedded-file');
+  const [mpvDebugEmbedded, setMpvDebugEmbedded] = useState(false);
+  const [mpvDebugRenderMode, setMpvDebugRenderMode] = useState('d3d11');
+  const [mpvDebugProcessOutput, setMpvDebugProcessOutput] = useState('');
+  const [mpvSlotBounds, setMpvSlotBounds] = useState({ x: 260, y: 120, width: 900, height: 500 });
+  const [mpvDebugStreamUrl, setMpvDebugStreamUrl] = useState('');
+  const [mpvDebugStreamSessionId, setMpvDebugStreamSessionId] = useState('');
+  const [streamServerRunning, setStreamServerRunning] = useState(false);
+  const [streamServerPort, setStreamServerPort] = useState(null);
+  const [streamServerBaseUrl, setStreamServerBaseUrl] = useState('');
+  const [streamActiveSessionCount, setStreamActiveSessionCount] = useState(0);
+  const [streamSessions, setStreamSessions] = useState([]);
+  const [embeddedTorrentSource, setEmbeddedTorrentSource] = useState('');
+  const [embeddedTorrentSourceKind, setEmbeddedTorrentSourceKind] = useState('magnet');
+  const [embeddedTorrentStreamStatus, setEmbeddedTorrentStreamStatus] = useState(null);
+  const showMpvDebugPanel = window.electronAPI?.isDev === true;
+  const mpvNativeSlotRef = useRef(null);
+  const mpvBoundsThrottleRef = useRef(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -192,6 +219,93 @@ const App = () => {
   }, [watchStatusMap]);
 
   useEffect(() => {
+    if (!showMpvDebugPanel || !window.electronAPI?.getMpvStatus) return undefined;
+
+    let active = true;
+    const runAvailabilityCheck = async () => {
+      if (!window.electronAPI?.checkMpvAvailability) return;
+      try {
+        const availabilityResult = await window.electronAPI.checkMpvAvailability();
+        if (!active) return;
+        setMpvDebugAvailable(Boolean(availabilityResult?.available));
+        setMpvDebugPath(String(availabilityResult?.path || ''));
+        setMpvDebugProbePath(String(availabilityResult?.probePath || ''));
+        setMpvDebugVersion(String(availabilityResult?.version || ''));
+        if (availabilityResult?.error) {
+          setMpvDebugError(String(availabilityResult.error));
+        }
+      } catch (error) {
+        if (!active) return;
+        setMpvDebugError(String(error?.message || 'MPV availability check failed.'));
+      }
+    };
+
+    const refreshMpvStatus = async () => {
+      try {
+        const statusResult = await window.electronAPI.getMpvStatus();
+        if (!active) return;
+        setMpvDebugStatus(String(statusResult?.status || 'unknown'));
+        setMpvDebugError(String(statusResult?.error || statusResult?.details?.lastError || ''));
+        setMpvDebugProcessOutput(String(statusResult?.details?.lastProcessOutput || ''));
+      } catch (error) {
+        if (!active) return;
+        setMpvDebugStatus('error');
+        setMpvDebugError(String(error?.message || 'MPV status check failed.'));
+      }
+    };
+
+    runAvailabilityCheck();
+    refreshMpvStatus();
+    const timer = window.setInterval(refreshMpvStatus, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [showMpvDebugPanel]);
+
+  useEffect(() => {
+    if (!showMpvDebugPanel || !mpvNativeSlotRef.current) return undefined;
+
+    const emitBounds = () => {
+      const slot = mpvNativeSlotRef.current;
+      if (!slot) return;
+      const rect = slot.getBoundingClientRect();
+      const bounds = {
+        x: Math.max(0, Math.round(rect.left)),
+        y: Math.max(0, Math.round(rect.top)),
+        width: Math.max(100, Math.round(rect.width)),
+        height: Math.max(100, Math.round(rect.height)),
+      };
+      setMpvSlotBounds(bounds);
+      window.electronAPI?.updateNativeHostBounds?.(bounds).catch(() => {});
+    };
+
+    const scheduleEmit = () => {
+      if (mpvBoundsThrottleRef.current) return;
+      mpvBoundsThrottleRef.current = window.setTimeout(() => {
+        mpvBoundsThrottleRef.current = null;
+        emitBounds();
+      }, 100);
+    };
+
+    emitBounds();
+    const observer = new ResizeObserver(() => scheduleEmit());
+    observer.observe(mpvNativeSlotRef.current);
+    window.addEventListener('resize', scheduleEmit);
+    window.addEventListener('scroll', scheduleEmit, true);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleEmit);
+      window.removeEventListener('scroll', scheduleEmit, true);
+      if (mpvBoundsThrottleRef.current) {
+        window.clearTimeout(mpvBoundsThrottleRef.current);
+        mpvBoundsThrottleRef.current = null;
+      }
+    };
+  }, [showMpvDebugPanel]);
+
+  useEffect(() => {
     const onToast = (event) => {
       if (settings.notificationsEnabled === false) return;
       const detail = event?.detail || {};
@@ -242,6 +356,194 @@ const App = () => {
     setShowWelcome(false);
   };
 
+  const handleMpvStart = async () => {
+    if (!window.electronAPI?.startMpvPlayback || !mpvDebugSource.trim()) return;
+    setMpvDebugBusy(true);
+    try {
+      const source = mpvDebugSource.trim();
+      const startResult = await window.electronAPI.startMpvPlayback({
+        sourceType: mpvDebugSourceType,
+        source,
+        url: mpvDebugSourceType === 'embedded-stream-url' ? source : '',
+        filePath: mpvDebugSourceType === 'embedded-file' ? source : '',
+        title: 'CineSoft MPV',
+        mode: mpvDebugMode,
+        embedded: mpvDebugMode === 'external' && mpvDebugEmbedded,
+        renderMode: mpvDebugMode === 'external' && mpvDebugEmbedded ? mpvDebugRenderMode : 'default',
+        bounds: mpvDebugMode === 'native-host'
+          ? mpvSlotBounds
+          : (mpvDebugMode === 'external' && mpvDebugEmbedded ? { x: 260, y: 120, width: 900, height: 500 } : undefined),
+      });
+      setMpvDebugStatus(String(startResult?.status || 'unknown'));
+      setMpvDebugError(String(startResult?.error || ''));
+    } catch (error) {
+      setMpvDebugStatus('error');
+      setMpvDebugError(String(error?.message || 'Failed to start MPV.'));
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const refreshStreamServerStatus = async () => {
+    if (!window.electronAPI?.getLocalStreamServerStatus) return;
+    try {
+      const result = await window.electronAPI.getLocalStreamServerStatus();
+      if (!result?.ok) return;
+      setStreamServerRunning(Boolean(result.running));
+      setStreamServerPort(result.port ?? null);
+      setStreamServerBaseUrl(String(result.baseUrl || ''));
+      setStreamActiveSessionCount(Number(result.activeSessionCount || 0));
+      setStreamSessions(Array.isArray(result.sessions) ? result.sessions : []);
+    } catch {
+      // ignore debug refresh errors
+    }
+  };
+
+  const handleMpvCheck = async () => {
+    if (!window.electronAPI?.checkMpvAvailability) return;
+    setMpvDebugBusy(true);
+    try {
+      const result = await window.electronAPI.checkMpvAvailability();
+      setMpvDebugAvailable(Boolean(result?.available));
+      setMpvDebugPath(String(result?.path || ''));
+      setMpvDebugProbePath(String(result?.probePath || ''));
+      setMpvDebugVersion(String(result?.version || ''));
+      setMpvDebugError(String(result?.error || ''));
+    } catch (error) {
+      setMpvDebugError(String(error?.message || 'Failed to check MPV.'));
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const handleMpvStop = async () => {
+    if (!window.electronAPI?.stopMpvPlayback) return;
+    setMpvDebugBusy(true);
+    try {
+      const stopResult = await window.electronAPI.stopMpvPlayback();
+      setMpvDebugStatus(String(stopResult?.status || 'unknown'));
+      setMpvDebugError(String(stopResult?.error || ''));
+    } catch (error) {
+      setMpvDebugStatus('error');
+      setMpvDebugError(String(error?.message || 'Failed to stop MPV.'));
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const handlePlayViaLocalStream = async () => {
+    if (!window.electronAPI?.createLocalFileStreamSession || !window.electronAPI?.startMpvPlayback) return;
+    if (mpvDebugSourceType !== 'embedded-file' || !mpvDebugSource.trim()) return;
+    setMpvDebugBusy(true);
+    try {
+      const filePath = mpvDebugSource.trim();
+      const sessionResult = await window.electronAPI.createLocalFileStreamSession({
+        filePath,
+        title: 'CineSoft MPV Local Stream',
+      });
+      if (!sessionResult?.ok || !sessionResult?.streamUrl) {
+        throw new Error(sessionResult?.error || 'Failed to create local stream session.');
+      }
+      setMpvDebugStreamUrl(String(sessionResult.streamUrl));
+      setMpvDebugStreamSessionId(String(sessionResult.streamId || ''));
+      await refreshStreamServerStatus();
+
+      const startResult = await window.electronAPI.startMpvPlayback({
+        sourceType: 'embedded-stream-url',
+        source: String(sessionResult.streamUrl),
+        url: String(sessionResult.streamUrl),
+        title: 'CineSoft MPV Local Stream',
+        mode: mpvDebugMode,
+        embedded: mpvDebugMode === 'external' && mpvDebugEmbedded,
+        renderMode: mpvDebugMode === 'external' && mpvDebugEmbedded ? mpvDebugRenderMode : 'default',
+        bounds: mpvDebugMode === 'native-host'
+          ? mpvSlotBounds
+          : (mpvDebugMode === 'external' && mpvDebugEmbedded ? { x: 260, y: 120, width: 900, height: 500 } : undefined),
+      });
+      setMpvDebugStatus(String(startResult?.status || 'unknown'));
+      setMpvDebugError(String(startResult?.error || ''));
+    } catch (error) {
+      setMpvDebugStatus('error');
+      setMpvDebugError(String(error?.message || 'Failed to play via local stream.'));
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const handleCloseStreamSession = async () => {
+    if (!window.electronAPI?.closeStreamSession || !mpvDebugStreamSessionId) return;
+    setMpvDebugBusy(true);
+    try {
+      const result = await window.electronAPI.closeStreamSession(mpvDebugStreamSessionId);
+      if (!result?.ok) {
+        throw new Error(result?.error || 'Failed to close stream session.');
+      }
+      setMpvDebugStreamSessionId('');
+      setMpvDebugStreamUrl('');
+      await refreshStreamServerStatus();
+    } catch (error) {
+      setMpvDebugError(String(error?.message || 'Failed to close stream session.'));
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  const refreshEmbeddedTorrentStatus = async () => {
+    if (!window.electronAPI?.getEmbeddedTorrentStreamStatus) return;
+    try {
+      const result = await window.electronAPI.getEmbeddedTorrentStreamStatus();
+      if (!result?.ok) return;
+      setEmbeddedTorrentStreamStatus({
+        status: String(result?.status || 'idle'),
+        torrentId: result?.torrentId || null,
+        fileIndex: result?.fileIndex ?? null,
+        selectedFileName: result?.selectedFileName || null,
+        expectedSize: result?.expectedSize ?? null,
+        prebufferStart: result?.prebufferStart ?? null,
+        prebufferEnd: result?.prebufferEnd ?? null,
+        prebufferReady: Boolean(result?.prebufferReady),
+        missingPiecesCount: result?.missingPiecesCount ?? null,
+        elapsedMs: result?.elapsedMs ?? 0,
+        activeStreamCount: Number(result?.activeStreamCount || 0),
+        lastError: result?.lastError || '',
+      });
+    } catch {
+      // ignore debug refresh errors
+    }
+  };
+
+  const handleStartEmbeddedTorrentStream = async () => {
+    if (!window.electronAPI?.startEmbeddedTorrentStream) return;
+    if (!embeddedTorrentSource.trim()) return;
+    setMpvDebugBusy(true);
+    try {
+      const result = await window.electronAPI.startEmbeddedTorrentStream({
+        source: embeddedTorrentSource.trim(),
+        sourceKind: embeddedTorrentSourceKind,
+        title: 'CineSoft Embedded Torrent Stream',
+        bounds: mpvSlotBounds,
+      });
+      if (!result?.ok) {
+        throw new Error(result?.error || 'Embedded torrent stream start failed.');
+      }
+      setMpvDebugStreamSessionId(String(result.streamId || ''));
+      setMpvDebugStreamUrl(String(result.streamUrl || ''));
+      await refreshStreamServerStatus();
+      await refreshEmbeddedTorrentStatus();
+    } catch (error) {
+      setMpvDebugError(String(error?.message || 'Failed to start embedded torrent stream.'));
+      await refreshEmbeddedTorrentStatus();
+    } finally {
+      setMpvDebugBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showMpvDebugPanel) return;
+    refreshStreamServerStatus();
+    refreshEmbeddedTorrentStatus();
+  }, [showMpvDebugPanel]);
+
   if (loading) return <div className="loading">Loading...</div>;
   const defaultRoute = DEFAULT_PAGE_ROUTE_MAP[settings.defaultPage] || '/';
 
@@ -250,6 +552,13 @@ const App = () => {
       <div className="app-container">
         <Sidebar settings={settings} />
         <main className="main-content">
+          {showMpvDebugPanel && (
+            <section className="mpv-native-slot-wrap">
+              <div ref={mpvNativeSlotRef} className="mpv-native-slot">
+                <span>Native MPV Player Slot</span>
+              </div>
+            </section>
+          )}
           <Routes>
             <Route
               path="/"
@@ -271,6 +580,135 @@ const App = () => {
           </Routes>
         </main>
         {showWelcome && <WelcomeOverlay language={settings.language} onClose={dismissWelcome} />}
+        {showMpvDebugPanel && (
+          <aside className="mpv-debug-panel" role="status" aria-live="polite">
+            <strong>MPV Debug</strong>
+            <span>status: {mpvDebugStatus}</span>
+            <span>available: {String(mpvDebugAvailable)}</span>
+            {mpvDebugPath ? <span>path: {mpvDebugPath}</span> : null}
+            {mpvDebugProbePath ? <span>probePath: {mpvDebugProbePath}</span> : null}
+            {mpvDebugVersion ? <span>version: {mpvDebugVersion}</span> : null}
+            {mpvDebugError ? <span>error: {mpvDebugError}</span> : null}
+            {mpvDebugProcessOutput ? <span>mpv: {mpvDebugProcessOutput}</span> : null}
+            {mpvDebugStreamUrl ? <span>streamUrl: {mpvDebugStreamUrl}</span> : null}
+            <span>streamServerRunning: {String(streamServerRunning)}</span>
+            <span>streamServerPort: {streamServerPort ?? '-'}</span>
+            <span>streamServerBaseUrl: {streamServerBaseUrl || '-'}</span>
+            <span>activeSessionCount: {String(streamActiveSessionCount)}</span>
+            {streamSessions.slice(0, 3).map((session) => (
+              <span key={session.streamId}>
+                session[{session.streamId}]: type={session.sourceType || '-'} expectedSize={session.expectedSize ?? '-'} lastServed={session.lastServedStart ?? '-'}-{session.lastServedEnd ?? '-'} lastPrefetchAt={session.lastPrefetchAt ?? '-'}
+              </span>
+            ))}
+            {embeddedTorrentStreamStatus ? (
+              <>
+                <span>embeddedStatus: {embeddedTorrentStreamStatus.status}</span>
+                <span>embeddedActive: {embeddedTorrentStreamStatus.activeStreamCount}</span>
+                {embeddedTorrentStreamStatus.torrentId ? <span>embeddedTorrentId: {embeddedTorrentStreamStatus.torrentId}</span> : null}
+                {embeddedTorrentStreamStatus.fileIndex != null ? <span>embeddedFileIndex: {embeddedTorrentStreamStatus.fileIndex}</span> : null}
+                {embeddedTorrentStreamStatus.selectedFileName ? <span>embeddedFile: {embeddedTorrentStreamStatus.selectedFileName}</span> : null}
+                {embeddedTorrentStreamStatus.expectedSize != null ? <span>embeddedExpectedSize: {embeddedTorrentStreamStatus.expectedSize}</span> : null}
+                {embeddedTorrentStreamStatus.prebufferStart != null ? <span>prebufferStart: {embeddedTorrentStreamStatus.prebufferStart}</span> : null}
+                {embeddedTorrentStreamStatus.prebufferEnd != null ? <span>prebufferEnd: {embeddedTorrentStreamStatus.prebufferEnd}</span> : null}
+                <span>prebufferReady: {String(embeddedTorrentStreamStatus.prebufferReady)}</span>
+                {embeddedTorrentStreamStatus.missingPiecesCount != null ? <span>missingPieces: {embeddedTorrentStreamStatus.missingPiecesCount}</span> : null}
+                <span>embeddedElapsedMs: {embeddedTorrentStreamStatus.elapsedMs}</span>
+                {embeddedTorrentStreamStatus.lastError ? <span>embeddedError: {embeddedTorrentStreamStatus.lastError}</span> : null}
+              </>
+            ) : null}
+            <input
+              className="mpv-debug-input"
+              type="text"
+              value={embeddedTorrentSource}
+              onChange={(event) => setEmbeddedTorrentSource(event.target.value)}
+              placeholder="Magnet / torrent URL / infohash"
+            />
+            <label className="mpv-debug-check">
+              <span>Torrent sourceKind</span>
+              <select value={embeddedTorrentSourceKind} onChange={(event) => setEmbeddedTorrentSourceKind(event.target.value)}>
+                <option value="magnet">magnet</option>
+                <option value="torrent-url">torrent-url</option>
+                <option value="infohash">infohash</option>
+              </select>
+            </label>
+            <input
+              className="mpv-debug-input"
+              type="text"
+              value={mpvDebugSource}
+              onChange={(event) => setMpvDebugSource(event.target.value)}
+              placeholder="Video path or URL"
+            />
+            <label className="mpv-debug-check">
+              <span>Mode</span>
+              <select value={mpvDebugMode} onChange={(event) => setMpvDebugMode(event.target.value)}>
+                <option value="external">external</option>
+                <option value="native-host">native-host</option>
+              </select>
+            </label>
+            <label className="mpv-debug-check">
+              <span>Source type</span>
+              <select value={mpvDebugSourceType} onChange={(event) => setMpvDebugSourceType(event.target.value)}>
+                <option value="embedded-file">embedded-file</option>
+                <option value="embedded-stream-url">embedded-stream-url</option>
+              </select>
+            </label>
+            <label className="mpv-debug-check">
+              <input
+                type="checkbox"
+                checked={mpvDebugEmbedded}
+                disabled={mpvDebugMode === 'native-host'}
+                onChange={(event) => setMpvDebugEmbedded(event.target.checked)}
+              />
+              Embedded
+            </label>
+            {mpvDebugMode === 'external' && mpvDebugEmbedded ? (
+              <>
+                <label className="mpv-debug-check">
+                  <span>Embedded render mode</span>
+                  <select value={mpvDebugRenderMode} onChange={(event) => setMpvDebugRenderMode(event.target.value)}>
+                    <option value="default">default</option>
+                    <option value="d3d11">d3d11</option>
+                    <option value="angle">angle</option>
+                  </select>
+                </label>
+                <small className="mpv-debug-note">Embedded test bounds uses x:260 y:120 w:900 h:500. If hidden, move terminal/window aside.</small>
+              </>
+            ) : null}
+            {mpvDebugMode === 'native-host' ? (
+              <small className="mpv-debug-note">Native host borderless test mode (embedded libtorrent source model)</small>
+            ) : null}
+            <div className="mpv-debug-actions">
+              <button type="button" onClick={handleMpvCheck} disabled={mpvDebugBusy}>
+                Check MPV
+              </button>
+              <button type="button" onClick={refreshStreamServerStatus} disabled={mpvDebugBusy}>
+                Refresh Stream Status
+              </button>
+              <button type="button" onClick={refreshEmbeddedTorrentStatus} disabled={mpvDebugBusy}>
+                Refresh Embedded Status
+              </button>
+              <button type="button" onClick={handleMpvStart} disabled={mpvDebugBusy || !mpvDebugSource.trim()}>
+                Start MPV
+              </button>
+              <button type="button" onClick={handleStartEmbeddedTorrentStream} disabled={mpvDebugBusy || !embeddedTorrentSource.trim()}>
+                Start Embedded Torrent Stream
+              </button>
+              <button
+                type="button"
+                onClick={handlePlayViaLocalStream}
+                disabled={mpvDebugBusy || mpvDebugSourceType !== 'embedded-file' || !mpvDebugSource.trim()}
+              >
+                Play via Local Stream
+              </button>
+              <button type="button" onClick={handleMpvStop} disabled={mpvDebugBusy}>
+                Stop MPV
+              </button>
+              <button type="button" onClick={handleCloseStreamSession} disabled={mpvDebugBusy || !mpvDebugStreamSessionId}>
+                Close Stream Session
+              </button>
+            </div>
+          </aside>
+        )}
         <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
           {toasts.map((toast) => (
             <div key={toast.id} className={`app-toast app-toast-${toast.tone}`}>

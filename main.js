@@ -10,6 +10,10 @@ const { pathToFileURL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
 const sonarrService = require('./src/main/services/sonarrService');
 const { createEngineInstallerService } = require('./src/main/services/engineInstallerService');
+const { mpvPlayerService } = require('./src/main/services/mpvPlayerService');
+const { streamSessionManager } = require('./src/main/services/streamSessionManager');
+const { LocalStreamServer } = require('./src/main/services/localStreamServer');
+const { EmbeddedTorrentStreamService } = require('./src/main/services/embeddedTorrentStreamService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -35,6 +39,13 @@ let appTray = null;
 let trayAvailable = false;
 let isQuitting = false;
 let cleanupStarted = false;
+const localStreamServer = new LocalStreamServer(streamSessionManager);
+let embeddedTorrentStreamService = null;
+const isDevRuntime = () => (
+  !app.isPackaged
+  || process.env.NODE_ENV === 'development'
+  || Boolean(process.env.VITE_DEV_SERVER_URL)
+);
 
 const PERSISTED_DOWNLOADS_KEY = 'torrentDownloads';
 const TORRENT_SPEED_LIMIT_KEY = 'torrentDownloadSpeedLimitKbps';
@@ -1331,6 +1342,22 @@ const ensureTorrentManager = async () => {
   return torrentManager;
 };
 
+localStreamServer.setTorrentRangeChecker(async ({ torrentId, fileIndex, start, end }) => {
+  const tm = await ensureTorrentManager();
+  return tm.checkRangeStatus({ torrentId, fileIndex, start, end });
+});
+localStreamServer.setTorrentEnsureRange(async ({ torrentId, fileIndex, start, end, deadlineMs }) => {
+  const tm = await ensureTorrentManager();
+  return tm.ensureRange({ torrentId, fileIndex, start, end, deadlineMs });
+});
+
+embeddedTorrentStreamService = new EmbeddedTorrentStreamService({
+  getTorrentManager: ensureTorrentManager,
+  streamSessionManager,
+  localStreamServer,
+  mpvPlayerService,
+});
+
 const getAppRoot = () => app.isPackaged ? app.getAppPath() : __dirname;
 const sourcesModulePath = pathToFileURL(path.join(getAppRoot(), 'src', 'sources', 'index.mjs')).href;
 
@@ -1726,6 +1753,29 @@ const createTray = () => {
   return appTray;
 };
 
+const syncNativeHostVisibilityAndBounds = (win, action = 'update') => {
+  try {
+    if (!win || win.isDestroyed()) return;
+    if (action === 'close') {
+      mpvPlayerService.sendNativeHostCommand({ type: 'close' });
+      return;
+    }
+    if (action === 'hide') {
+      mpvPlayerService.hideNativeHost();
+      return;
+    }
+    if (action === 'show') {
+      mpvPlayerService.showNativeHost();
+    }
+    if (action === 'move') {
+      return;
+    }
+    mpvPlayerService.updateNativeHostBounds(mpvPlayerService.getLastNativeHostBounds());
+  } catch {
+    // ignore sync errors
+  }
+};
+
 function createWindow() {
   const isDevMode = !app.isPackaged;
   const windowIconPath = getWindowIconPath();
@@ -1770,6 +1820,14 @@ function createWindow() {
     requestQuitFromTray().catch(() => {});
   });
 
+  win.on('move', () => syncNativeHostVisibilityAndBounds(win, 'move'));
+  win.on('resize', () => syncNativeHostVisibilityAndBounds(win, 'update'));
+  win.on('minimize', () => syncNativeHostVisibilityAndBounds(win, 'hide'));
+  win.on('restore', () => syncNativeHostVisibilityAndBounds(win, 'show'));
+  win.on('hide', () => syncNativeHostVisibilityAndBounds(win, 'hide'));
+  win.on('show', () => syncNativeHostVisibilityAndBounds(win, 'show'));
+  win.on('close', () => syncNativeHostVisibilityAndBounds(win, 'close'));
+
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null;
@@ -1802,6 +1860,7 @@ function createWindow() {
   //   win.webContents.openDevTools();
   // }
   mainWindow = win;
+  mpvPlayerService.setMainWindow(mainWindow);
   return win;
 }
 
@@ -1833,6 +1892,9 @@ app.on('before-quit', () => {
     clearInterval(torrentRulesInterval);
     torrentRulesInterval = null;
   }
+  mpvPlayerService.shutdown().catch(() => {});
+  localStreamServer.stop().catch(() => {});
+  streamSessionManager.closeAll();
 });
 
 app.on('child-process-gone', (_event, details) => {
@@ -3194,6 +3256,14 @@ ipcMain.handle('start-managed-prowlarr', async (event, prowlarrConfig) => {
     store.set('prowlarrAutoStartDisabled', false);
   }
   return result;
+});
+
+ipcMain.on('app:is-dev-sync', (event) => {
+  try {
+    event.returnValue = isDevRuntime();
+  } catch {
+    event.returnValue = false;
+  }
 });
 
 ipcMain.handle('stop-managed-prowlarr', async () => {
@@ -4638,6 +4708,225 @@ ipcMain.handle('library-subtitles-download', async (event, payload = {}) => {
   }
 });
 
+
+const toSafeMpvIpcResponse = (payload = {}) => ({
+  ok: Boolean(payload?.ok),
+  status: typeof payload?.status === 'string' ? payload.status : undefined,
+  error: typeof payload?.error === 'string' ? payload.error : undefined,
+  details: payload?.details,
+});
+
+ipcMain.handle('mpv:get-status', async () => {
+  try {
+    const statusPayload = mpvPlayerService.getMpvStatus();
+    return toSafeMpvIpcResponse({
+      ok: true,
+      status: statusPayload?.status,
+      details: statusPayload,
+    });
+  } catch (error) {
+    console.error('[MpvPlayer] get-status failed:', error);
+    return toSafeMpvIpcResponse({ ok: false, status: 'error', error: error?.message || 'Failed to get MPV status.' });
+  }
+});
+
+ipcMain.handle('mpv:check-availability', async () => {
+  try {
+    const result = await mpvPlayerService.checkMpvAvailability();
+    return {
+      ok: Boolean(result?.ok),
+      available: Boolean(result?.available),
+      path: result?.path || null,
+      probePath: result?.probePath || null,
+      version: result?.version || null,
+      status: typeof result?.status === 'string' ? result.status : undefined,
+      error: typeof result?.error === 'string' ? result.error : undefined,
+    };
+  } catch (error) {
+    console.error('[MpvPlayer] availability check failed:', error);
+    return {
+      ok: false,
+      available: false,
+      path: null,
+      probePath: null,
+      version: null,
+      status: 'error',
+      error: error?.message || 'Failed to check MPV availability.',
+    };
+  }
+});
+
+ipcMain.handle('mpv:start', async (event, options = {}) => {
+  try {
+    const result = await mpvPlayerService.startMpvPlayback(options);
+    return toSafeMpvIpcResponse(result);
+  } catch (error) {
+    console.error('[MpvPlayer] start failed:', error);
+    return toSafeMpvIpcResponse({ ok: false, status: 'error', error: error?.message || 'Failed to start MPV playback.' });
+  }
+});
+
+ipcMain.handle('mpv:stop', async () => {
+  try {
+    const result = await mpvPlayerService.stopMpvPlayback();
+    return toSafeMpvIpcResponse(result);
+  } catch (error) {
+    console.error('[MpvPlayer] stop failed:', error);
+    return toSafeMpvIpcResponse({ ok: false, status: 'error', error: error?.message || 'Failed to stop MPV playback.' });
+  }
+});
+
+ipcMain.handle('mpv:resize', async (event, bounds = {}) => {
+  try {
+    const result = mpvPlayerService.resizeMpvViewport(bounds);
+    return toSafeMpvIpcResponse(result);
+  } catch (error) {
+    console.error('[MpvPlayer] resize failed:', error);
+    return toSafeMpvIpcResponse({ ok: false, status: 'error', error: error?.message || 'Failed to resize MPV viewport.' });
+  }
+});
+
+ipcMain.handle('mpv:update-native-host-bounds', async (event, bounds = {}) => {
+  try {
+    const applied = mpvPlayerService.updateNativeHostBounds(bounds);
+    const statusPayload = mpvPlayerService.getMpvStatus();
+    return toSafeMpvIpcResponse({
+      ok: true,
+      status: statusPayload?.status,
+      details: {
+        applied,
+        bounds: mpvPlayerService.getLastNativeHostBounds(),
+      },
+    });
+  } catch (error) {
+    return toSafeMpvIpcResponse({
+      ok: false,
+      status: 'error',
+      error: error?.message || 'Failed to update native host bounds.',
+    });
+  }
+});
+
+ipcMain.handle('stream:create-local-file-session', async (event, payload = {}) => {
+  try {
+    const filePath = String(payload?.filePath || '').trim();
+    const title = String(payload?.title || '').trim();
+    if (!filePath) {
+      return { ok: false, error: 'filePath is required.' };
+    }
+    const session = streamSessionManager.createLocalFileSession({ filePath, title });
+    await localStreamServer.start();
+    const streamUrl = localStreamServer.getStreamUrl(session.streamId);
+    return {
+      ok: true,
+      streamId: session.streamId,
+      streamUrl,
+      filePath: session.filePath,
+      mime: session.mime,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to create local file stream session.' };
+  }
+});
+
+ipcMain.handle('stream:close-session', async (event, streamId) => {
+  try {
+    const closed = streamSessionManager.closeSession(streamId);
+    return {
+      ok: true,
+      closed: Boolean(closed),
+      activeSessionCount: streamSessionManager.getSessionCount(),
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to close stream session.' };
+  }
+});
+
+ipcMain.handle('stream:get-server-status', async () => {
+  try {
+    const sessions = streamSessionManager.listSessions().map((session) => ({
+      streamId: session.streamId,
+      sourceType: session.sourceType,
+      torrentId: session.torrentId ?? null,
+      fileIndex: session.fileIndex ?? null,
+      readinessMode: session.readinessMode ?? null,
+      filePath: session.filePath,
+      title: session.title,
+      mime: session.mime,
+      expectedSize: session.expectedSize ?? null,
+      lastServedStart: session.lastServedStart ?? null,
+      lastServedEnd: session.lastServedEnd ?? null,
+      lastPrefetchAt: session.lastPrefetchAt ?? null,
+      createdAt: session.createdAt,
+      lastAccessAt: session.lastAccessAt,
+      streamUrl: localStreamServer.getStreamUrl(session.streamId) || null,
+    }));
+    return {
+      ok: true,
+      running: localStreamServer.isRunning(),
+      port: localStreamServer.getPort(),
+      baseUrl: localStreamServer.getBaseUrl() || null,
+      activeSessionCount: streamSessionManager.getSessionCount(),
+      sessions,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to get stream server status.' };
+  }
+});
+
+ipcMain.handle('stream:get-active-sessions', async () => {
+  try {
+    const sessions = streamSessionManager.listSessions().map((session) => ({
+      streamId: session.streamId,
+      sourceType: session.sourceType,
+      torrentId: session.torrentId ?? null,
+      fileIndex: session.fileIndex ?? null,
+      readinessMode: session.readinessMode ?? null,
+      filePath: session.filePath,
+      title: session.title,
+      mime: session.mime,
+      expectedSize: session.expectedSize ?? null,
+      lastServedStart: session.lastServedStart ?? null,
+      lastServedEnd: session.lastServedEnd ?? null,
+      lastPrefetchAt: session.lastPrefetchAt ?? null,
+      createdAt: session.createdAt,
+      lastAccessAt: session.lastAccessAt,
+      streamUrl: localStreamServer.getStreamUrl(session.streamId) || null,
+    }));
+    return {
+      ok: true,
+      activeSessionCount: sessions.length,
+      sessions,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to get active stream sessions.' };
+  }
+});
+
+ipcMain.handle('stream:start-embedded-torrent', async (event, payload = {}) => {
+  try {
+    return await embeddedTorrentStreamService.startEmbeddedTorrentStream(payload);
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to start embedded torrent stream.' };
+  }
+});
+
+ipcMain.handle('stream:stop-embedded-torrent', async (event, streamId) => {
+  try {
+    return await embeddedTorrentStreamService.stopEmbeddedTorrentStream(streamId);
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to stop embedded torrent stream.' };
+  }
+});
+
+ipcMain.handle('stream:get-embedded-torrent-status', async () => {
+  try {
+    return embeddedTorrentStreamService.getEmbeddedTorrentStreamStatus();
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to get embedded torrent stream status.' };
+  }
+});
+
 ipcMain.handle('logs-get', async () => ({ ok: true, logs: appLogs }));
 ipcMain.handle('logs-clear', async () => {
   appLogs.length = 0;
@@ -4711,3 +5000,5 @@ ipcMain.handle('open-library-folder', async (event, payload = {}) => {
     return { ok: false, error: err.message };
   }
 });
+
+

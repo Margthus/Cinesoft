@@ -79,6 +79,11 @@ entities.json
 __pycache__/
 *.pyc
 
+# MPV / native host build artifacts
+resources/mpv/*.pdb
+tools/mpv-host/bin/
+tools/mpv-host/obj/
+
 .codex/
 scratch_test.js
 

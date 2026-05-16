@@ -1,4 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const computeIsDev = () => {
+  try {
+    const fromMain = ipcRenderer.sendSync('app:is-dev-sync');
+    if (typeof fromMain === 'boolean') return fromMain;
+  } catch {
+    // fallback to env-based checks
+  }
+  return process.env.NODE_ENV === 'development' || Boolean(process.env.VITE_DEV_SERVER_URL);
+};
+const IS_DEV = computeIsDev();
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAuthState: () => ipcRenderer.invoke('get-auth-state'),
@@ -109,7 +119,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDownloadDir: () => ipcRenderer.invoke('select-download-dir'),
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
   getDownloadDirFreeSpace: () => ipcRenderer.invoke('get-download-dir-free-space'),
-  isDev: process.env.NODE_ENV === 'development',
+  getMpvStatus: () => ipcRenderer.invoke('mpv:get-status'),
+  checkMpvAvailability: () => ipcRenderer.invoke('mpv:check-availability'),
+  startMpvPlayback: (options) => ipcRenderer.invoke('mpv:start', options),
+  stopMpvPlayback: () => ipcRenderer.invoke('mpv:stop'),
+  resizeMpvViewport: (bounds) => ipcRenderer.invoke('mpv:resize', bounds),
+  updateNativeHostBounds: (bounds) => ipcRenderer.invoke('mpv:update-native-host-bounds', bounds),
+  createLocalFileStreamSession: (payload) => ipcRenderer.invoke('stream:create-local-file-session', payload),
+  closeStreamSession: (streamId) => ipcRenderer.invoke('stream:close-session', streamId),
+  getLocalStreamServerStatus: () => ipcRenderer.invoke('stream:get-server-status'),
+  getActiveStreamSessions: () => ipcRenderer.invoke('stream:get-active-sessions'),
+  startEmbeddedTorrentStream: (payload) => ipcRenderer.invoke('stream:start-embedded-torrent', payload),
+  stopEmbeddedTorrentStream: (streamId) => ipcRenderer.invoke('stream:stop-embedded-torrent', streamId),
+  getEmbeddedTorrentStreamStatus: () => ipcRenderer.invoke('stream:get-embedded-torrent-status'),
+  isDev: IS_DEV,
 });
 
 contextBridge.exposeInMainWorld('cinesoft', {
@@ -119,3 +142,4 @@ contextBridge.exposeInMainWorld('cinesoft', {
     findExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   },
 });
+

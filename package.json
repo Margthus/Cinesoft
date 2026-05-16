@@ -62,6 +62,10 @@
       {
         "from": "build/icon.ico",
         "to": "build/icon.ico"
+      },
+      {
+        "from": "resources/mpv",
+        "to": "mpv"
       }
     ],
     "asarUnpack": [

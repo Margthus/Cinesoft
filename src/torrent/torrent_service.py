@@ -585,6 +585,10 @@ class APIHandler(BaseHTTPRequestHandler):
             self._handle_set_speed_limit()
         elif path == "/session-options":
             self._handle_session_options()
+        elif path == "/stream/range-status":
+            self._handle_stream_range_status()
+        elif path == "/stream/ensure-range":
+            self._handle_stream_ensure_range()
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
 
@@ -699,6 +703,86 @@ class APIHandler(BaseHTTPRequestHandler):
                 "size": files.file_size(i),
             })
         return out
+
+    def _resolve_file_offset_and_size(self, ti, file_index):
+        files = ti.files()
+        if file_index < 0 or file_index >= files.num_files():
+            raise ValueError("Invalid fileIndex")
+        file_size = int(files.file_size(file_index))
+        if file_size <= 0:
+            raise ValueError("Invalid file size")
+
+        # libtorrent API differs by version; prefer direct offset if available, fallback to cumulative sum.
+        try:
+            file_offset = int(files.file_offset(file_index))
+            return file_offset, file_size
+        except Exception:
+            pass
+
+        try:
+            file_offset = 0
+            for idx in range(file_index):
+                file_offset += int(files.file_size(idx))
+            return file_offset, file_size
+        except Exception as exc:
+            raise ValueError(f"Could not compute file offset: {exc}")
+
+    def _compute_range_piece_status(self, handle, torrent_id, file_index, start, end):
+        if not is_handle_valid(handle):
+            return {"ok": False, "status": 410, "error": "Torrent removed"}
+
+        try:
+            ti = handle.torrent_file()
+        except RuntimeError as exc:
+            return {"ok": False, "status": 410, "error": f"Torrent removed: {exc}"}
+        if not ti:
+            return {"ok": False, "status": 503, "error": "Metadata not ready"}
+
+        try:
+            file_offset, file_size = self._resolve_file_offset_and_size(ti, file_index)
+        except ValueError as exc:
+            return {"ok": False, "status": 422, "error": str(exc)}
+
+        if start >= file_size:
+            return {"ok": False, "status": 416, "error": "Range start exceeds file size"}
+
+        end = min(end, file_size - 1)
+        global_start = file_offset + start
+        global_end = file_offset + end
+
+        try:
+            piece_length = int(ti.piece_length())
+        except Exception as exc:
+            return {"ok": False, "status": 500, "error": f"Could not read piece length: {exc}"}
+        if piece_length <= 0:
+            return {"ok": False, "status": 500, "error": "Invalid piece length"}
+
+        first_piece = global_start // piece_length
+        last_piece = global_end // piece_length
+
+        missing_pieces = []
+        checked_pieces = 0
+        try:
+            for piece_idx in range(first_piece, last_piece + 1):
+                checked_pieces += 1
+                if not handle.have_piece(piece_idx):
+                    missing_pieces.append(piece_idx)
+        except Exception as exc:
+            return {"ok": False, "status": 500, "error": f"Could not check pieces: {exc}"}
+
+        return {
+            "ok": True,
+            "ready": len(missing_pieces) == 0,
+            "torrentId": torrent_id,
+            "fileIndex": file_index,
+            "start": start,
+            "end": end,
+            "pieceLength": piece_length,
+            "firstPiece": first_piece,
+            "lastPiece": last_piece,
+            "missingPieces": missing_pieces,
+            "checkedPieces": checked_pieces,
+        }
 
     def _handle_add(self):
         data = self._read_json()
@@ -977,6 +1061,108 @@ class APIHandler(BaseHTTPRequestHandler):
         limit_bps = data.get("downloadRateLimit", 0)
         applied = apply_download_rate_limit(limit_bps)
         self._send_json({"ok": True, "downloadRateLimit": applied})
+
+    def _handle_stream_range_status(self):
+        data = self._read_json()
+        torrent_id = str(data.get("torrentId") or "").strip()
+        file_index_raw = data.get("fileIndex")
+        start_raw = data.get("start")
+        end_raw = data.get("end")
+
+        if not torrent_id:
+            self._send_json({"ok": False, "error": "torrentId is required"}, 400)
+            return
+        if torrent_id not in torrents:
+            self._send_json({"ok": False, "error": "Torrent not found"}, 404)
+            return
+
+        try:
+            file_index = int(file_index_raw)
+            start = int(start_raw)
+            end = int(end_raw)
+        except Exception:
+            self._send_json({"ok": False, "error": "fileIndex/start/end must be integers"}, 400)
+            return
+
+        if file_index < 0 or start < 0 or end < 0 or start > end:
+            self._send_json({"ok": False, "error": "Invalid range parameters"}, 400)
+            return
+
+        entry = torrents[torrent_id]
+        handle = entry.get("handle")
+        status = self._compute_range_piece_status(handle, torrent_id, file_index, start, end)
+        if not status.get("ok"):
+            self._send_json({"ok": False, "error": status.get("error", "Range status failed")}, int(status.get("status", 500)))
+            return
+        self._send_json(status)
+
+    def _handle_stream_ensure_range(self):
+        data = self._read_json()
+        torrent_id = str(data.get("torrentId") or "").strip()
+        file_index_raw = data.get("fileIndex")
+        start_raw = data.get("start")
+        end_raw = data.get("end")
+        deadline_ms_raw = data.get("deadlineMs", 1000)
+
+        if not torrent_id:
+            self._send_json({"ok": False, "ready": False, "error": "torrentId is required"}, 400)
+            return
+        if torrent_id not in torrents:
+            self._send_json({"ok": False, "ready": False, "error": "Torrent not found"}, 404)
+            return
+
+        try:
+            file_index = int(file_index_raw)
+            start = int(start_raw)
+            end = int(end_raw)
+            deadline_ms = max(1, int(deadline_ms_raw))
+        except Exception:
+            self._send_json({"ok": False, "ready": False, "error": "fileIndex/start/end/deadlineMs must be integers"}, 400)
+            return
+
+        if file_index < 0 or start < 0 or end < 0 or start > end:
+            self._send_json({"ok": False, "ready": False, "error": "Invalid range parameters"}, 400)
+            return
+
+        entry = torrents[torrent_id]
+        handle = entry.get("handle")
+        status = self._compute_range_piece_status(handle, torrent_id, file_index, start, end)
+        if not status.get("ok"):
+            self._send_json({"ok": False, "ready": False, "error": status.get("error", "Ensure range failed")}, int(status.get("status", 500)))
+            return
+        if status.get("ready") is True:
+            status["prioritizedPieces"] = 0
+            status["deadlineMs"] = deadline_ms
+            self._send_json(status)
+            return
+
+        try:
+            paused = bool(handle.status().flags & lt.torrent_flags.paused)
+        except Exception:
+            paused = False
+        if paused:
+            status["prioritizedPieces"] = 0
+            status["ready"] = False
+            status["deadlineMs"] = deadline_ms
+            status["error"] = "Torrent is paused"
+            self._send_json(status)
+            return
+
+        prioritized = 0
+        for piece_idx in status.get("missingPieces", []):
+            try:
+                handle.piece_priority(int(piece_idx), 7)
+                prioritized += 1
+            except Exception as exc:
+                log_warning("piece_priority_failed", torrent=torrent_id, piece=int(piece_idx), error=str(exc))
+            try:
+                handle.set_piece_deadline(int(piece_idx), deadline_ms)
+            except Exception as exc:
+                log_warning("piece_deadline_failed", torrent=torrent_id, piece=int(piece_idx), deadlineMs=deadline_ms, error=str(exc))
+
+        status["prioritizedPieces"] = prioritized
+        status["deadlineMs"] = deadline_ms
+        self._send_json(status)
 
 
 def main():

@@ -185,6 +185,43 @@ class TorrentManager {
     return this._request('POST', '/session-options', options || {});
   }
 
+  /** Check torrent piece readiness for a byte range. */
+  async checkRangeStatus({ torrentId, fileIndex, start, end } = {}) {
+    try {
+      return await this._request('POST', '/stream/range-status', {
+        torrentId,
+        fileIndex,
+        start,
+        end,
+      }, 10000);
+    } catch (error) {
+      return {
+        ok: false,
+        ready: false,
+        error: String(error?.message || 'range-status request failed'),
+      };
+    }
+  }
+
+  /** Ensure torrent pieces for a byte range are prioritized/deadlined. */
+  async ensureRange({ torrentId, fileIndex, start, end, deadlineMs = 1000 } = {}) {
+    try {
+      return await this._request('POST', '/stream/ensure-range', {
+        torrentId,
+        fileIndex,
+        start,
+        end,
+        deadlineMs,
+      }, 10000);
+    } catch (error) {
+      return {
+        ok: false,
+        ready: false,
+        error: String(error?.message || 'ensure-range request failed'),
+      };
+    }
+  }
+
 
   /** Pause a torrent. */
   async pause(id) {
