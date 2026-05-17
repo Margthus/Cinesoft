@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const DEBUG_TORRSERVER_STREAM = String(process.env.DEBUG_TORRSERVER_STREAM || '').toLowerCase() === 'true';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAuthState: () => ipcRenderer.invoke('get-auth-state'),
@@ -94,8 +95,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   torrentGetSettings: () => ipcRenderer.invoke('torrent-get-settings'),
   torrentSaveSettings: (settings) => ipcRenderer.invoke('torrent-save-settings', settings),
   openTorrentVideo: (payload) => ipcRenderer.invoke('open-torrent-video', payload),
+  selectTorrServerExecutable: () => ipcRenderer.invoke('select-torrserver-executable'),
+  getTorrServerSettings: () => ipcRenderer.invoke('torrserver:get-settings'),
+  saveTorrServerSettings: (settings) => ipcRenderer.invoke('torrserver:save-settings', settings),
   getTorrServerStatus: () => ipcRenderer.invoke('torrserver:status'),
-  startTorrServerStream: (payload) => ipcRenderer.invoke('torrserver:start-stream', payload),
+  startTorrServer: (settings) => ipcRenderer.invoke('torrserver:start', settings),
+  stopTorrServer: () => ipcRenderer.invoke('torrserver:stop'),
+  testTorrServer: (settings) => ipcRenderer.invoke('torrserver:test', settings),
+  startTorrServerStream: async (payload) => {
+    const result = await ipcRenderer.invoke('torrserver:start-stream', payload);
+    if (DEBUG_TORRSERVER_STREAM) {
+      try {
+        console.log('[TorrServerUI:StartStreamResult]', {
+          ok: Boolean(result),
+          streamUrl: result?.streamUrl || '',
+          player: result?.player || null,
+          error: result?.error || '',
+        });
+      } catch {}
+    }
+    return result;
+  },
+  torrserverDebugEnabled: DEBUG_TORRSERVER_STREAM,
+  openTorrServerWeb: (settings) => ipcRenderer.invoke('torrserver:open-web', settings),
   stopMpv: () => ipcRenderer.invoke('mpv:stop'),
   scanLibrary: () => ipcRenderer.invoke('library-scan'),
   openLibraryVideo: (payload) => ipcRenderer.invoke('open-library-video', payload),

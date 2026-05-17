@@ -10,8 +10,16 @@ const { pathToFileURL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
 const sonarrService = require('./src/main/services/sonarrService');
 const { createEngineInstallerService } = require('./src/main/services/engineInstallerService');
-const { getTorrServerStatus, startTorrServerStream } = require('./src/main/services/torrServerService');
-const { playWithMpv, stopMpv } = require('./src/main/services/mpvPlayerService');
+const {
+  DEFAULT_PORT: TORRSERVER_DEFAULT_PORT,
+  normalizeTorrServerSettings,
+  getTorrServerStatus,
+  startTorrServer,
+  stopTorrServer,
+  testTorrServerConnection,
+  startTorrServerStream,
+} = require('./src/main/services/torrServerService');
+const { playWithMpv, stopMpv, setMpvExitHandler } = require('./src/main/services/mpvPlayerService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -98,6 +106,17 @@ const FALLBACK_SUBTITLE_ADDON_BASE_URLS = [
   'https://turkcealtyaziorg-stremio-addon.mycodelab.live',
   'https://turkcealtyaziorg-stremio-addon.mycodelab.com.tr',
 ];
+const DEFAULT_TORRSERVER_SETTINGS = {
+  enabled: false,
+  exePath: '',
+  port: TORRSERVER_DEFAULT_PORT,
+  autoStartOnStream: true,
+  stopWhenPlaybackEnds: true,
+  dataDir: '',
+  cacheDir: '',
+  cacheSize: null,
+};
+const DEBUG_TORRSERVER_STREAM = String(process.env.DEBUG_TORRSERVER_STREAM || '').toLowerCase() === 'true';
 
 const normalizeHttpUrl = (value = '', label = 'URL') => {
   const raw = String(value || '').trim();
@@ -1363,12 +1382,31 @@ const getSonarrConfig = () => ({
   sonarrDefaultQualityProfileId: store.get('sonarrDefaultQualityProfileId') ?? '',
   sonarrSearchAfterAdd: store.get('sonarrSearchAfterAdd') !== false,
 });
+const getTorrServerConfig = () => {
+  const saved = store.get('torrserver') || {};
+  return normalizeTorrServerSettings({
+    ...DEFAULT_TORRSERVER_SETTINGS,
+    ...saved,
+    port: Number(saved?.port || TORRSERVER_DEFAULT_PORT),
+  }, app.getPath('userData'));
+};
 let prowlarrProcess = null;
 let radarrProcess = null;
 let sonarrProcess = null;
 let forceQuitTimer = null;
 const managedProcesses = new Map();
 const startingEngines = new Set();
+let activePlaybackKind = '';
+let closeManagedTorrServerWhenMpvExits = false;
+setMpvExitHandler(async () => {
+  if (activePlaybackKind !== 'torrserver-stream') return;
+  activePlaybackKind = '';
+  if (!closeManagedTorrServerWhenMpvExits) return;
+  closeManagedTorrServerWhenMpvExits = false;
+  try {
+    await stopTorrServer(getTorrServerConfig(), { onlyIfManaged: true });
+  } catch {}
+});
 const getStoredAuthUser = () => store.get('authUser') || null;
 const getStoredAuthSession = () => store.get('authSession') || { authenticated: false, rememberMe: false, username: '' };
 
@@ -1411,6 +1449,9 @@ if (!store.has('sonarrAutoStartDisabled')) {
 }
 if (!store.has('authSession')) {
   store.set('authSession', { authenticated: false, rememberMe: false, username: '' });
+}
+if (!store.has('torrserver')) {
+  store.set('torrserver', { ...DEFAULT_TORRSERVER_SETTINGS });
 }
 
 // Balanced GPU strategy:
@@ -2673,6 +2714,7 @@ ipcMain.handle('get-settings', () => {
   let prowlarr = store.get('prowlarr') || {};
   let radarr = getRadarrConfig();
   let sonarr = getSonarrConfig();
+  const torrserver = getTorrServerConfig();
 
   if (prowlarr?.managed === true) {
     const prepared = ensureProwlarrConfigFile(prowlarr);
@@ -2753,6 +2795,7 @@ ipcMain.handle('get-settings', () => {
       ...(torrentio.enabledSites || {}),
       },
     },
+    torrserver,
     ...radarr,
     ...sonarr,
   };
@@ -2900,6 +2943,10 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('sonarrDefaultRootFolder', String(settings.sonarrDefaultRootFolder || '').trim());
   store.set('sonarrDefaultQualityProfileId', settings.sonarrDefaultQualityProfileId ?? '');
   store.set('sonarrSearchAfterAdd', settings.sonarrSearchAfterAdd !== false);
+  if (settings?.torrserver && typeof settings.torrserver === 'object') {
+    const nextTorrServer = normalizeTorrServerSettings(settings.torrserver, app.getPath('userData'));
+    store.set('torrserver', nextTorrServer);
+  }
   const savedApiKey = store.get('apiKey') || '';
   const savedProwlarr = store.get('prowlarr') || {};
   const savedRadarrEnabled = store.get('radarrEnabled') === true;
@@ -3334,16 +3381,107 @@ ipcMain.handle('engine:find-exe', async (event, appName) => {
   };
 });
 
+ipcMain.handle('select-torrserver-executable', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select TorrServer executable',
+    properties: ['openFile'],
+    filters: process.platform === 'win32'
+      ? [{ name: 'TorrServer', extensions: ['exe'] }]
+      : [{ name: 'TorrServer', extensions: ['*'] }],
+  });
+  if (result.canceled || !result.filePaths[0]) return '';
+  return result.filePaths[0];
+});
+
+ipcMain.handle('torrserver:get-settings', async () => {
+  return getTorrServerConfig();
+});
+
+ipcMain.handle('torrserver:save-settings', async (event, settings = {}) => {
+  const normalized = normalizeTorrServerSettings(settings, app.getPath('userData'));
+  store.set('torrserver', normalized);
+  return { ok: true, settings: normalized };
+});
+
 ipcMain.handle('torrserver:status', async () => {
-  return getTorrServerStatus();
+  return getTorrServerStatus(getTorrServerConfig());
+});
+
+ipcMain.handle('torrserver:start', async (event, settings = {}) => {
+  const merged = normalizeTorrServerSettings({ ...getTorrServerConfig(), ...(settings || {}) }, app.getPath('userData'));
+  const result = await startTorrServer(merged);
+  store.set('torrserver', merged);
+  return result;
+});
+
+ipcMain.handle('torrserver:stop', async () => {
+  const result = await stopTorrServer(getTorrServerConfig());
+  closeManagedTorrServerWhenMpvExits = false;
+  if (activePlaybackKind === 'torrserver-stream') activePlaybackKind = '';
+  return result;
+});
+
+ipcMain.handle('torrserver:test', async (event, settings = {}) => {
+  const merged = normalizeTorrServerSettings({ ...getTorrServerConfig(), ...(settings || {}) }, app.getPath('userData'));
+  return testTorrServerConnection(merged);
+});
+
+ipcMain.handle('torrserver:open-web', async (event, settings = {}) => {
+  try {
+    const merged = normalizeTorrServerSettings({ ...getTorrServerConfig(), ...(settings || {}) }, app.getPath('userData'));
+    const baseUrl = String(merged.baseUrl || `http://127.0.0.1:${merged.port}`).replace(/\/+$/, '');
+    await shell.openExternal(baseUrl);
+    return { ok: true, baseUrl };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 });
 
 ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
-  const result = await startTorrServerStream(payload || {});
-  const player = playWithMpv({
+  const preview = (value) => String(value || '').slice(0, 160).replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***');
+  if (DEBUG_TORRSERVER_STREAM) {
+    console.log('[IPC:TorrServerStartStreamPayloadKeys]', {
+      topLevelKeys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+      sourceKeys: payload?.source && typeof payload.source === 'object' ? Object.keys(payload.source) : [],
+      resultKeys: payload?.result && typeof payload.result === 'object' ? Object.keys(payload.result) : [],
+      itemKeys: payload?.item && typeof payload.item === 'object' ? Object.keys(payload.item) : [],
+    });
+    console.log('[IPC:TorrServerStartStreamPayloadDebug]', {
+      topLevelKeys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+      sourceKeys: payload?.source && typeof payload.source === 'object' ? Object.keys(payload.source) : [],
+      rawSourceKeys: payload?.rawSource && typeof payload.rawSource === 'object' ? Object.keys(payload.rawSource) : [],
+      selectedSourceKeys: payload?.selectedSource && typeof payload.selectedSource === 'object' ? Object.keys(payload.selectedSource) : [],
+      magnetPreview: preview(payload?.magnet),
+      torrentUrlPreview: preview(payload?.torrentUrl),
+      sourceMagnetPreview: preview(payload?.source?.magnet),
+      sourceTorrentUrlPreview: preview(payload?.source?.torrentUrl),
+      rawSourcePreview: JSON.stringify(payload?.rawSource || payload?.source || {}).slice(0, 2000),
+    });
+    console.log('[IPC:TorrServerStartStream]', {
+      title: payload?.title || '',
+      hasMagnet: Boolean(payload?.magnet || payload?.source?.magnet || payload?.result?.magnet),
+      hasTorrentUrl: Boolean(payload?.torrentUrl || payload?.source?.torrentUrl || payload?.result?.torrentUrl),
+      hasLink: Boolean(payload?.link),
+    });
+  }
+  const torrServerSettings = getTorrServerConfig();
+  const result = await startTorrServerStream(payload || {}, torrServerSettings);
+  if (DEBUG_TORRSERVER_STREAM) {
+    console.log('[TorrServerPlayer:LaunchMpv]', {
+      sourceType: 'url',
+      url: String(result?.streamUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
+      playlistUrl: String(result?.playlistUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
+      title: payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream',
+    });
+  }
+  const player = await playWithMpv({
+    sourceType: 'url',
     url: result.streamUrl,
+    playlistUrl: result.playlistUrl,
     title: payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream',
   });
+  activePlaybackKind = 'torrserver-stream';
+  closeManagedTorrServerWhenMpvExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
   return {
     ...result,
     player,
@@ -3351,7 +3489,15 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
 });
 
 ipcMain.handle('mpv:stop', async () => {
-  return stopMpv();
+  const stopped = stopMpv();
+  if (activePlaybackKind === 'torrserver-stream') {
+    activePlaybackKind = '';
+    if (closeManagedTorrServerWhenMpvExits) {
+      closeManagedTorrServerWhenMpvExits = false;
+      await stopTorrServer(getTorrServerConfig(), { onlyIfManaged: true });
+    }
+  }
+  return stopped;
 });
 
 ipcMain.handle('open-prowlarr-download-page', async () => {

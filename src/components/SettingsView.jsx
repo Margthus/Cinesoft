@@ -51,12 +51,23 @@ const DEFAULT_EMBEDDED_TORRENT_SETTINGS = {
   uploadSlots: 8,
   diskCacheSize: 'auto',
 };
+const DEFAULT_TORRSERVER_SETTINGS = {
+  enabled: false,
+  exePath: '',
+  port: 8090,
+  autoStartOnStream: true,
+  stopWhenPlaybackEnds: true,
+  dataDir: '',
+  cacheDir: '',
+  cacheSize: null,
+};
 
 const SettingsView = ({ settings, setSettings }) => {
   const [formData, setFormData] = useState({
     ...settings,
     prowlarr: normalizeProwlarrConfig(settings.prowlarr || DEFAULT_PROWLARR_CONFIG),
     torrentio: normalizeTorrentioConfig(settings.torrentio || {}),
+    torrserver: { ...DEFAULT_TORRSERVER_SETTINGS, ...(settings.torrserver || {}) },
   });
   const [saveState, setSaveState] = useState('');
   const [qbRadarrState, setQbRadarrState] = useState('');
@@ -86,6 +97,7 @@ const SettingsView = ({ settings, setSettings }) => {
   const [sonarrStatus, setSonarrStatus] = useState('');
   const [sonarrRootFolders, setSonarrRootFolders] = useState([]);
   const [sonarrQualityProfiles, setSonarrQualityProfiles] = useState([]);
+  const [torrServerStatus, setTorrServerStatus] = useState('');
   const [engineInstallState, setEngineInstallState] = useState({
     Prowlarr: { stage: 'idle', message: '', error: '', busy: false },
     Radarr: { stage: 'idle', message: '', error: '', busy: false },
@@ -139,6 +151,7 @@ const SettingsView = ({ settings, setSettings }) => {
       ...settings,
       prowlarr: normalizeProwlarrConfig(settings.prowlarr || DEFAULT_PROWLARR_CONFIG),
       torrentio: normalizeTorrentioConfig(settings.torrentio || {}),
+      torrserver: { ...DEFAULT_TORRSERVER_SETTINGS, ...(settings.torrserver || {}) },
     });
   }, [settings]);
 
@@ -323,10 +336,27 @@ const SettingsView = ({ settings, setSettings }) => {
         || 'sonarrTimeout' in changes
         || 'sonarrDefaultRootFolder' in changes
         || 'sonarrDefaultQualityProfileId' in changes
-        || 'sonarrSearchAfterAdd' in changes) {
+        || 'sonarrSearchAfterAdd' in changes
+        || 'torrserver' in changes) {
         window.electronAPI?.saveSettings?.(next).then(() => setSettings(next));
       }
       return next;
+    });
+  };
+
+  const getTorrServerSettings = (override = {}) => ({
+    ...DEFAULT_TORRSERVER_SETTINGS,
+    ...(formData.torrserver || {}),
+    ...override,
+    port: Number(override?.port ?? formData?.torrserver?.port ?? 8090) || 8090,
+  });
+
+  const updateTorrServer = (changes = {}) => {
+    updateRoot({
+      torrserver: {
+        ...getTorrServerSettings(),
+        ...changes,
+      },
     });
   };
 
@@ -421,6 +451,62 @@ const SettingsView = ({ settings, setSettings }) => {
     const result = await window.electronAPI?.openSonarrWebUI?.(getSonarrSettings());
     if (!result?.ok) {
       alert(result?.error || 'Sonarr URL could not be opened');
+    }
+  };
+
+  const handleSelectTorrServerExecutable = async () => {
+    const executablePath = await window.electronAPI?.selectTorrServerExecutable?.();
+    if (executablePath) {
+      updateTorrServer({ exePath: executablePath });
+    }
+  };
+
+  const handleSaveTorrServer = async () => {
+    setTorrServerStatus('saving');
+    const settingsToSave = getTorrServerSettings();
+    const result = await window.electronAPI?.saveTorrServerSettings?.(settingsToSave);
+    if (result?.ok) {
+      updateTorrServer(result.settings || settingsToSave);
+      setTorrServerStatus('saved');
+    } else {
+      setTorrServerStatus(`error:${result?.error || 'save failed'}`);
+    }
+  };
+
+  const handleTestTorrServer = async () => {
+    setTorrServerStatus('testing');
+    const result = await window.electronAPI?.testTorrServer?.(getTorrServerSettings());
+    if (result?.ok) {
+      setTorrServerStatus('ok');
+      return;
+    }
+    setTorrServerStatus(`error:${result?.error || 'test failed'}`);
+  };
+
+  const handleStartTorrServer = async () => {
+    setTorrServerStatus('starting');
+    const result = await window.electronAPI?.startTorrServer?.(getTorrServerSettings());
+    if (result?.ok) {
+      setTorrServerStatus('running');
+      return;
+    }
+    setTorrServerStatus(`error:${result?.error || 'start failed'}`);
+  };
+
+  const handleStopTorrServer = async () => {
+    setTorrServerStatus('stopping');
+    const result = await window.electronAPI?.stopTorrServer?.();
+    if (result?.ok) {
+      setTorrServerStatus('stopped');
+      return;
+    }
+    setTorrServerStatus(`error:${result?.error || 'stop failed'}`);
+  };
+
+  const handleOpenTorrServerWeb = async () => {
+    const result = await window.electronAPI?.openTorrServerWeb?.(getTorrServerSettings());
+    if (!result?.ok) {
+      alert(result?.error || 'TorrServer URL could not be opened');
     }
   };
 
@@ -1172,6 +1258,7 @@ const SettingsView = ({ settings, setSettings }) => {
       id: 'sources',
       label: t.navSources,
       items: [
+        { id: 'torrserver', label: t.torrserver, icon: Server },
         { id: 'torrentio', label: 'Torrentio', icon: Globe },
         { id: 'prowlarr', label: t.prowlarr, icon: Server },
         { id: 'radarr', label: t.radarr, icon: Film },
@@ -1335,6 +1422,87 @@ const SettingsView = ({ settings, setSettings }) => {
       </div>
     </section>
   );
+
+  const renderTorrServerSection = () => {
+    const torrCfg = getTorrServerSettings();
+    return (
+      <section className="settings-section-shell">
+        <header className="settings-panel-header">
+          <div className="settings-panel-title">
+            <Server size={18} />
+            <div>
+              <h2>{t.torrserver}</h2>
+              <p>{t.torrserverHint}</p>
+            </div>
+          </div>
+        </header>
+
+        <div className="settings-row-list">
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.torrserverEnabled}</strong>
+              <span>{t.torrserverEnabledHint}</span>
+            </div>
+            <Toggle checked={torrCfg.enabled === true} onChange={(checked) => updateTorrServer({ enabled: checked })} />
+          </div>
+        </div>
+
+        <div className="settings-form-card">
+          <label className="stacked-field">
+            <span>{t.torrserverExePath}</span>
+            <div className="input-action-row">
+              <input
+                className="settings-input"
+                value={torrCfg.exePath || ''}
+                onChange={(event) => updateTorrServer({ exePath: event.target.value })}
+                placeholder={t.torrserverExePath}
+              />
+              <button className="icon-btn" type="button" onClick={handleSelectTorrServerExecutable} aria-label={t.browse}>
+                <FolderOpen size={16} />
+              </button>
+            </div>
+          </label>
+          <label className="stacked-field">
+            <span>{t.torrserverPort}</span>
+            <input
+              className="settings-input"
+              type="number"
+              value={torrCfg.port || 8090}
+              onChange={(event) => updateTorrServer({ port: Number(event.target.value || 8090) || 8090 })}
+            />
+          </label>
+          <label className="stacked-field">
+            <span>{t.torrserverDataDir}</span>
+            <input className="settings-input" value={torrCfg.dataDir || ''} onChange={(event) => updateTorrServer({ dataDir: event.target.value })} />
+          </label>
+          <label className="stacked-field">
+            <span>{t.torrserverCacheDir}</span>
+            <input className="settings-input" value={torrCfg.cacheDir || ''} onChange={(event) => updateTorrServer({ cacheDir: event.target.value })} />
+          </label>
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.torrserverAutoStart}</strong>
+            </div>
+            <Toggle checked={torrCfg.autoStartOnStream !== false} onChange={(checked) => updateTorrServer({ autoStartOnStream: checked })} />
+          </div>
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.torrserverStopOnPlaybackEnd}</strong>
+            </div>
+            <Toggle checked={torrCfg.stopWhenPlaybackEnds !== false} onChange={(checked) => updateTorrServer({ stopWhenPlaybackEnds: checked })} />
+          </div>
+          <div className="action-row">
+            <button className="action-btn subtle" onClick={handleTestTorrServer} disabled={torrServerStatus === 'testing'}>{t.test}</button>
+            <button className="action-btn start" onClick={handleStartTorrServer} disabled={torrServerStatus === 'starting'}>{t.start}</button>
+            <button className="action-btn stop" onClick={handleStopTorrServer} disabled={torrServerStatus === 'stopping'}>{t.stop}</button>
+            <button className="action-btn subtle" onClick={handleOpenTorrServerWeb}>{t.openWebUI}</button>
+            <button className="action-btn save" onClick={handleSaveTorrServer}>{t.save}</button>
+          </div>
+          {torrServerStatus ? <div className="status-line">{torrServerStatus.startsWith('error:') ? torrServerStatus.slice(6) : torrServerStatus}</div> : null}
+        </div>
+      </section>
+    );
+  };
 
   const renderEmbeddedTorrentSection = () => (
     <section className="settings-section-shell">
@@ -2798,6 +2966,7 @@ const SettingsView = ({ settings, setSettings }) => {
     if (activeSection === 'general') return renderGeneralSection();
     if (activeSection === 'guide') return renderGuideSection();
     if (activeSection === 'tmdb') return renderTmdbSection();
+    if (activeSection === 'torrserver') return renderTorrServerSection();
     if (activeSection === 'downloadEmbedded') return renderEmbeddedTorrentSection();
     if (activeSection === 'downloadQbittorrent') return renderQbittorrentSection();
     if (activeSection === 'torrentio') return renderTorrentioSection();
@@ -3255,6 +3424,18 @@ const getCopy = (language) => ({
     tmdbKeyLabel: 'API anahtari',
     tmdbKeyDesc: 'TMDB uzerinden veri cekmek icin kullanilir.',
     prowlarr: 'Prowlarr',
+    torrserver: 'TorrServer',
+    torrserverHint: 'Yalnizca stream engine kontrolu. Download manager degildir.',
+    torrserverEnabled: 'TorrServer stream engine',
+    torrserverEnabledHint: 'Stream butonu icin TorrServer kullan.',
+    torrserverExePath: 'TorrServer executable path',
+    torrserverPort: 'TorrServer Port',
+    torrserverDataDir: 'TorrServer data dir',
+    torrserverCacheDir: 'TorrServer cache dir',
+    torrserverAutoStart: 'Streamte otomatik baslat',
+    torrserverStopOnPlaybackEnd: 'Playback bitince (CineSoft baslattiysa) kapat',
+    browse: 'Browse',
+    openWebUI: 'Open Web UI',
     radarr: 'Radarr',
     sonarr: 'Sonarr',
     downloadEngine: 'Indirme Motoru',
@@ -3567,6 +3748,18 @@ const getCopy = (language) => ({
     tmdbKeyLabel: 'API key',
     tmdbKeyDesc: 'Used for fetching TMDB data.',
     prowlarr: 'Prowlarr',
+    torrserver: 'TorrServer',
+    torrserverHint: 'Streaming engine control only. Not a download manager.',
+    torrserverEnabled: 'TorrServer stream engine',
+    torrserverEnabledHint: 'Use TorrServer for the Stream button.',
+    torrserverExePath: 'TorrServer executable path',
+    torrserverPort: 'TorrServer Port',
+    torrserverDataDir: 'TorrServer data dir',
+    torrserverCacheDir: 'TorrServer cache dir',
+    torrserverAutoStart: 'Auto-start on stream',
+    torrserverStopOnPlaybackEnd: 'Stop when playback ends (only if CineSoft started it)',
+    browse: 'Browse',
+    openWebUI: 'Open Web UI',
     radarr: 'Radarr',
     sonarr: 'Sonarr',
     downloadEngine: 'Download Engine',
