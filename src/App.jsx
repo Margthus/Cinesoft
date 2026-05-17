@@ -156,6 +156,7 @@ const App = () => {
   const nativeStreamEnabled = (window.electronAPI?.isDev === true)
     || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
   const showMpvDebugPanel = window.electronAPI?.isDev === true;
+  const mpvControlDebug = window.electronAPI?.isMpvControlDebug === true;
   const mpvNativeSlotRef = useRef(null);
   const mpvBoundsThrottleRef = useRef(null);
   const playerControlsTimerRef = useRef(null);
@@ -937,16 +938,16 @@ const App = () => {
   };
 
   const handlePlayerTogglePause = () => {
-    console.info('[PlayerUI:TogglePause]', { activePlaybackKind, isPlayerMode });
+    if (mpvControlDebug) console.info('[PlayerUI:TogglePause]', { activePlaybackKind, isPlayerMode });
     if (!window.electronAPI?.toggleMpvPause) return;
     window.electronAPI.toggleMpvPause().then((result) => {
-      console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-response', result });
+      if (mpvControlDebug) console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-response', result });
       if (!result?.ok || !result?.status) return;
       setPlayerIsPaused(Boolean(result.status.paused));
       setPlayerCurrentTime(Number(result.status.timePos || 0));
       setPlayerDuration(Number.isFinite(Number(result.status.duration)) ? Number(result.status.duration) : null);
     }).catch((error) => {
-      console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-error', error: String(error?.message || error) });
+      if (mpvControlDebug) console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-error', error: String(error?.message || error) });
     });
   };
 
@@ -1002,7 +1003,7 @@ const App = () => {
     const refresh = async () => {
       try {
         const result = await window.electronAPI.getMpvPlaybackStatus();
-        console.info('[PlayerUI:PlaybackStatus]', { phase: 'poll', result });
+        if (mpvControlDebug) console.info('[PlayerUI:PlaybackStatus]', { phase: 'poll', result });
         if (disposed || !result?.ok || !result?.status) return;
         const status = result.status;
         setPlayerIsPaused(Boolean(status.paused));

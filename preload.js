@@ -9,6 +9,7 @@ const computeIsDev = () => {
   return process.env.NODE_ENV === 'development' || Boolean(process.env.VITE_DEV_SERVER_URL);
 };
 const IS_DEV = computeIsDev();
+const MPV_CONTROL_DEBUG = String(process.env.DEBUG_MPV_CONTROL || '').toLowerCase() === 'true';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAuthState: () => ipcRenderer.invoke('get-auth-state'),
@@ -139,6 +140,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopEmbeddedTorrentStream: (payload) => ipcRenderer.invoke('stream:stop-embedded-torrent', payload),
   getEmbeddedTorrentStreamStatus: () => ipcRenderer.invoke('stream:get-embedded-torrent-status'),
   isDev: IS_DEV,
+  isMpvControlDebug: MPV_CONTROL_DEBUG,
 });
 
 contextBridge.exposeInMainWorld('cinesoft', {

@@ -23,6 +23,7 @@ try {
 const Store = require('electron-store');
 const store = new Store();
 const { TorrentManager } = require('./src/torrent/torrentManager.cjs');
+const DEBUG_MPV_CONTROL = String(process.env.DEBUG_MPV_CONTROL || '').toLowerCase() === 'true';
 const FORCE_SOFTWARE_RENDERING_KEY = 'forceSoftwareRendering';
 const WINDOWS_APP_ID = 'com.margthus.cinesoft';
 
@@ -4822,9 +4823,9 @@ ipcMain.handle('mpv:update-native-host-bounds', async (event, bounds = {}) => {
 
 ipcMain.handle('mpv:toggle-pause', async () => {
   try {
-    console.info('[IPC:MpvTogglePause] received');
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvTogglePause] received');
     const result = await mpvPlayerService.togglePause();
-    console.info('[IPC:MpvTogglePause] result', result);
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvTogglePause] result', result);
     return {
       ok: Boolean(result?.ok),
       status: result?.status || null,
@@ -4837,9 +4838,9 @@ ipcMain.handle('mpv:toggle-pause', async () => {
 
 ipcMain.handle('mpv:set-pause', async (event, paused) => {
   try {
-    console.info('[IPC:MpvSetPause] received', { paused: Boolean(paused) });
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSetPause] received', { paused: Boolean(paused) });
     const result = await mpvPlayerService.setPause(Boolean(paused));
-    console.info('[IPC:MpvSetPause] result', result);
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSetPause] result', result);
     return {
       ok: Boolean(result?.ok),
       status: result?.status || null,
@@ -4852,9 +4853,9 @@ ipcMain.handle('mpv:set-pause', async (event, paused) => {
 
 ipcMain.handle('mpv:get-playback-status', async () => {
   try {
-    console.info('[IPC:MpvGetPlaybackStatus] received');
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvGetPlaybackStatus] received');
     const result = await mpvPlayerService.requestPlaybackStatus();
-    console.info('[IPC:MpvGetPlaybackStatus] result', result);
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvGetPlaybackStatus] result', result);
     return {
       ok: Boolean(result?.ok),
       status: result?.status || null,
@@ -4867,9 +4868,9 @@ ipcMain.handle('mpv:get-playback-status', async () => {
 
 ipcMain.handle('mpv:seek', async (event, timePos) => {
   try {
-    console.info('[IPC:MpvSeek] received', { timePos });
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSeek] received', { timePos });
     const result = await mpvPlayerService.seekTo(Number(timePos));
-    console.info('[IPC:MpvSeek] result', result);
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSeek] result', result);
     return {
       ok: Boolean(result?.ok),
       status: result?.status || null,
@@ -4882,9 +4883,9 @@ ipcMain.handle('mpv:seek', async (event, timePos) => {
 
 ipcMain.handle('mpv:set-volume', async (event, volume) => {
   try {
-    console.info('[IPC:MpvSetVolume] received', { volume });
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSetVolume] received', { volume });
     const result = await mpvPlayerService.setVolume(Number(volume));
-    console.info('[IPC:MpvSetVolume] result', result);
+    if (DEBUG_MPV_CONTROL) console.info('[IPC:MpvSetVolume] result', result);
     return {
       ok: Boolean(result?.ok),
       status: result?.status || null,

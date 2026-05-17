@@ -17,6 +17,11 @@ internal sealed class MainForm : Form
     private Task? _stdinTask;
     private string? _mpvIpcPipeName;
     private int _ipcRequestId = 1000;
+    private static readonly bool DebugMpvControl = string.Equals(
+        Environment.GetEnvironmentVariable("DEBUG_MPV_CONTROL"),
+        "true",
+        StringComparison.OrdinalIgnoreCase
+    );
     private const int GWL_STYLE = -16;
     private const uint WS_CHILD = 0x40000000;
     private const uint WS_VISIBLE = 0x10000000;
@@ -185,7 +190,7 @@ internal sealed class MainForm : Form
                         if (type == "mpv-toggle-pause")
                         {
                             Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-toggle-pause");
-                            Console.WriteLine("[MpvHost:IPC] command=cycle pause");
+                            if (DebugMpvControl) Console.WriteLine("[MpvHost:IPC] command=cycle pause");
                             await HandleTogglePauseAsync();
                             return;
                         }
@@ -193,7 +198,7 @@ internal sealed class MainForm : Form
                         {
                             var pauseValue = TryGetBool(root, "pause") ?? TryGetBool(root, "Pause") ?? false;
                             Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-set-pause");
-                            Console.WriteLine($"[MpvHost:IPC] command=set pause value={pauseValue}");
+                            if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] command=set pause value={pauseValue}");
                             await HandleSetPauseAsync(pauseValue);
                             return;
                         }
@@ -201,7 +206,7 @@ internal sealed class MainForm : Form
                         {
                             var timePos = TryGetDouble(root, "timePos") ?? TryGetDouble(root, "TimePos") ?? 0d;
                             Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-seek");
-                            Console.WriteLine($"[MpvHost:IPC] command=set time-pos value={timePos}");
+                            if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] command=set time-pos value={timePos}");
                             await HandleSeekAsync(timePos);
                             return;
                         }
@@ -210,12 +215,12 @@ internal sealed class MainForm : Form
                             var volume = TryGetDouble(root, "volume") ?? TryGetDouble(root, "Volume") ?? 100d;
                             volume = Math.Max(0d, Math.Min(100d, volume));
                             Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-set-volume");
-                            Console.WriteLine($"[MpvHost:IPC] command=set volume value={volume}");
+                            if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] command=set volume value={volume}");
                             await HandleSetVolumeAsync(volume);
                             return;
                         }
                         Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-get-playback-status");
-                        Console.WriteLine("[MpvHost:IPC] command=get status");
+                        if (DebugMpvControl) Console.WriteLine("[MpvHost:IPC] command=get status");
                         await EmitPlaybackStatusAsync();
                     }
                     catch (Exception ex)
@@ -315,7 +320,7 @@ internal sealed class MainForm : Form
         {
             psi.ArgumentList.Add(arg);
         }
-        Console.WriteLine($"[MpvHost:IPC] mpvPipeName={_mpvIpcPipeName} mpvPipePath=\\\\.\\pipe\\{_mpvIpcPipeName}");
+        if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] mpvPipeName={_mpvIpcPipeName} mpvPipePath=\\\\.\\pipe\\{_mpvIpcPipeName}");
 
         _mpvProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _mpvProcess.OutputDataReceived += (_, ev) => CaptureLog(ev.Data, isError: false);
@@ -425,25 +430,25 @@ internal sealed class MainForm : Form
         NamedPipeClientStream? connectedClient = null;
         var connectDeadline = DateTime.UtcNow.AddMilliseconds(2000);
         var attempt = 0;
-        Console.WriteLine($"[MpvHost:IPC] phase=connect-start pipeName={_mpvIpcPipeName}");
+        if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] phase=connect-start pipeName={_mpvIpcPipeName}");
         while (DateTime.UtcNow < connectDeadline)
         {
             attempt += 1;
             var probeClient = new NamedPipeClientStream(".", _mpvIpcPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             try
             {
-                Console.WriteLine($"[MpvHost:IPC] connect attempt={attempt} pipeName={_mpvIpcPipeName}");
+                if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] connect attempt={attempt} pipeName={_mpvIpcPipeName}");
                 using var connectCts = new CancellationTokenSource(600);
                 await probeClient.ConnectAsync(connectCts.Token);
                 connectedClient = probeClient;
-                Console.WriteLine("[MpvHost:IPC] phase=connect-ok");
+                if (DebugMpvControl) Console.WriteLine("[MpvHost:IPC] phase=connect-ok");
                 break;
             }
             catch (Exception ex)
             {
                 lastConnectError = ex;
                 probeClient.Dispose();
-                Console.WriteLine($"[MpvHost:IPC] phase=connect-failed attempt={attempt} error={ex.Message}");
+                if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] phase=connect-failed attempt={attempt} error={ex.Message}");
                 await Task.Delay(150);
             }
         }
@@ -470,7 +475,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            Console.WriteLine($"[MpvHost:IPC] phase=write command={JsonSerializer.Serialize(command)}");
+            if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] phase=write command={JsonSerializer.Serialize(command)}");
             await writer.WriteLineAsync(JsonSerializer.Serialize(requestPayload));
         }
         catch (Exception ex)
@@ -479,7 +484,7 @@ internal sealed class MainForm : Form
             return MpvIpcCommandResult.Fail($"ipc write failed: {ex.Message}");
         }
 
-        Console.WriteLine("[MpvHost:IPC] phase=read-start");
+        if (DebugMpvControl) Console.WriteLine("[MpvHost:IPC] phase=read-start");
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (DateTime.UtcNow < deadline)
         {
@@ -498,7 +503,7 @@ internal sealed class MainForm : Form
             {
                 using var doc = JsonDocument.Parse(line);
                 var root = doc.RootElement;
-                Console.WriteLine($"[MpvHost:IPC] phase=read-ok raw={line}");
+                if (DebugMpvControl) Console.WriteLine($"[MpvHost:IPC] phase=read-ok raw={line}");
                 if (!root.TryGetProperty("request_id", out var idElement) || idElement.GetInt32() != requestId)
                 {
                     continue;

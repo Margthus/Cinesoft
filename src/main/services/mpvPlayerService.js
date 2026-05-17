@@ -19,6 +19,7 @@ const MPV_STATUSES = Object.freeze({
   ERROR: 'error',
   UNAVAILABLE: 'unavailable',
 });
+const DEBUG_MPV_CONTROL = String(process.env.DEBUG_MPV_CONTROL || '').toLowerCase() === 'true';
 
 const ALLOWED_STATUSES = new Set(Object.values(MPV_STATUSES));
 const MPV_PROBE_TIMEOUT_MS = 2500;
@@ -182,7 +183,7 @@ class MpvPlayerService {
         updatedAt: Date.now(),
         stale: false,
       };
-      console.info('[MpvPlayer:PlaybackStatusParsed]', this.lastPlaybackStatus);
+      if (DEBUG_MPV_CONTROL) console.info('[MpvPlayer:PlaybackStatusParsed]', this.lastPlaybackStatus);
       return this.lastPlaybackStatus;
     } catch (error) {
       console.warn('[MpvPlayer:PlaybackStatusParseError]', { line: text, error: String(error?.message || error) });
@@ -205,7 +206,7 @@ class MpvPlayerService {
     }
     try {
       const payload = `${JSON.stringify(command)}\n`;
-      console.info('[MpvPlayer:Command]', { command });
+      if (DEBUG_MPV_CONTROL) console.info('[MpvPlayer:Command]', { command });
       await new Promise((resolve, reject) => {
         this.hostProcess.stdin.write(payload, (error) => {
           if (error) reject(error);
