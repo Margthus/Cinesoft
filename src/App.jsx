@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -48,7 +48,9 @@ const DEFAULT_PAGE_ROUTE_MAP = {
 const APP_TOAST_EVENT = 'cinesoft:toast';
 const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
 const NATIVE_LOCAL_PLAY_EVENT = 'cinesoft:native-local-play';
-const PLAYER_TOPBAR_HEIGHT = 52;
+const PLAYER_TOPBAR_HEIGHT = 56;
+const PLAYER_BOTTOMBAR_HEIGHT = 76;
+const PLAYER_CONTROLS_AUTOHIDE_MS = 3000;
 let appToastId = 0;
 
 export const showAppToast = (detail = {}) => {
@@ -142,12 +144,19 @@ const App = () => {
   const [activeStreamId, setActiveStreamId] = useState('');
   const [playerError, setPlayerError] = useState('');
   const [isStoppingPlayer, setIsStoppingPlayer] = useState(false);
+  const [showPlayerControls, setShowPlayerControls] = useState(true);
+  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [playerIsPaused, setPlayerIsPaused] = useState(false);
+  const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
+  const [playerDuration, setPlayerDuration] = useState(null);
+  const [playerVolume, setPlayerVolume] = useState(100);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const nativeStreamEnabled = (window.electronAPI?.isDev === true)
     || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
   const showMpvDebugPanel = window.electronAPI?.isDev === true;
   const mpvNativeSlotRef = useRef(null);
   const mpvBoundsThrottleRef = useRef(null);
+  const playerControlsTimerRef = useRef(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -287,6 +296,7 @@ const App = () => {
       windowInnerHeight: window.innerHeight,
       refExists: Boolean(mpvNativeSlotRef.current),
       topbarHeight: PLAYER_TOPBAR_HEIGHT,
+      bottombarHeight: PLAYER_BOTTOMBAR_HEIGHT,
       ...extra,
     });
   };
@@ -297,7 +307,7 @@ const App = () => {
           x: 0,
           y: PLAYER_TOPBAR_HEIGHT,
           width: Math.max(100, Math.round(window.innerWidth || 0)),
-          height: Math.max(100, Math.round((window.innerHeight || 0) - PLAYER_TOPBAR_HEIGHT)),
+          height: Math.max(100, Math.round((window.innerHeight || 0) - PLAYER_TOPBAR_HEIGHT - PLAYER_BOTTOMBAR_HEIGHT)),
         }
       : {
           x: 0,
@@ -695,8 +705,8 @@ const App = () => {
       await refreshEmbeddedTorrentStatus();
     } catch (error) {
       setMpvDebugError(String(error?.message || 'Failed to start embedded torrent stream.'));
-      setEmbeddedUiError(String(error?.message || 'Stream hazırlanamadı, yeterli parça indirilemedi.'));
-      setPlayerError(String(error?.message || 'Stream hazırlanamadı.'));
+      setEmbeddedUiError(String(error?.message || 'Stream hazÄ±rlanamadÄ±, yeterli parÃ§a indirilemedi.'));
+      setPlayerError(String(error?.message || 'Stream hazÄ±rlanamadÄ±.'));
       setEmbeddedUiStatus('error');
       setPlayerStatus('error');
       await refreshEmbeddedTorrentStatus();
@@ -740,6 +750,7 @@ const App = () => {
       if (mode === 'playback-only' || mode === 'pause-torrent' || mode === 'remove-torrent') {
         setIsPlayerMode(false);
         setActivePlaybackKind('');
+        setShowPlayerMenu(false);
         setPlayerError('');
       }
       await refreshEmbeddedTorrentStatus();
@@ -887,6 +898,108 @@ const App = () => {
     return () => document.body.classList.remove('player-mode-active');
   }, [isPlayerMode]);
 
+  const armPlayerControlsAutoHide = useCallback(() => {
+    if (playerControlsTimerRef.current) {
+      window.clearTimeout(playerControlsTimerRef.current);
+      playerControlsTimerRef.current = null;
+    }
+    if (!isPlayerMode) return;
+    setShowPlayerControls(true);
+    playerControlsTimerRef.current = window.setTimeout(() => {
+      setShowPlayerControls(false);
+      setShowPlayerMenu(false);
+    }, PLAYER_CONTROLS_AUTOHIDE_MS);
+  }, [isPlayerMode]);
+
+  useEffect(() => {
+    if (!isPlayerMode) {
+      if (playerControlsTimerRef.current) {
+        window.clearTimeout(playerControlsTimerRef.current);
+        playerControlsTimerRef.current = null;
+      }
+      setShowPlayerControls(true);
+      setShowPlayerMenu(false);
+      return;
+    }
+    armPlayerControlsAutoHide();
+    return () => {
+      if (playerControlsTimerRef.current) {
+        window.clearTimeout(playerControlsTimerRef.current);
+        playerControlsTimerRef.current = null;
+      }
+    };
+  }, [isPlayerMode, armPlayerControlsAutoHide]);
+
+  const handlePlayerOverlayMouseMove = () => {
+    armPlayerControlsAutoHide();
+  };
+
+  const handlePlayerTogglePause = () => {
+    console.info('[PlayerUI:TogglePause]', { activePlaybackKind, isPlayerMode });
+    if (!window.electronAPI?.toggleMpvPause) return;
+    window.electronAPI.toggleMpvPause().then((result) => {
+      console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-response', result });
+      if (!result?.ok || !result?.status) return;
+      setPlayerIsPaused(Boolean(result.status.paused));
+      setPlayerCurrentTime(Number(result.status.timePos || 0));
+      setPlayerDuration(Number.isFinite(Number(result.status.duration)) ? Number(result.status.duration) : null);
+    }).catch((error) => {
+      console.info('[PlayerUI:PlaybackStatus]', { phase: 'toggle-error', error: String(error?.message || error) });
+    });
+  };
+
+  const handlePlayerSeek = () => {
+    // Placeholder for V2 mpv-host seek IPC wiring.
+  };
+
+  const handlePlayerVolumeChange = (event) => {
+    const next = Number(event?.target?.value || 100);
+    setPlayerVolume(Math.max(0, Math.min(100, next)));
+  };
+
+  const handlePlayerToggleFullscreen = () => {
+    // Placeholder for V2 window/native fullscreen toggle wiring.
+  };
+
+  const formatTime = (seconds, options = {}) => {
+    const { dashWhenZero = false } = options;
+    const numeric = Number(seconds);
+    if (!Number.isFinite(numeric) || numeric < 0) return '--:--';
+    if (dashWhenZero && numeric <= 0) return '--:--';
+    const whole = Math.floor(numeric);
+    const h = Math.floor(whole / 3600);
+    const m = Math.floor((whole % 3600) / 60);
+    const s = whole % 60;
+    if (h > 0) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    if (!isPlayerMode || !window.electronAPI?.getMpvPlaybackStatus) return undefined;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const result = await window.electronAPI.getMpvPlaybackStatus();
+        console.info('[PlayerUI:PlaybackStatus]', { phase: 'poll', result });
+        if (disposed || !result?.ok || !result?.status) return;
+        const status = result.status;
+        setPlayerIsPaused(Boolean(status.paused));
+        setPlayerCurrentTime(Number(status.timePos || 0));
+        setPlayerDuration(Number.isFinite(Number(status.duration)) ? Number(status.duration) : null);
+      } catch {
+        // keep previous values
+      }
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [isPlayerMode]);
+
   const handleClosePlayer = async () => {
     if (isStoppingPlayer) return;
     setIsStoppingPlayer(true);
@@ -913,9 +1026,13 @@ const App = () => {
       }
       setIsPlayerMode(false);
       setActivePlaybackKind('');
+      setShowPlayerMenu(false);
       setActivePlayerTitle('');
       setPlayerStatus('idle');
       setPlayerError('');
+      setPlayerIsPaused(false);
+      setPlayerCurrentTime(0);
+      setPlayerDuration(null);
       setActiveStreamId('');
       setEmbeddedUiStatus('idle');
       setEmbeddedUiError('');
@@ -1050,47 +1167,73 @@ const App = () => {
           </Routes>
         </main>
         {nativeStreamEnabled && isPlayerMode ? (
-          <div className="cinesoft-player-overlay" aria-live="polite">
-            <div className="cinesoft-player-topbar">
+          <div className="cinesoft-player-overlay" aria-live="polite" onMouseMove={handlePlayerOverlayMouseMove}>
+            <div className={`player-topbar ${showPlayerControls ? 'visible' : 'hidden'}`}>
               <div className="player-topbar-left">
-                <button type="button" className="player-close-button" onClick={handleClosePlayer} aria-label="Close player" disabled={isStoppingPlayer}>
-                  ×
+                <button type="button" className="player-icon-button player-back-button" onClick={handleClosePlayer} aria-label="Close player" disabled={isStoppingPlayer}>
+                  ←
                 </button>
                 <div className="player-title">{activePlayerTitle || 'CineSoft Embedded Torrent Stream'}</div>
               </div>
-              <div className="player-actions">
-                {activePlaybackKind === 'local-file' ? (
-                  <button type="button" onClick={handleClosePlayer} disabled={isStoppingPlayer || mpvDebugBusy}>
-                    Stop Playback
-                  </button>
-                ) : (
-                  <>
-                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('playback-only')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                      Stop Playback Only
-                    </button>
-                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                      Pause Torrent
-                    </button>
-                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                      Remove Torrent
-                    </button>
-                  </>
-                )}
+              <div className="player-topbar-actions">
+                <button type="button" className="player-icon-button" onClick={handlePlayerToggleFullscreen} aria-label="Fullscreen toggle">⛶</button>
+                <button type="button" className="player-icon-button" onClick={() => setShowPlayerMenu((prev) => !prev)} aria-label="More actions">⋯</button>
               </div>
+              {showPlayerMenu ? (
+                <div className="player-more-menu">
+                  {activePlaybackKind === 'local-file' ? (
+                    <button type="button" onClick={handleClosePlayer} disabled={isStoppingPlayer || mpvDebugBusy}>Stop Playback</button>
+                  ) : (
+                    <>
+                      <button type="button" onClick={() => handleStopEmbeddedTorrentStream('playback-only')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>Stop Playback</button>
+                      <button type="button" onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>Pause Torrent</button>
+                      <button type="button" onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>Remove Torrent</button>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
-            <div ref={mpvNativeSlotRef} className="fullscreen-player-slot">
-              <span>Native MPV Player Slot</span>
+            <div ref={mpvNativeSlotRef} className="player-video-slot fullscreen-player-slot">
+              
+              {playerStatus !== 'playing' ? (
+                <div className="player-overlay-status">
+                  <span>
+                    {playerStatus === 'preparing' ? 'Preparing stream...' : null}
+                    {playerStatus === 'selecting-file' ? 'Selecting file...' : null}
+                    {playerStatus === 'prebuffering' ? (playerError || 'Baslangic parcasi bekleniyor...') : null}
+                    {playerStatus === 'error' ? (playerError || 'Stream hazirlanamadi, baslangic parcasi indirilemedi.') : null}
+                  </span>
+                  {playerStatus === 'error' ? (
+                    <button type="button" className="player-error-close" onClick={handleClosePlayer}>Close</button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            {playerStatus !== 'playing' ? (
-              <div className="player-overlay-status">
-                <span>
-                  {playerStatus === 'preparing' ? 'Preparing stream...' : null}
-                  {playerStatus === 'selecting-file' ? 'Selecting file...' : null}
-                  {playerStatus === 'prebuffering' ? (playerError || 'Baslangic parcasi bekleniyor...') : null}
-                  {playerStatus === 'error' ? (playerError || 'Stream hazirlanamadi, baslangic parcasi indirilemedi.') : null}
-                </span>
+            <div className={`player-bottombar ${showPlayerControls ? 'visible' : 'hidden'}`}>
+              <button type="button" className="player-control-button" onClick={handlePlayerTogglePause}>
+                {playerIsPaused ? 'Play' : 'Pause'}
+              </button>
+              <div className="player-seek-area">
+                <div className="player-time-row">
+                  <span>{formatTime(playerCurrentTime)}</span>
+                  <span>{formatTime(playerDuration, { dashWhenZero: true })}</span>
+                </div>
+                <input
+                  type="range"
+                  className="player-seek-slider"
+                  min="0"
+                  max="100"
+                  value={playerDuration && playerDuration > 0 ? Math.max(0, Math.min(100, Math.round((playerCurrentTime / playerDuration) * 100))) : 0}
+                  onChange={handlePlayerSeek}
+                  disabled
+                />
               </div>
-            ) : null}
+              <button type="button" className="player-control-button">Vol</button>
+              <input type="range" className="player-volume-slider" min="0" max="100" value={playerVolume} onChange={handlePlayerVolumeChange} />
+              <button type="button" className="player-control-button" disabled>Sub</button>
+              <button type="button" className="player-control-button" disabled>1x</button>
+              <button type="button" className="player-control-button" disabled>Stats</button>
+            </div>
           </div>
         ) : null}
         {showWelcome && <WelcomeOverlay language={settings.language} onClose={dismissWelcome} />}
@@ -1522,6 +1665,8 @@ const Sidebar = ({ settings }) => {
 };
 
 export default App;
+
+
 
 
 

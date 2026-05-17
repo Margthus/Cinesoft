@@ -4820,6 +4820,51 @@ ipcMain.handle('mpv:update-native-host-bounds', async (event, bounds = {}) => {
   }
 });
 
+ipcMain.handle('mpv:toggle-pause', async () => {
+  try {
+    console.info('[IPC:MpvTogglePause] received');
+    const result = await mpvPlayerService.togglePause();
+    console.info('[IPC:MpvTogglePause] result', result);
+    return {
+      ok: Boolean(result?.ok),
+      status: result?.status || null,
+      error: result?.error || undefined,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to toggle MPV pause.' };
+  }
+});
+
+ipcMain.handle('mpv:set-pause', async (event, paused) => {
+  try {
+    console.info('[IPC:MpvSetPause] received', { paused: Boolean(paused) });
+    const result = await mpvPlayerService.setPause(Boolean(paused));
+    console.info('[IPC:MpvSetPause] result', result);
+    return {
+      ok: Boolean(result?.ok),
+      status: result?.status || null,
+      error: result?.error || undefined,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to set MPV pause.' };
+  }
+});
+
+ipcMain.handle('mpv:get-playback-status', async () => {
+  try {
+    console.info('[IPC:MpvGetPlaybackStatus] received');
+    const result = await mpvPlayerService.requestPlaybackStatus();
+    console.info('[IPC:MpvGetPlaybackStatus] result', result);
+    return {
+      ok: Boolean(result?.ok),
+      status: result?.status || null,
+      error: result?.error || undefined,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to get MPV playback status.' };
+  }
+});
+
 ipcMain.handle('stream:create-local-file-session', async (event, payload = {}) => {
   try {
     const filePath = String(payload?.filePath || '').trim();

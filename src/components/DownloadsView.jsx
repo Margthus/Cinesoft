@@ -67,6 +67,25 @@ const formatTorrentTitle = (torrent) => {
   return torrent.title || torrent.name || torrent.mediaInfo?.title || torrent.mediaInfo?.name || 'Torrent';
 };
 
+const isTorrentCompleted = (torrent = {}) => {
+  const state = String(torrent?.state || '').toLowerCase();
+  const status = String(torrent?.status || '').toLowerCase();
+  const progressRaw = Number(torrent?.progress);
+  const progressPercent = Number(torrent?.progressPercent);
+  const percent = Number(torrent?.percent);
+  const downloadedBytes = Number(torrent?.downloadedBytes ?? torrent?.downloaded ?? 0);
+  const totalBytes = Number(torrent?.totalBytes ?? torrent?.totalSize ?? 0);
+
+  if (torrent?.completed === true || torrent?.done === true) return true;
+  if (Number.isFinite(progressRaw) && (progressRaw >= 1 || progressRaw >= 100)) return true;
+  if (Number.isFinite(progressPercent) && progressPercent >= 100) return true;
+  if (Number.isFinite(percent) && percent >= 100) return true;
+  if (state === 'completed' || state === 'seeding') return true;
+  if (status === 'completed' || status === 'seeding') return true;
+  if (totalBytes > 0 && downloadedBytes >= totalBytes) return true;
+  return false;
+};
+
 const normalizeTorrentUiState = (torrent = {}) => {
   const paused = Boolean(
     torrent?.paused === true
@@ -74,8 +93,7 @@ const normalizeTorrentUiState = (torrent = {}) => {
     || String(torrent?.status || '').toLowerCase() === 'paused'
   );
   const errored = Boolean(String(torrent?.status || '').toLowerCase() === 'error');
-  const progress = Number(torrent?.progress || 0);
-  const done = Boolean(torrent?.done) || progress >= 100;
+  const done = isTorrentCompleted(torrent);
   const downloadRate = Number(torrent?.downloadSpeed ?? torrent?.downloadRate ?? 0) || 0;
   if (paused) return 'paused';
   if (errored) return 'error';
@@ -352,14 +370,14 @@ const DownloadsView = ({ settings }) => {
   };
 
   const activeTorrents = torrents
-    .filter((torrent) => !torrent.done)
+    .filter((torrent) => !isTorrentCompleted(torrent))
     .sort((a, b) => {
       const orderA = Number(a.queueOrder) || Number.MAX_SAFE_INTEGER;
       const orderB = Number(b.queueOrder) || Number.MAX_SAFE_INTEGER;
       if (orderA !== orderB) return orderA - orderB;
       return Number(a.addedAt || 0) - Number(b.addedAt || 0);
     });
-  const completedTorrents = torrents.filter((torrent) => torrent.done);
+  const completedTorrents = torrents.filter((torrent) => isTorrentCompleted(torrent));
 
   if (loading) {
     return (
@@ -600,7 +618,7 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
     });
   }
   const uiState = normalizeTorrentUiState(torrent);
-  const isDone = uiState === 'completed';
+  const isDone = isTorrentCompleted(torrent);
   const isPaused = uiState === 'paused';
   const statusText = isPaused
     ? t.paused
@@ -628,6 +646,15 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
   );
   const localPlayablePath = isDone ? resolveCompletedLocalVideoPath(torrent) : '';
   const localPlayable = Boolean(localPlayablePath);
+  const action = isDone ? (localPlayable ? 'play' : 'none') : (streamable ? 'stream' : 'none');
+  if (window.electronAPI?.isDev === true) {
+    console.info('[DownloadsView:ActionResolve]', {
+      title: formatTorrentTitle(torrent),
+      isCompleted: isDone,
+      hasLocalFilePath: localPlayable,
+      action,
+    });
+  }
   const displayTitle = formatTorrentTitle(torrent);
   const displaySubtitle = torrent.name || torrent.title || '';
 
@@ -700,18 +727,24 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
           </div>
         )}
         <div className="torrent-actions">
-          {!isDone && streamable && (
+          {action === 'stream' && (
             <button className="torrent-action-btn" onClick={() => onStream(torrent)}>
               <Play size={15} />
               <span>{t.stream}</span>
             </button>
           )}
-          {isDone && localPlayable && (
+          {action === 'play' && (
             <button className="torrent-action-btn" onClick={() => onPlayLocal?.(torrent)}>
               <Play size={15} />
               <span>Play</span>
             </button>
           )}
+          {isDone && action === 'none' ? (
+            <button className="torrent-action-btn" disabled>
+              <Play size={15} />
+              <span>Play</span>
+            </button>
+          ) : null}
           <button className="torrent-action-btn" onClick={() => onFiles(torrent)}>
             <ListChecks size={15} />
             <span>{t.files}</span>

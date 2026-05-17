@@ -122,6 +122,7 @@ class MpvPlayerService {
     this.lastHostOutput = '';
     this.hostStartedAt = 0;
     this.lastNativeHostBounds = { ...NATIVE_HOST_BOUNDS };
+    this.lastPlaybackStatus = null;
   }
 
   setStatus(nextStatus) {
@@ -158,6 +159,114 @@ class MpvPlayerService {
     } catch {
       return false;
     }
+  }
+
+  parseHostPlaybackStatusLine(line = '') {
+    const text = String(line || '').trim();
+    if (!text.startsWith('[MpvHost:PlaybackStatus]')) return null;
+    const jsonStart = text.indexOf('{');
+    if (jsonStart < 0) return null;
+    try {
+      const parsed = JSON.parse(text.slice(jsonStart));
+      const paused = parsed?.paused === true;
+      const timePos = Number.isFinite(Number(parsed?.timePos)) ? Number(parsed.timePos) : null;
+      const duration = Number.isFinite(Number(parsed?.duration)) ? Number(parsed.duration) : null;
+      const percent = (duration && duration > 0 && Number.isFinite(timePos))
+        ? Math.max(0, Math.min(100, (timePos / duration) * 100))
+        : null;
+      this.lastPlaybackStatus = {
+        paused,
+        timePos,
+        duration,
+        percent,
+        updatedAt: Date.now(),
+        stale: false,
+      };
+      console.info('[MpvPlayer:PlaybackStatusParsed]', this.lastPlaybackStatus);
+      return this.lastPlaybackStatus;
+    } catch (error) {
+      console.warn('[MpvPlayer:PlaybackStatusParseError]', { line: text, error: String(error?.message || error) });
+      return null;
+    }
+  }
+
+  getPlaybackStatus() {
+    return this.lastPlaybackStatus ? { ...this.lastPlaybackStatus } : null;
+  }
+
+  async sendPlayerCommand(command = {}) {
+    if (!this.hostProcess || !this.hostProcess.stdin || this.hostProcess.killed) {
+      console.warn('[MpvPlayer:Command] native host not running', { command });
+      return { ok: false, error: 'Native host process is not running.' };
+    }
+    if (this.hostProcess.stdin.writable !== true) {
+      console.warn('[MpvPlayer:Command] stdin not writable', { command });
+      return { ok: false, error: 'Native host stdin is not writable.' };
+    }
+    try {
+      const payload = `${JSON.stringify(command)}\n`;
+      console.info('[MpvPlayer:Command]', { command });
+      await new Promise((resolve, reject) => {
+        this.hostProcess.stdin.write(payload, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      return { ok: true };
+    } catch (error) {
+      console.warn('[MpvPlayer:Command] write failed', { command, error: String(error?.message || error) });
+      return { ok: false, error: String(error?.message || 'Failed to send command to native host.') };
+    }
+  }
+
+  async waitForPlaybackStatusUpdate(beforeUpdatedAt = 0, timeoutMs = 1500) {
+    const deadline = Date.now() + Math.max(100, Number(timeoutMs) || 1500);
+    while (Date.now() < deadline) {
+      const current = this.lastPlaybackStatus;
+      if (current && current.updatedAt > beforeUpdatedAt) {
+        return { ok: true, status: current };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return { ok: false, error: 'Playback status timeout' };
+  }
+
+  async requestPlaybackStatus({ requestFresh = true, timeoutMs = 1500 } = {}) {
+    const beforeUpdatedAt = this.lastPlaybackStatus?.updatedAt || 0;
+    if (requestFresh) {
+      const cmd = await this.sendPlayerCommand({ type: 'mpv-get-playback-status' });
+      if (!cmd.ok) return cmd;
+    }
+    const updated = await this.waitForPlaybackStatusUpdate(beforeUpdatedAt, timeoutMs);
+    if (updated.ok) return updated;
+    if (this.lastPlaybackStatus) {
+      return { ok: true, status: { ...this.lastPlaybackStatus, stale: true } };
+    }
+    return updated;
+  }
+
+  async togglePause() {
+    const beforeUpdatedAt = this.lastPlaybackStatus?.updatedAt || 0;
+    const commandResult = await this.sendPlayerCommand({ type: 'mpv-toggle-pause' });
+    if (!commandResult.ok) return commandResult;
+    const updated = await this.waitForPlaybackStatusUpdate(beforeUpdatedAt, 1500);
+    if (updated.ok) return updated;
+    if (this.lastPlaybackStatus) {
+      return { ok: true, status: { ...this.lastPlaybackStatus, stale: true } };
+    }
+    return updated;
+  }
+
+  async setPause(paused) {
+    const beforeUpdatedAt = this.lastPlaybackStatus?.updatedAt || 0;
+    const commandResult = await this.sendPlayerCommand({ type: 'mpv-set-pause', pause: paused === true });
+    if (!commandResult.ok) return commandResult;
+    const updated = await this.waitForPlaybackStatusUpdate(beforeUpdatedAt, 1500);
+    if (updated.ok) return updated;
+    if (this.lastPlaybackStatus) {
+      return { ok: true, status: { ...this.lastPlaybackStatus, stale: true } };
+    }
+    return updated;
   }
 
   updateNativeHostBounds(bounds = {}) {
@@ -443,6 +552,7 @@ class MpvPlayerService {
         hasHostWindow: Boolean(this.hostWindow && !this.hostWindow.isDestroyed()),
         hostProcessPid: this.hostPid,
         lastHostOutput: this.lastHostOutput,
+        lastPlaybackStatus: this.lastPlaybackStatus,
         hasLastStartOptions: Boolean(this.lastStartOptions),
         lastViewport: this.lastViewport,
       },
@@ -750,6 +860,7 @@ class MpvPlayerService {
     this.setStatus(MPV_STATUSES.STARTING);
     this.lastHostOutput = '';
     this.lastProcessOutput = '';
+    this.lastPlaybackStatus = null;
     this.hostStartedAt = Date.now();
     console.info('[MpvPlayer:NativeHostBounds]', {
       phase: 'final-spawn',
@@ -794,6 +905,7 @@ class MpvPlayerService {
         if (!text.trim()) return;
         const lines = text.split(/\r?\n/).filter(Boolean);
         for (const line of lines) {
+          this.parseHostPlaybackStatusLine(line);
           if (isError) {
             console.warn('[MpvPlayer:NativeHost:stderr]', line);
           } else {
@@ -920,6 +1032,7 @@ class MpvPlayerService {
       this.hostProcess = null;
       this.hostPid = null;
       this.hostStartedAt = 0;
+      this.lastPlaybackStatus = null;
       this.setStatus(MPV_STATUSES.STOPPED);
       this.destroyMpvHostWindow();
       if (!mpvClosed || !hostClosed) {
