@@ -104,6 +104,54 @@ const resolveCompletedLocalVideoPath = (torrent = {}) => {
   return '';
 };
 
+const normalizeTmdbImage = (value = '', size = 'w500') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith('/')) return `https://image.tmdb.org/t/p/${size}${text}`;
+  return '';
+};
+
+const resolvePosterUrl = (item = {}) => {
+  const candidates = [
+    item?.posterUrl,
+    item?.poster,
+    item?.posterPath,
+    item?.mediaInfo?.posterUrl,
+    item?.mediaInfo?.poster,
+    item?.mediaInfo?.posterPath,
+    item?.metadata?.posterUrl,
+    item?.metadata?.poster,
+    item?.metadata?.posterPath,
+    item?.tmdb?.poster_path,
+    item?.movie?.poster_path,
+    item?.details?.poster_path,
+  ];
+  for (const candidate of candidates) {
+    const resolved = normalizeTmdbImage(candidate, 'w500');
+    if (resolved) return resolved;
+  }
+  return '';
+};
+
+const resolveBackdropUrl = (item = {}) => {
+  const candidates = [
+    item?.backdropUrl,
+    item?.backdrop,
+    item?.backdropPath,
+    item?.mediaInfo?.backdropUrl,
+    item?.mediaInfo?.backdrop,
+    item?.mediaInfo?.backdropPath,
+    item?.metadata?.backdropUrl,
+    item?.metadata?.backdropPath,
+  ];
+  for (const candidate of candidates) {
+    const resolved = normalizeTmdbImage(candidate, 'w780');
+    if (resolved) return resolved;
+  }
+  return '';
+};
+
 const DownloadsView = ({ settings }) => {
   const isTr = settings.language === 'tr';
   const nativeStreamEnabled = (window.electronAPI?.isDev === true)
@@ -199,6 +247,12 @@ const DownloadsView = ({ settings }) => {
         source: String(source),
         sourceKind,
         title: String(formatTorrentTitle(torrent)),
+        mediaInfo: {
+          ...(torrent?.mediaInfo || {}),
+          title: formatTorrentTitle(torrent),
+          posterUrl: resolvePosterUrl(torrent),
+          backdropUrl: resolveBackdropUrl(torrent),
+        },
       },
     }));
   };
@@ -536,7 +590,15 @@ const TorrentSection = ({ title, count, icon, children }) => (
 
 const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown, canStream, onStream, onPlayLocal }) => {
   const [showFileProgress, setShowFileProgress] = useState(false);
-  const posterUrl = torrent.mediaInfo?.poster || '';
+  const [posterFailed, setPosterFailed] = useState(false);
+  const posterUrl = posterFailed ? '' : resolvePosterUrl(torrent);
+  if ((window.electronAPI?.isDev === true) && posterUrl) {
+    console.info('[DownloadsView:PosterResolve]', {
+      title: formatTorrentTitle(torrent),
+      posterSource: 'resolver',
+      resolvedPosterUrl: posterUrl,
+    });
+  }
   const uiState = normalizeTorrentUiState(torrent);
   const isDone = uiState === 'completed';
   const isPaused = uiState === 'paused';
@@ -582,7 +644,7 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
         </div>
       )}
       <div className="torrent-poster">
-        {posterUrl ? <img src={posterUrl} alt={displayTitle} /> : <div className="torrent-poster-placeholder"><Download size={34} /></div>}
+        {posterUrl ? <img src={posterUrl} alt={displayTitle} onError={() => setPosterFailed(true)} /> : <div className="torrent-poster-placeholder"><Download size={34} /></div>}
       </div>
       <div className="torrent-info">
         <div className="torrent-title-row">

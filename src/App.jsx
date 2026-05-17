@@ -637,6 +637,7 @@ const App = () => {
     if (isStoppingPlayer) return;
     const source = String(payload?.source || '').trim();
     const sourceKind = String(payload?.sourceKind || 'magnet');
+    const mediaInfo = (payload?.mediaInfo && typeof payload.mediaInfo === 'object') ? payload.mediaInfo : {};
     if (!source) return;
     const enterPlayerMode = payload?.enterPlayerMode !== false;
     if (enterPlayerMode) setIsPlayerMode(true);
@@ -660,6 +661,7 @@ const App = () => {
         source,
         sourceKind,
         title,
+        mediaInfo,
         bounds: resolvedBounds,
         isPlayerMode: enterPlayerMode,
       });
@@ -791,6 +793,7 @@ const App = () => {
         source: detail.source || '',
         sourceKind: detail.sourceKind || 'magnet',
         title: detail.title || 'CineSoft Embedded Torrent Stream',
+        mediaInfo: (detail.mediaInfo && typeof detail.mediaInfo === 'object') ? detail.mediaInfo : {},
         enterPlayerMode: true,
       });
       if (typeof window !== 'undefined') {

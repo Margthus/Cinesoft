@@ -631,11 +631,32 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
     let sourceKind = 'magnet';
     if (source?.torrentUrl) sourceKind = 'torrent-url';
     else if (!source?.magnet && source?.infoHash) sourceKind = 'infohash';
+    const mediaInfo = {
+      title: String(item?.title || item?.name || source?.title || ''),
+      originalTitle: String(item?.original_title || item?.original_name || ''),
+      year: Number((item?.release_date || item?.first_air_date || '').slice(0, 4)) || null,
+      poster: item?.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : (item?.poster_url || ''),
+      posterUrl: item?.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : (item?.poster_url || ''),
+      posterPath: item?.poster_path || '',
+      backdrop: item?.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : (item?.backdrop_url || ''),
+      backdropUrl: item?.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : (item?.backdrop_url || ''),
+      backdropPath: item?.backdrop_path || '',
+      tmdbId: item?.id || null,
+      imdbId: item?.imdb_id || null,
+      mediaType: String(type || ''),
+      overview: String(item?.overview || ''),
+      magnet: source?.magnet || '',
+      infoHash: source?.infoHash || '',
+      torrentUrl: source?.torrentUrl || '',
+      quality: source?.quality || '',
+      provider: source?.provider || '',
+    };
     window.dispatchEvent(new CustomEvent(NATIVE_STREAM_EVENT, {
       detail: {
         source: String(sourceValue),
         sourceKind,
         title: String(source?.title || item?.title || item?.name || 'CineSoft Embedded Torrent Stream'),
+        mediaInfo,
       },
     }));
   };

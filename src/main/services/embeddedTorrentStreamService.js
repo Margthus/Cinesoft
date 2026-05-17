@@ -241,11 +241,13 @@ class EmbeddedTorrentStreamService {
     return { source, sourceKind };
   }
 
-  buildPreparePayload({ source, sourceKind, title }) {
+  buildPreparePayload({ source, sourceKind, title, mediaInfo = {} }) {
     const payload = {
       mode: 'download',
       title: String(title || 'Embedded Torrent Stream').trim(),
-      mediaInfo: {},
+      mediaInfo: {
+        ...(mediaInfo && typeof mediaInfo === 'object' ? mediaInfo : {}),
+      },
     };
     if (sourceKind === 'torrent-url') {
       payload.torrentUrl = source;
@@ -373,7 +375,7 @@ class EmbeddedTorrentStreamService {
 
       const tm = await this.getTorrentManager();
       this.throwIfRunCancelled(runId);
-      const preparePayload = this.buildPreparePayload({ source, sourceKind, title });
+      const preparePayload = this.buildPreparePayload({ source, sourceKind, title, mediaInfo: options?.mediaInfo || {} });
       const prepareResult = await tm.prepare(preparePayload);
       this.throwIfRunCancelled(runId);
       if (!prepareResult?.ok || !prepareResult?.id) {
@@ -928,6 +930,9 @@ class EmbeddedTorrentStreamService {
         status: 'playing',
         stopReason: null,
         selectedFileName: path.basename(picked.path || ''),
+        mediaInfo: {
+          ...((options?.mediaInfo && typeof options.mediaInfo === 'object') ? options.mediaInfo : {}),
+        },
       });
 
       console.info('[EmbeddedTorrentStream] started', {
