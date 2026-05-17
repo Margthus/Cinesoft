@@ -150,6 +150,8 @@ const App = () => {
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(null);
   const [playerVolume, setPlayerVolume] = useState(100);
+  const [playerSeekPercent, setPlayerSeekPercent] = useState(0);
+  const [playerIsSeeking, setPlayerIsSeeking] = useState(false);
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const nativeStreamEnabled = (window.electronAPI?.isDev === true)
     || String(import.meta.env.VITE_ENABLE_NATIVE_STREAM || '').toLowerCase() === 'true';
@@ -948,17 +950,35 @@ const App = () => {
     });
   };
 
-  const handlePlayerSeek = () => {
-    // Placeholder for V2 mpv-host seek IPC wiring.
-  };
-
   const handlePlayerVolumeChange = (event) => {
     const next = Number(event?.target?.value || 100);
-    setPlayerVolume(Math.max(0, Math.min(100, next)));
+    const clamped = Math.max(0, Math.min(100, next));
+    setPlayerVolume(clamped);
+    window.electronAPI?.setMpvVolume?.(clamped).catch(() => {});
   };
 
   const handlePlayerToggleFullscreen = () => {
-    // Placeholder for V2 window/native fullscreen toggle wiring.
+    window.electronAPI?.togglePlayerFullscreen?.().catch(() => {});
+  };
+
+  const commitPlayerSeek = async (percentValue) => {
+    const duration = Number(playerDuration);
+    if (!window.electronAPI?.seekMpvPlayback || !Number.isFinite(duration) || duration <= 0) return;
+    const normalized = Math.max(0, Math.min(100, Number(percentValue) || 0));
+    const targetTime = (normalized / 100) * duration;
+    await window.electronAPI.seekMpvPlayback(targetTime);
+  };
+
+  const handlePlayerSeekChange = (event) => {
+    const next = Number(event?.target?.value || 0);
+    setPlayerIsSeeking(true);
+    setPlayerSeekPercent(Math.max(0, Math.min(100, next)));
+  };
+
+  const handlePlayerSeekCommit = async (event) => {
+    const next = Number(event?.target?.value || playerSeekPercent || 0);
+    await commitPlayerSeek(next);
+    setPlayerIsSeeking(false);
   };
 
   const formatTime = (seconds, options = {}) => {
@@ -986,8 +1006,12 @@ const App = () => {
         if (disposed || !result?.ok || !result?.status) return;
         const status = result.status;
         setPlayerIsPaused(Boolean(status.paused));
-        setPlayerCurrentTime(Number(status.timePos || 0));
+        const nextTime = Number(status.timePos || 0);
+        setPlayerCurrentTime(nextTime);
         setPlayerDuration(Number.isFinite(Number(status.duration)) ? Number(status.duration) : null);
+        if (!playerIsSeeking && Number.isFinite(Number(status.duration)) && Number(status.duration) > 0) {
+          setPlayerSeekPercent(Math.max(0, Math.min(100, Math.round((nextTime / Number(status.duration)) * 100))));
+        }
       } catch {
         // keep previous values
       }
@@ -998,7 +1022,7 @@ const App = () => {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [isPlayerMode]);
+  }, [isPlayerMode, playerIsSeeking]);
 
   const handleClosePlayer = async () => {
     if (isStoppingPlayer) return;
@@ -1033,6 +1057,8 @@ const App = () => {
       setPlayerIsPaused(false);
       setPlayerCurrentTime(0);
       setPlayerDuration(null);
+      setPlayerSeekPercent(0);
+      setPlayerIsSeeking(false);
       setActiveStreamId('');
       setEmbeddedUiStatus('idle');
       setEmbeddedUiError('');
@@ -1180,7 +1206,7 @@ const App = () => {
                 <button type="button" className="player-icon-button" onClick={() => setShowPlayerMenu((prev) => !prev)} aria-label="More actions">⋯</button>
               </div>
               {showPlayerMenu ? (
-                <div className="player-more-menu">
+                <div className="player-more-menu player-more-menu-inline" role="menu">
                   {activePlaybackKind === 'local-file' ? (
                     <button type="button" onClick={handleClosePlayer} disabled={isStoppingPlayer || mpvDebugBusy}>Stop Playback</button>
                   ) : (
@@ -1223,12 +1249,19 @@ const App = () => {
                   className="player-seek-slider"
                   min="0"
                   max="100"
-                  value={playerDuration && playerDuration > 0 ? Math.max(0, Math.min(100, Math.round((playerCurrentTime / playerDuration) * 100))) : 0}
-                  onChange={handlePlayerSeek}
-                  disabled
+                  value={playerDuration && playerDuration > 0 ? playerSeekPercent : 0}
+                  onChange={handlePlayerSeekChange}
+                  onMouseUp={handlePlayerSeekCommit}
+                  onTouchEnd={handlePlayerSeekCommit}
+                  onKeyUp={(event) => {
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End' || event.key === 'PageUp' || event.key === 'PageDown') {
+                      handlePlayerSeekCommit(event);
+                    }
+                  }}
+                  disabled={!playerDuration || playerDuration <= 0}
                 />
               </div>
-              <button type="button" className="player-control-button">Vol</button>
+              <button type="button" className="player-control-button" disabled>Vol</button>
               <input type="range" className="player-volume-slider" min="0" max="100" value={playerVolume} onChange={handlePlayerVolumeChange} />
               <button type="button" className="player-control-button" disabled>Sub</button>
               <button type="button" className="player-control-button" disabled>1x</button>

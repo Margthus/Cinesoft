@@ -269,6 +269,39 @@ class MpvPlayerService {
     return updated;
   }
 
+  async seekTo(timePos) {
+    const target = Number(timePos);
+    if (!Number.isFinite(target) || target < 0) {
+      return { ok: false, error: 'Invalid seek time.' };
+    }
+    const beforeUpdatedAt = this.lastPlaybackStatus?.updatedAt || 0;
+    const commandResult = await this.sendPlayerCommand({ type: 'mpv-seek', timePos: target });
+    if (!commandResult.ok) return commandResult;
+    const updated = await this.waitForPlaybackStatusUpdate(beforeUpdatedAt, 1500);
+    if (updated.ok) return updated;
+    if (this.lastPlaybackStatus) {
+      return { ok: true, status: { ...this.lastPlaybackStatus, stale: true } };
+    }
+    return updated;
+  }
+
+  async setVolume(volume) {
+    const nextVolume = Number(volume);
+    if (!Number.isFinite(nextVolume)) {
+      return { ok: false, error: 'Invalid volume value.' };
+    }
+    const clamped = Math.max(0, Math.min(100, nextVolume));
+    const beforeUpdatedAt = this.lastPlaybackStatus?.updatedAt || 0;
+    const commandResult = await this.sendPlayerCommand({ type: 'mpv-set-volume', volume: clamped });
+    if (!commandResult.ok) return commandResult;
+    const updated = await this.waitForPlaybackStatusUpdate(beforeUpdatedAt, 1500);
+    if (updated.ok) return updated;
+    if (this.lastPlaybackStatus) {
+      return { ok: true, status: { ...this.lastPlaybackStatus, stale: true } };
+    }
+    return updated;
+  }
+
   updateNativeHostBounds(bounds = {}) {
     const safe = sanitizeBounds(bounds);
     this.lastNativeHostBounds = {

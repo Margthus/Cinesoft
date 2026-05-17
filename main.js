@@ -4865,6 +4865,49 @@ ipcMain.handle('mpv:get-playback-status', async () => {
   }
 });
 
+ipcMain.handle('mpv:seek', async (event, timePos) => {
+  try {
+    console.info('[IPC:MpvSeek] received', { timePos });
+    const result = await mpvPlayerService.seekTo(Number(timePos));
+    console.info('[IPC:MpvSeek] result', result);
+    return {
+      ok: Boolean(result?.ok),
+      status: result?.status || null,
+      error: result?.error || undefined,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to seek MPV playback.' };
+  }
+});
+
+ipcMain.handle('mpv:set-volume', async (event, volume) => {
+  try {
+    console.info('[IPC:MpvSetVolume] received', { volume });
+    const result = await mpvPlayerService.setVolume(Number(volume));
+    console.info('[IPC:MpvSetVolume] result', result);
+    return {
+      ok: Boolean(result?.ok),
+      status: result?.status || null,
+      error: result?.error || undefined,
+    };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to set MPV volume.' };
+  }
+});
+
+ipcMain.handle('player:toggle-fullscreen', async () => {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, error: 'Main window is not available.' };
+    }
+    const next = !mainWindow.isFullScreen();
+    mainWindow.setFullScreen(next);
+    return { ok: true, isFullScreen: mainWindow.isFullScreen() };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Failed to toggle fullscreen.' };
+  }
+});
+
 ipcMain.handle('stream:create-local-file-session', async (event, payload = {}) => {
   try {
     const filePath = String(payload?.filePath || '').trim();

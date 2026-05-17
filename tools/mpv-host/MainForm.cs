@@ -176,7 +176,7 @@ internal sealed class MainForm : Form
                 return;
             }
             var type = typeRaw.Trim().ToLowerInvariant();
-            if (type is "mpv-toggle-pause" or "mpv-set-pause" or "mpv-get-playback-status")
+            if (type is "mpv-toggle-pause" or "mpv-set-pause" or "mpv-get-playback-status" or "mpv-seek" or "mpv-set-volume")
             {
                 _ = Task.Run(async () =>
                 {
@@ -195,6 +195,23 @@ internal sealed class MainForm : Form
                             Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-set-pause");
                             Console.WriteLine($"[MpvHost:IPC] command=set pause value={pauseValue}");
                             await HandleSetPauseAsync(pauseValue);
+                            return;
+                        }
+                        if (type == "mpv-seek")
+                        {
+                            var timePos = TryGetDouble(root, "timePos") ?? TryGetDouble(root, "TimePos") ?? 0d;
+                            Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-seek");
+                            Console.WriteLine($"[MpvHost:IPC] command=set time-pos value={timePos}");
+                            await HandleSeekAsync(timePos);
+                            return;
+                        }
+                        if (type == "mpv-set-volume")
+                        {
+                            var volume = TryGetDouble(root, "volume") ?? TryGetDouble(root, "Volume") ?? 100d;
+                            volume = Math.Max(0d, Math.Min(100d, volume));
+                            Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-set-volume");
+                            Console.WriteLine($"[MpvHost:IPC] command=set volume value={volume}");
+                            await HandleSetVolumeAsync(volume);
                             return;
                         }
                         Console.WriteLine("[MpvHost:CommandDispatch] type=mpv-get-playback-status");
@@ -376,6 +393,26 @@ internal sealed class MainForm : Form
         await EmitPlaybackStatusAsync();
     }
 
+    private async Task HandleSeekAsync(double timePos)
+    {
+        var result = await SendMpvIpcCommandAsync(new object[] { "set_property", "time-pos", timePos });
+        if (!result.Success)
+        {
+            Console.WriteLine($"[MpvHost:PlaybackStatusError] seek failed: {result.Error ?? "unknown"}");
+        }
+        await EmitPlaybackStatusAsync();
+    }
+
+    private async Task HandleSetVolumeAsync(double volume)
+    {
+        var result = await SendMpvIpcCommandAsync(new object[] { "set_property", "volume", volume });
+        if (!result.Success)
+        {
+            Console.WriteLine($"[MpvHost:PlaybackStatusError] set volume failed: {result.Error ?? "unknown"}");
+        }
+        await EmitPlaybackStatusAsync();
+    }
+
     private async Task<MpvIpcCommandResult> SendMpvIpcCommandAsync(object[] command, int timeoutMs = 1500)
     {
         if (string.IsNullOrWhiteSpace(_mpvIpcPipeName) || _mpvProcess is not { HasExited: false })
@@ -528,6 +565,14 @@ internal sealed class MainForm : Form
         if (!root.TryGetProperty(name, out var value)) return null;
         if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var numeric)) return numeric;
         if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed)) return parsed;
+        return null;
+    }
+
+    private static double? TryGetDouble(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var numeric)) return numeric;
+        if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), out var parsed)) return parsed;
         return null;
     }
 
