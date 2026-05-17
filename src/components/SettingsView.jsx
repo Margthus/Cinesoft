@@ -1445,6 +1445,13 @@ const SettingsView = ({ settings, setSettings }) => {
             </div>
             <Toggle checked={torrCfg.enabled === true} onChange={(checked) => updateTorrServer({ enabled: checked })} />
           </div>
+          <div className="settings-row-card">
+            <div className="settings-row-copy">
+              <strong>{t.playerBackend}</strong>
+              <span>{t.playerBackendHint}</span>
+            </div>
+            <div className="status-chip status-chip--active">VLC</div>
+          </div>
         </div>
 
         <div className="settings-form-card">
@@ -3428,6 +3435,8 @@ const getCopy = (language) => ({
     torrserverHint: 'Yalnizca stream engine kontrolu. Download manager degildir.',
     torrserverEnabled: 'TorrServer stream engine',
     torrserverEnabledHint: 'Stream butonu icin TorrServer kullan.',
+    playerBackend: 'Player backend',
+    playerBackendHint: 'TorrServer streamleri VLC Player host ile oynatilir.',
     torrserverExePath: 'TorrServer executable path',
     torrserverPort: 'TorrServer Port',
     torrserverDataDir: 'TorrServer data dir',
@@ -3752,6 +3761,8 @@ const getCopy = (language) => ({
     torrserverHint: 'Streaming engine control only. Not a download manager.',
     torrserverEnabled: 'TorrServer stream engine',
     torrserverEnabledHint: 'Use TorrServer for the Stream button.',
+    playerBackend: 'Player backend',
+    playerBackendHint: 'TorrServer streams are played by the VLC Player host.',
     torrserverExePath: 'TorrServer executable path',
     torrserverPort: 'TorrServer Port',
     torrserverDataDir: 'TorrServer data dir',

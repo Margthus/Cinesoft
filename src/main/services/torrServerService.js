@@ -197,13 +197,88 @@ const parseM3uFirstUrl = (content = '') => {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
   if (!lines.length) return '';
-  const httpLine = lines.find((line) => /^https?:\/\//i.test(line));
-  return httpLine || lines[0] || '';
+  const urlLines = lines.filter((line) => /^https?:\/\//i.test(line));
+  if (!urlLines.length) return '';
+  const preferredLine = urlLines.find((line) => /\/stream\//i.test(line) || /\.(mp4|mkv|avi|mov|webm|ts|m4v)(\?|$)/i.test(line));
+  return preferredLine || urlLines[0] || '';
 };
 
 const safePreview = (value = '', max = 500) => {
   const text = String(value || '');
   return text.length > max ? `${text.slice(0, max)}...` : text;
+};
+
+const waitForPlayableM3UUrl = async (m3uUrl, options = {}) => {
+  const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 30000);
+  const intervalMs = Math.max(250, Number(options?.intervalMs) || 1000);
+  const startedAt = Date.now();
+  let attempt = 0;
+  let lastStatus = 0;
+  let lastContentType = '';
+  let lastBodyPreview = '';
+  let lastBodyLength = 0;
+
+  while ((Date.now() - startedAt) <= timeoutMs) {
+    attempt += 1;
+    let hasPlayableUrl = false;
+    let resolvedUrl = '';
+    try {
+      const response = await axios.get(m3uUrl, {
+        timeout: Math.max(HEALTH_TIMEOUT_MS, 5000),
+        responseType: 'text',
+        transformResponse: [(data) => data],
+        validateStatus: () => true,
+      });
+      const body = String(response?.data || '');
+      const headers = response?.headers || {};
+      lastStatus = Number(response?.status || 0);
+      lastContentType = String(headers['content-type'] || '');
+      lastBodyLength = body.length;
+      lastBodyPreview = maskSensitiveUrl(safePreview(body, 200));
+      if (lastStatus >= 200 && lastStatus < 300) {
+        resolvedUrl = parseM3uFirstUrl(body);
+        hasPlayableUrl = Boolean(resolvedUrl);
+      }
+    } catch (error) {
+      lastStatus = 0;
+      lastContentType = '';
+      lastBodyLength = 0;
+      lastBodyPreview = safePreview(String(error?.message || 'request failed'), 200);
+    }
+
+    console.log('[TorrServer:M3UResolveWait]', {
+      attempt,
+      elapsedMs: Date.now() - startedAt,
+      status: lastStatus,
+      contentType: lastContentType,
+      bodyLength: lastBodyLength,
+      hasPlayableUrl,
+    });
+
+    if (hasPlayableUrl) {
+      return {
+        streamUrl: resolvedUrl,
+        attempt,
+        elapsedMs: Date.now() - startedAt,
+        status: lastStatus,
+        contentType: lastContentType,
+        bodyLength: lastBodyLength,
+      };
+    }
+
+    if ((Date.now() - startedAt) >= timeoutMs) break;
+    await wait(intervalMs);
+  }
+
+  return {
+    streamUrl: '',
+    attempt,
+    elapsedMs: Date.now() - startedAt,
+    status: lastStatus,
+    contentType: lastContentType,
+    bodyLength: lastBodyLength,
+    bodyPreview: lastBodyPreview,
+  };
 };
 
 const isLikelyTorrentBytes = (buffer) => {
@@ -463,84 +538,35 @@ const startTorrServerStream = async (payload = {}, settings = {}) => {
   });
 
   const m3uUrl = `${status.baseUrl}/stream?m3u&link=${encodeURIComponent(streamSourceLink)}`;
-  const directStreamUrl = `${status.baseUrl}/stream?link=${encodeURIComponent(streamSourceLink)}`;
   debugLog('[TorrServer:M3UFetch]', { m3uUrl: maskSensitiveUrl(m3uUrl) });
-  let probedDirectOk = false;
-  let directStatus = 0;
-  try {
-    const directProbe = await axios.get(directStreamUrl, {
-      timeout: Math.max(HEALTH_TIMEOUT_MS, 4000),
-      responseType: 'stream',
-      maxRedirects: 0,
-      validateStatus: () => true,
-    });
-    const headers = directProbe?.headers || {};
-    directStatus = Number(directProbe?.status || 0);
-    debugLog('[TorrServer:DirectStreamProbe]', {
-      url: maskSensitiveUrl(directStreamUrl),
-      status: directStatus,
-      contentType: String(headers['content-type'] || ''),
-      contentLength: String(headers['content-length'] || ''),
-      acceptRanges: String(headers['accept-ranges'] || ''),
-    });
-    if (directProbe?.data && typeof directProbe.data.destroy === 'function') {
-      directProbe.data.destroy();
-    }
-    probedDirectOk = directStatus === 200 || directStatus === 206;
-  } catch (error) {
-    debugLog('[TorrServer:DirectStreamProbe]', {
-      url: maskSensitiveUrl(directStreamUrl),
-      status: 0,
-      error: String(error?.message || 'probe failed'),
-    });
-  }
-
-  let streamUrl = '';
-  let playlistUrl = '';
-  let m3uStatus = 0;
-  try {
-    const response = await axios.get(m3uUrl, {
-      timeout: Math.max(HEALTH_TIMEOUT_MS, 5000),
-      responseType: 'text',
-      transformResponse: [(data) => data],
-      validateStatus: () => true,
-    });
-    const body = String(response?.data || '');
-    const headers = response?.headers || {};
-    m3uStatus = Number(response?.status || 0);
-    debugLog('[TorrServer:M3UResponse]', {
-      status: m3uStatus,
-      contentType: String(headers['content-type'] || ''),
-      bodyLength: body.length,
-      bodyPreview: maskSensitiveUrl(safePreview(body, 500)),
-    });
-    if (m3uStatus >= 200 && m3uStatus < 300) {
-      streamUrl = parseM3uFirstUrl(body);
-    }
-    if (!streamUrl && m3uStatus >= 200 && m3uStatus < 300) {
-      playlistUrl = m3uUrl;
-    }
-  } catch {}
-  debugLog('[TorrServer:M3UResolvedUrl]', {
-    streamUrl: maskSensitiveUrl(streamUrl),
-    playlistUrl: maskSensitiveUrl(playlistUrl),
+  const m3uResolve = await waitForPlayableM3UUrl(m3uUrl, {
+    timeoutMs: 30000,
+    intervalMs: 1000,
   });
-  const finalStreamUrl = probedDirectOk ? directStreamUrl : streamUrl;
-  const finalPlaylistUrl = finalStreamUrl ? '' : (m3uStatus >= 200 && m3uStatus < 300 ? playlistUrl : '');
-  if (!finalStreamUrl && !finalPlaylistUrl) {
-    throw new Error('TorrServer could not prepare stream source');
+  console.log('[TorrServer:M3UResponse]', {
+    status: Number(m3uResolve?.status || 0),
+    contentType: String(m3uResolve?.contentType || ''),
+    bodyLength: Number(m3uResolve?.bodyLength || 0),
+  });
+  const streamUrl = String(m3uResolve?.streamUrl || '');
+  console.log('[TorrServer:M3UResolvedUrl]', {
+    streamUrl: maskSensitiveUrl(streamUrl),
+  });
+  const finalStreamUrl = streamUrl;
+  if (!finalStreamUrl) {
+    throw new Error(`TorrServer could not resolve playable video URL. Metadata may still be loading.${m3uResolve?.bodyPreview ? ` Last response: ${m3uResolve.bodyPreview}` : ''}`);
   }
   console.log('[TorrServer:StreamUrl]', {
-    streamUrl: maskSensitiveUrl(finalStreamUrl || finalPlaylistUrl),
+    streamUrl: maskSensitiveUrl(finalStreamUrl),
     baseUrl: maskSensitiveUrl(status.baseUrl),
   });
   return {
     engine: 'torrserver',
     streamUrl: finalStreamUrl,
-    playlistUrl: finalPlaylistUrl,
+    playlistUrl: '',
     m3uUrl,
-    directStreamUrl,
-    url: finalStreamUrl || finalPlaylistUrl,
+    directStreamUrl: '',
+    url: finalStreamUrl,
     sourceLink: previewText(maskSensitiveUrl(streamSourceLink), 160),
     baseUrl: status.baseUrl,
     startedForThisSession,

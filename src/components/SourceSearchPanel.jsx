@@ -565,7 +565,7 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         });
       }
       notify(
-        settings.language === 'en' ? 'Stream started in external MPV.' : 'Harici MPV ile stream baslatildi.',
+        settings.language === 'en' ? 'Stream started in VLC Player.' : 'VLC Player ile stream baslatildi.',
         'success',
       );
     } catch (err) {
@@ -574,10 +574,10 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         notify('TorrServer exe path is not configured', 'error', 6000);
       } else if (errorMessage.includes('TorrServer not running')) {
         notify('TorrServer not running', 'error', 6000);
-      } else if (errorMessage.includes('MPV executable not found')) {
-        notify('MPV executable not found', 'error', 7000);
-      } else if (errorMessage.includes('mpv.exe not found') || errorMessage.includes('MPV URL is required')) {
-        notify(`MPV launch failed: ${errorMessage}`, 'error', 7000);
+      } else if (errorMessage.includes('VLC host executable not found')) {
+        notify('VLC Player host executable not found', 'error', 7000);
+      } else if (errorMessage.includes('VLC Player URL is required') || errorMessage.includes('Failed to launch VLC Player')) {
+        notify(`VLC Player launch failed: ${errorMessage}`, 'error', 7000);
       } else {
         notify(errorMessage || 'Stream start failed', 'error', 6000);
       }

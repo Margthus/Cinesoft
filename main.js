@@ -19,7 +19,7 @@ const {
   testTorrServerConnection,
   startTorrServerStream,
 } = require('./src/main/services/torrServerService');
-const { playWithMpv, stopMpv, setMpvExitHandler } = require('./src/main/services/mpvPlayerService');
+const { playWithVlc, stopVlcPlayback, setVlcExitHandler } = require('./src/main/services/vlcPlayerService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -1397,12 +1397,12 @@ let forceQuitTimer = null;
 const managedProcesses = new Map();
 const startingEngines = new Set();
 let activePlaybackKind = '';
-let closeManagedTorrServerWhenMpvExits = false;
-setMpvExitHandler(async () => {
+let closeManagedTorrServerWhenPlayerExits = false;
+setVlcExitHandler(async () => {
   if (activePlaybackKind !== 'torrserver-stream') return;
   activePlaybackKind = '';
-  if (!closeManagedTorrServerWhenMpvExits) return;
-  closeManagedTorrServerWhenMpvExits = false;
+  if (!closeManagedTorrServerWhenPlayerExits) return;
+  closeManagedTorrServerWhenPlayerExits = false;
   try {
     await stopTorrServer(getTorrServerConfig(), { onlyIfManaged: true });
   } catch {}
@@ -3416,7 +3416,7 @@ ipcMain.handle('torrserver:start', async (event, settings = {}) => {
 
 ipcMain.handle('torrserver:stop', async () => {
   const result = await stopTorrServer(getTorrServerConfig());
-  closeManagedTorrServerWhenMpvExits = false;
+  closeManagedTorrServerWhenPlayerExits = false;
   if (activePlaybackKind === 'torrserver-stream') activePlaybackKind = '';
   return result;
 });
@@ -3466,34 +3466,31 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
   }
   const torrServerSettings = getTorrServerConfig();
   const result = await startTorrServerStream(payload || {}, torrServerSettings);
+  const playerTitle = payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream';
   if (DEBUG_TORRSERVER_STREAM) {
-    console.log('[TorrServerPlayer:LaunchMpv]', {
-      sourceType: 'url',
+    console.log('[TorrServerPlayer:LaunchVlc]', {
       url: String(result?.streamUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
-      playlistUrl: String(result?.playlistUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
-      title: payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream',
+      title: playerTitle,
     });
   }
-  const player = await playWithMpv({
-    sourceType: 'url',
+  const player = await playWithVlc({
     url: result.streamUrl,
-    playlistUrl: result.playlistUrl,
-    title: payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream',
+    title: playerTitle,
   });
   activePlaybackKind = 'torrserver-stream';
-  closeManagedTorrServerWhenMpvExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
+  closeManagedTorrServerWhenPlayerExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
   return {
     ...result,
     player,
   };
 });
 
-ipcMain.handle('mpv:stop', async () => {
-  const stopped = stopMpv();
+ipcMain.handle('player:stop', async () => {
+  const stopped = stopVlcPlayback();
   if (activePlaybackKind === 'torrserver-stream') {
     activePlaybackKind = '';
-    if (closeManagedTorrServerWhenMpvExits) {
-      closeManagedTorrServerWhenMpvExits = false;
+    if (closeManagedTorrServerWhenPlayerExits) {
+      closeManagedTorrServerWhenPlayerExits = false;
       await stopTorrServer(getTorrServerConfig(), { onlyIfManaged: true });
     }
   }

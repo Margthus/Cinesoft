@@ -118,7 +118,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   torrserverDebugEnabled: DEBUG_TORRSERVER_STREAM,
   openTorrServerWeb: (settings) => ipcRenderer.invoke('torrserver:open-web', settings),
-  stopMpv: () => ipcRenderer.invoke('mpv:stop'),
+  stopNativePlayer: () => ipcRenderer.invoke('player:stop'),
   scanLibrary: () => ipcRenderer.invoke('library-scan'),
   openLibraryVideo: (payload) => ipcRenderer.invoke('open-library-video', payload),
   openLibraryFolder: (payload) => ipcRenderer.invoke('open-library-folder', payload),

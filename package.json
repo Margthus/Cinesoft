@@ -62,6 +62,13 @@
       {
         "from": "build/icon.ico",
         "to": "build/icon.ico"
+      },
+      {
+        "from": "tools/vlc-host/bin/Release/net8.0-windows",
+        "to": "vlc-host",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [
