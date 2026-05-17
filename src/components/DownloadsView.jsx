@@ -19,6 +19,7 @@ const DEFAULT_TORRENT_SETTINGS = {
   lowSpeedDurationMinutes: 10,
 };
 const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
+const NATIVE_LOCAL_PLAY_EVENT = 'cinesoft:native-local-play';
 
 const formatSize = (bytes) => {
   if (!bytes) return '0 B';
@@ -81,6 +82,26 @@ const normalizeTorrentUiState = (torrent = {}) => {
   if (done) return 'completed';
   if (downloadRate > 0) return 'downloading';
   return 'idle';
+};
+
+const joinLocalPath = (basePath = '', relPath = '') => {
+  const base = String(basePath || '').trim();
+  const rel = String(relPath || '').trim();
+  if (!base || !rel) return '';
+  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith('\\\\')) return rel;
+  const normalizedBase = base.replace(/[\\/]+$/, '');
+  const normalizedRel = rel.replace(/^[\\/]+/, '').replace(/\//g, '\\');
+  return `${normalizedBase}\\${normalizedRel}`;
+};
+
+const resolveCompletedLocalVideoPath = (torrent = {}) => {
+  const savePath = String(torrent?.savePath || '').trim();
+  const selected = Array.isArray(torrent?.selectedVideoFiles) ? torrent.selectedVideoFiles : [];
+  const doneSelected = selected.find((file) => file?.done === true && Number(file?.size || 0) > 0);
+  if (doneSelected?.path && savePath) return joinLocalPath(savePath, doneSelected.path);
+  const videoPath = String(torrent?.videoFile?.path || '').trim();
+  if (videoPath && savePath) return joinLocalPath(savePath, videoPath);
+  return '';
 };
 
 const DownloadsView = ({ settings }) => {
@@ -177,6 +198,18 @@ const DownloadsView = ({ settings }) => {
       detail: {
         source: String(source),
         sourceKind,
+        title: String(formatTorrentTitle(torrent)),
+      },
+    }));
+  };
+
+  const handlePlayLocal = (torrent) => {
+    if (typeof window === 'undefined') return;
+    const localFilePath = resolveCompletedLocalVideoPath(torrent);
+    if (!localFilePath) return;
+    window.dispatchEvent(new CustomEvent(NATIVE_LOCAL_PLAY_EVENT, {
+      detail: {
+        localFilePath,
         title: String(formatTorrentTitle(torrent)),
       },
     }));
@@ -306,6 +339,7 @@ const DownloadsView = ({ settings }) => {
                   t={t}
                   canStream={nativeStreamEnabled}
                   onStream={handleStream}
+                  onPlayLocal={handlePlayLocal}
                   onPause={handlePause}
                   onResume={handleResume}
                   onRemove={handleRemove}
@@ -320,7 +354,18 @@ const DownloadsView = ({ settings }) => {
           {completedTorrents.length > 0 && (
             <TorrentSection title={t.completed} count={completedTorrents.length} icon={<CheckCircle2 size={18} />}>
               {completedTorrents.map((torrent) => (
-                <TorrentCard key={torrent.id} torrent={torrent} t={t} canStream={nativeStreamEnabled} onStream={handleStream} onPause={handlePause} onResume={handleResume} onRemove={handleRemove} onFiles={openFileModal} />
+                <TorrentCard
+                  key={torrent.id}
+                  torrent={torrent}
+                  t={t}
+                  canStream={nativeStreamEnabled}
+                  onStream={handleStream}
+                  onPlayLocal={handlePlayLocal}
+                  onPause={handlePause}
+                  onResume={handleResume}
+                  onRemove={handleRemove}
+                  onFiles={openFileModal}
+                />
               ))}
             </TorrentSection>
           )}
@@ -489,7 +534,7 @@ const TorrentSection = ({ title, count, icon, children }) => (
   </div>
 );
 
-const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown, canStream, onStream }) => {
+const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReorder, canMoveUp, canMoveDown, canStream, onStream, onPlayLocal }) => {
   const [showFileProgress, setShowFileProgress] = useState(false);
   const posterUrl = torrent.mediaInfo?.poster || '';
   const uiState = normalizeTorrentUiState(torrent);
@@ -519,6 +564,8 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
     || torrent?.mediaInfo?.torrentUrl
     || torrent?.mediaInfo?.infoHash
   );
+  const localPlayablePath = isDone ? resolveCompletedLocalVideoPath(torrent) : '';
+  const localPlayable = Boolean(localPlayablePath);
   const displayTitle = formatTorrentTitle(torrent);
   const displaySubtitle = torrent.name || torrent.title || '';
 
@@ -591,10 +638,16 @@ const TorrentCard = ({ torrent, t, onPause, onResume, onRemove, onFiles, onReord
           </div>
         )}
         <div className="torrent-actions">
-          {streamable && (
+          {!isDone && streamable && (
             <button className="torrent-action-btn" onClick={() => onStream(torrent)}>
               <Play size={15} />
               <span>{t.stream}</span>
+            </button>
+          )}
+          {isDone && localPlayable && (
+            <button className="torrent-action-btn" onClick={() => onPlayLocal?.(torrent)}>
+              <Play size={15} />
+              <span>Play</span>
             </button>
           )}
           <button className="torrent-action-btn" onClick={() => onFiles(torrent)}>

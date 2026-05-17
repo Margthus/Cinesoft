@@ -47,6 +47,7 @@ const DEFAULT_PAGE_ROUTE_MAP = {
 };
 const APP_TOAST_EVENT = 'cinesoft:toast';
 const NATIVE_STREAM_EVENT = 'cinesoft:native-stream-start';
+const NATIVE_LOCAL_PLAY_EVENT = 'cinesoft:native-local-play';
 const PLAYER_TOPBAR_HEIGHT = 52;
 let appToastId = 0;
 
@@ -135,6 +136,7 @@ const App = () => {
   const [embeddedUiStatus, setEmbeddedUiStatus] = useState('idle');
   const [embeddedUiError, setEmbeddedUiError] = useState('');
   const [isPlayerMode, setIsPlayerMode] = useState(false);
+  const [activePlaybackKind, setActivePlaybackKind] = useState('');
   const [activePlayerTitle, setActivePlayerTitle] = useState('');
   const [playerStatus, setPlayerStatus] = useState('idle');
   const [activeStreamId, setActiveStreamId] = useState('');
@@ -646,6 +648,7 @@ const App = () => {
     setEmbeddedUiStatus('preparing');
     setPlayerStatus('preparing');
     try {
+      setActivePlaybackKind('embedded-stream');
       setEmbeddedUiStatus('selecting-file');
       setPlayerStatus('selecting-file');
       const resolvedBounds = enterPlayerMode
@@ -734,6 +737,7 @@ const App = () => {
       setPlayerStatus(mode === 'playback-only' ? 'idle' : 'stopped');
       if (mode === 'playback-only' || mode === 'pause-torrent' || mode === 'remove-torrent') {
         setIsPlayerMode(false);
+        setActivePlaybackKind('');
         setPlayerError('');
       }
       await refreshEmbeddedTorrentStatus();
@@ -802,7 +806,21 @@ const App = () => {
   }, [nativeStreamEnabled, mpvSlotBounds]);
 
   useEffect(() => {
+    if (!nativeStreamEnabled) return undefined;
+    const onStartNativeLocalPlay = async (event) => {
+      const detail = event?.detail || {};
+      await startLocalFilePlaybackFromUi({
+        localFilePath: detail.localFilePath || '',
+        title: detail.title || 'CineSoft Local File',
+      });
+    };
+    window.addEventListener(NATIVE_LOCAL_PLAY_EVENT, onStartNativeLocalPlay);
+    return () => window.removeEventListener(NATIVE_LOCAL_PLAY_EVENT, onStartNativeLocalPlay);
+  }, [nativeStreamEnabled, mpvSlotBounds, isStoppingPlayer]);
+
+  useEffect(() => {
     if (!embeddedTorrentStreamStatus) return;
+    if (activePlaybackKind === 'local-file') return;
     const status = String(embeddedTorrentStreamStatus.status || '').toLowerCase();
     const hasActiveStream = Boolean(
       embeddedTorrentStreamStatus.streamId
@@ -858,7 +876,7 @@ const App = () => {
       const mbps = rate > 0 ? `${(rate / (1024 * 1024)).toFixed(2)} MB/s` : '0 MB/s';
       setPlayerError(`Baslangic parcasi bekleniyor... Peers: ${peers} | Speed: ${mbps}`);
     }
-  }, [embeddedTorrentStreamStatus]);
+  }, [embeddedTorrentStreamStatus, activePlaybackKind]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -870,19 +888,28 @@ const App = () => {
     if (isStoppingPlayer) return;
     setIsStoppingPlayer(true);
     try {
-      const streamId = activeStreamId || resolvedEmbeddedStreamId || undefined;
-      if (streamId && window.electronAPI?.stopEmbeddedTorrentStream) {
+      if (activePlaybackKind === 'local-file') {
         try {
-          await window.electronAPI.stopEmbeddedTorrentStream({
-            streamId,
-            mode: 'pause-torrent',
-            removeFiles: false,
-          });
+          await window.electronAPI?.stopMpvPlayback?.();
         } catch {
           // best effort close
         }
+      } else {
+        const streamId = activeStreamId || resolvedEmbeddedStreamId || undefined;
+        if (streamId && window.electronAPI?.stopEmbeddedTorrentStream) {
+          try {
+            await window.electronAPI.stopEmbeddedTorrentStream({
+              streamId,
+              mode: 'pause-torrent',
+              removeFiles: false,
+            });
+          } catch {
+            // best effort close
+          }
+        }
       }
       setIsPlayerMode(false);
+      setActivePlaybackKind('');
       setActivePlayerTitle('');
       setPlayerStatus('idle');
       setPlayerError('');
@@ -893,10 +920,59 @@ const App = () => {
       setMpvDebugStreamUrl('');
       await refreshEmbeddedTorrentStatus();
       await refreshStreamServerStatus();
-      await window.electronAPI?.torrentGetAll?.();
-      window.dispatchEvent(new CustomEvent('cinesoft:torrents-refresh'));
+      if (activePlaybackKind !== 'local-file') {
+        await window.electronAPI?.torrentGetAll?.();
+        window.dispatchEvent(new CustomEvent('cinesoft:torrents-refresh'));
+      }
     } finally {
       setIsStoppingPlayer(false);
+    }
+  };
+
+  const startLocalFilePlaybackFromUi = async (payload = {}) => {
+    if (!window.electronAPI?.startMpvPlayback) return;
+    if (isStoppingPlayer) return;
+    const localFilePath = String(payload?.localFilePath || '').trim();
+    if (!localFilePath) return;
+    const title = String(payload?.title || 'CineSoft Local File');
+    setIsPlayerMode(true);
+    setActivePlaybackKind('local-file');
+    setActivePlayerTitle(title);
+    setMpvDebugBusy(true);
+    setPlayerError('');
+    setEmbeddedUiError('');
+    setPlayerStatus('preparing');
+    try {
+      const resolvedBounds = await waitForPlayerSlotBounds();
+      logPlayerModeBounds('before-start-local-file', resolvedBounds, { fallbackUsed: false });
+      setMpvSlotBounds(resolvedBounds);
+      console.info('[PlayerMode:LocalFilePlay]', {
+        localFilePath,
+        title,
+        bounds: resolvedBounds,
+      });
+      const result = await window.electronAPI.startMpvPlayback({
+        sourceType: 'embedded-file',
+        source: localFilePath,
+        filePath: localFilePath,
+        title,
+        mode: 'native-host',
+        bounds: resolvedBounds,
+        isPlayerMode: true,
+      });
+      if (!result?.ok) throw new Error(result?.error || 'Local file playback failed.');
+      setPlayerStatus('playing');
+      setActiveStreamId('');
+      setMpvDebugStreamSessionId('');
+      setMpvDebugStreamUrl('');
+      window.requestAnimationFrame(() => {
+        window.electronAPI?.updateNativeHostBounds?.(resolvedBounds).catch(() => {});
+      });
+    } catch (error) {
+      setPlayerStatus('error');
+      setPlayerError(String(error?.message || 'Local file play failed.'));
+    } finally {
+      setMpvDebugBusy(false);
     }
   };
 
@@ -980,15 +1056,23 @@ const App = () => {
                 <div className="player-title">{activePlayerTitle || 'CineSoft Embedded Torrent Stream'}</div>
               </div>
               <div className="player-actions">
-                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('playback-only')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                  Stop Playback Only
-                </button>
-                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                  Pause Torrent
-                </button>
-                <button type="button" onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
-                  Remove Torrent
-                </button>
+                {activePlaybackKind === 'local-file' ? (
+                  <button type="button" onClick={handleClosePlayer} disabled={isStoppingPlayer || mpvDebugBusy}>
+                    Stop Playback
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('playback-only')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                      Stop Playback Only
+                    </button>
+                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('pause-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                      Pause Torrent
+                    </button>
+                    <button type="button" onClick={() => handleStopEmbeddedTorrentStream('remove-torrent')} disabled={isStoppingPlayer || mpvDebugBusy || !resolvedEmbeddedStreamId}>
+                      Remove Torrent
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <div ref={mpvNativeSlotRef} className="fullscreen-player-slot">
