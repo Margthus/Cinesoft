@@ -460,11 +460,31 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
   };
 
   const handleTorrentDownload = async (source) => {
-    if (!window.electronAPI?.torrentPrepare || !window.electronAPI?.torrentGetFiles || !window.electronAPI?.torrentSelectFiles) return;
-
     setActionLoading(prev => ({ ...prev, [source.id]: true }));
 
     try {
+      const sourceEngine = String(source?.engine || source?.source?.engine || '').toLowerCase();
+      if (sourceEngine === 'torrserver') {
+        if (!window.electronAPI?.startTorrServerStream) {
+          throw new Error('TorrServer integration is not available');
+        }
+        await window.electronAPI.startTorrServerStream({
+          magnet: source?.magnet,
+          torrentUrl: source?.torrentUrl,
+          link: source?.link,
+          source,
+          result: source,
+          title: source?.title || item?.title || 'CineSoft Stream',
+        });
+        notify(
+          settings.language === 'en' ? 'Stream started in external MPV.' : 'Harici MPV ile stream baslatildi.',
+          'success',
+        );
+        return;
+      }
+
+      if (!window.electronAPI?.torrentPrepare || !window.electronAPI?.torrentGetFiles || !window.electronAPI?.torrentSelectFiles) return;
+
       let pendingTorrentId = '';
       const releaseDate = item.release_date || item.first_air_date || '';
       const releaseYear = releaseDate ? new Date(releaseDate).getFullYear() : 0;
@@ -571,7 +591,12 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
 
     } catch (err) {
       console.error('Torrent action error:', err);
-      notify(settings.language === 'en' ? `Failed to add torrent: ${err.message}` : `Torrent eklenemedi: ${err.message}`, 'error', 5000);
+      const errorMessage = String(err?.message || '');
+      if (errorMessage === 'TorrServer not running. Start TorrServer on http://127.0.0.1:8090') {
+        notify('TorrServer not running. Start TorrServer on http://127.0.0.1:8090', 'error', 6000);
+      } else {
+        notify(settings.language === 'en' ? `Failed to add torrent: ${err.message}` : `Torrent eklenemedi: ${err.message}`, 'error', 5000);
+      }
     } finally {
       setFilePickerLoading(false);
       setTimeout(() => {

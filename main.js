@@ -10,6 +10,8 @@ const { pathToFileURL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
 const sonarrService = require('./src/main/services/sonarrService');
 const { createEngineInstallerService } = require('./src/main/services/engineInstallerService');
+const { getTorrServerStatus, startTorrServerStream } = require('./src/main/services/torrServerService');
+const { playWithMpv, stopMpv } = require('./src/main/services/mpvPlayerService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -3330,6 +3332,26 @@ ipcMain.handle('engine:find-exe', async (event, appName) => {
     appName: engineInstaller.normalizeEngineName(appName) || '',
     exePath: exePath || '',
   };
+});
+
+ipcMain.handle('torrserver:status', async () => {
+  return getTorrServerStatus();
+});
+
+ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
+  const result = await startTorrServerStream(payload || {});
+  const player = playWithMpv({
+    url: result.streamUrl,
+    title: payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream',
+  });
+  return {
+    ...result,
+    player,
+  };
+});
+
+ipcMain.handle('mpv:stop', async () => {
+  return stopMpv();
 });
 
 ipcMain.handle('open-prowlarr-download-page', async () => {
