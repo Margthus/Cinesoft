@@ -167,9 +167,16 @@ internal sealed class PlayerForm : Form
     private const int WsVisible = 0x10000000;
     private const int WsCaption = 0x00C00000;
     private const int WsPopup = unchecked((int)0x80000000);
+    private const int WsThickFrame = 0x00040000;
+    private const int WsBorder = 0x00800000;
+    private const int WsDlgFrame = 0x00400000;
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpFrameChanged = 0x0020;
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();
@@ -233,6 +240,9 @@ internal sealed class PlayerForm : Form
     private string _activeSubtitleKey = string.Empty;
     private string _videoPath = string.Empty;
     private List<string> _externalSubtitleFiles = new();
+    private bool _embedApplied;
+    private Rectangle _lastEmbeddedBounds = Rectangle.Empty;
+    private Size _lastEmbeddedParentClient = Size.Empty;
 
     public PlayerForm(LaunchOptions options)
     {
@@ -243,12 +253,15 @@ internal sealed class PlayerForm : Form
         _insetRight = options.InsetRight;
         _insetTop = options.InsetTop;
         _insetBottom = options.InsetBottom;
-        Text = $"CineSoft - {_options.Title}";
+        Text = _embeddedMode ? string.Empty : $"CineSoft - {_options.Title}";
         StartPosition = _embeddedMode ? FormStartPosition.Manual : FormStartPosition.CenterScreen;
         Size = new Size(1280, 720);
         MinimumSize = new Size(640, 360);
         BackColor = Color.Black;
         ShowInTaskbar = !_embeddedMode;
+        ControlBox = !_embeddedMode;
+        MinimizeBox = !_embeddedMode;
+        MaximizeBox = !_embeddedMode;
         TopMost = false;
         KeyPreview = true;
         FormBorderStyle = FormBorderStyle.None;
@@ -296,7 +309,15 @@ internal sealed class PlayerForm : Form
         };
 
         Controls.Add(_videoView);
-        Controls.Add(_titleBar);
+        if (_embeddedMode)
+        {
+            _titleBar.Visible = false;
+            _titleBar.Hide();
+        }
+        else
+        {
+            Controls.Add(_titleBar);
+        }
 
         _uiTimer = new System.Windows.Forms.Timer { Interval = 500 };
         _uiTimer.Tick += (_, _) => PublishPlaybackState();
@@ -308,6 +329,7 @@ internal sealed class PlayerForm : Form
         Shown += OnPlayerShown;
         FormClosing += OnPlayerClosing;
         KeyDown += OnPlayerKeyDown;
+        Load += (_, _) => _videoView.CreateControl();
         Resize += (_, _) =>
         {
             if (!_embeddedMode)
@@ -360,9 +382,38 @@ internal sealed class PlayerForm : Form
             return;
         }
 
-        SetParent(Handle, parent);
+        if (_embedApplied)
+        {
+            UpdateEmbeddedBounds();
+            if (!_embedBoundsTimer.Enabled)
+            {
+                _embedBoundsTimer.Start();
+            }
+
+            return;
+        }
+
+        Program.Log(
+            "VlcHost:EmbedRequested",
+            $"handle=0x{Handle.ToInt64():X}; parent=0x{parent.ToInt64():X}; insets={_insetLeft},{_insetTop},{_insetRight},{_insetBottom}",
+            _options,
+            force: true);
+
+        Text = string.Empty;
+        ControlBox = false;
+        MinimizeBox = false;
+        MaximizeBox = false;
+        ShowInTaskbar = false;
+        FormBorderStyle = FormBorderStyle.None;
         _titleBar.Hide();
+        var previousParent = SetParent(Handle, parent);
         ApplyEmbeddedChildStyle(Handle);
+        _embedApplied = true;
+        Program.Log(
+            "VlcHost:EmbedApplied",
+            $"handle=0x{Handle.ToInt64():X}; parent=0x{parent.ToInt64():X}; previousParent=0x{previousParent.ToInt64():X}; lastError={Marshal.GetLastWin32Error()}",
+            _options,
+            force: true);
         UpdateEmbeddedBounds();
         _embedBoundsTimer.Start();
     }
@@ -384,16 +435,35 @@ internal sealed class PlayerForm : Form
         var parentHeight = Math.Max(1, rect.Bottom - rect.Top);
         var width = Math.Max(1, parentWidth - _insetLeft - _insetRight);
         var height = Math.Max(1, parentHeight - _insetTop - _insetBottom);
+        var nextBounds = new Rectangle(_insetLeft, _insetTop, width, height);
+        var nextParentClient = new Size(parentWidth, parentHeight);
         SetWindowPos(Handle, HwndTop, _insetLeft, _insetTop, width, height, SwpNoActivate | SwpShowWindow);
+        if (nextBounds != _lastEmbeddedBounds || nextParentClient != _lastEmbeddedParentClient)
+        {
+            _lastEmbeddedBounds = nextBounds;
+            _lastEmbeddedParentClient = nextParentClient;
+            Program.Log(
+                "VlcHost:BoundsApplied",
+                $"parentClient={parentWidth}x{parentHeight}; bounds={_insetLeft},{_insetTop},{width},{height}; insets={_insetLeft},{_insetTop},{_insetRight},{_insetBottom}",
+                _options,
+                force: true);
+        }
     }
 
-    private static void ApplyEmbeddedChildStyle(IntPtr handle)
+    private void ApplyEmbeddedChildStyle(IntPtr handle)
     {
         var style = GetWindowLong(handle, GwlStyle);
+        Program.Log("VlcHost:StyleBefore", $"style=0x{style:X8}", _options, force: true);
         style &= ~WsPopup;
         style &= ~WsCaption;
+        style &= ~WsThickFrame;
+        style &= ~WsBorder;
+        style &= ~WsDlgFrame;
         style |= WsChild | WsVisible;
         SetWindowLong(handle, GwlStyle, style);
+        SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged | SwpShowWindow);
+        var afterStyle = GetWindowLong(handle, GwlStyle);
+        Program.Log("VlcHost:StyleAfter", $"style=0x{afterStyle:X8}; lastError={Marshal.GetLastWin32Error()}", _options, force: true);
     }
 
     private void StartPlaybackIfNeeded()
@@ -452,6 +522,7 @@ internal sealed class PlayerForm : Form
         _mediaPlayer.ESDeleted += (_, _) => OnMediaEvent(() => PublishSubtitleState(force: true));
         _mediaPlayer.ESSelected += (_, _) => OnMediaEvent(() => PublishSubtitleState(force: true));
 
+        _videoView.CreateControl();
         _videoView.MediaPlayer = _mediaPlayer;
         Program.Log("VlcHost:VideoViewHandle", $"handle=0x{_videoView.Handle.ToInt64():X}; visible={_videoView.Visible}", _options, force: true);
 

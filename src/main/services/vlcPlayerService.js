@@ -65,20 +65,40 @@ const maskSensitiveUrl = (value = '') => {
 
 const findVlcHostExecutable = () => {
   const appPath = typeof app?.getAppPath === 'function' ? app.getAppPath() : '';
-  const candidates = [
+  const developmentCandidates = [
     path.join(process.cwd(), 'tools', 'vlc-host', 'bin', 'Debug', 'net8.0-windows', 'Cinesoft.VlcHost.exe'),
     path.join(process.cwd(), 'tools', 'vlc-host', 'bin', 'Release', 'net8.0-windows', 'Cinesoft.VlcHost.exe'),
     path.join(process.cwd(), 'tools', 'vlc-host', 'bin', 'Debug', 'net8.0-windows', 'publish', 'Cinesoft.VlcHost.exe'),
     path.join(process.cwd(), 'tools', 'vlc-host', 'bin', 'Release', 'net8.0-windows', 'publish', 'Cinesoft.VlcHost.exe'),
     path.join(process.cwd(), 'resources', 'vlc-host', 'Cinesoft.VlcHost.exe'),
+  ].filter(Boolean);
+  const packagedCandidates = [
     path.join(process.resourcesPath || '', 'vlc-host', 'Cinesoft.VlcHost.exe'),
     path.join(process.resourcesPath || '', 'resources', 'vlc-host', 'Cinesoft.VlcHost.exe'),
     path.join(appPath || '', 'resources', 'vlc-host', 'Cinesoft.VlcHost.exe'),
   ].filter(Boolean);
+  const pickNewestExisting = (candidates = []) => candidates
+    .filter((candidate) => fs.existsSync(candidate))
+    .map((candidate) => {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fs.statSync(candidate).mtimeMs || 0;
+      } catch {}
+      return { candidate, mtimeMs };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
 
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+  const candidateGroups = app?.isPackaged === true
+    ? [packagedCandidates, developmentCandidates]
+    : [developmentCandidates, packagedCandidates];
+
+  for (const candidateGroup of candidateGroups) {
+    const existingCandidates = pickNewestExisting(candidateGroup);
+    if (existingCandidates.length > 0) {
+      return existingCandidates[0].candidate;
+    }
   }
+
   throw new Error('VLC host executable not found');
 };
 
