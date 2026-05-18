@@ -116,6 +116,9 @@ const DEFAULT_TORRSERVER_SETTINGS = {
   cacheDir: '',
   cacheSize: null,
 };
+
+const NATIVE_PLAYER_TOPBAR_HEIGHT = 0;
+const NATIVE_PLAYER_CONTROLS_HEIGHT = 84;
 const DEBUG_TORRSERVER_STREAM = String(process.env.DEBUG_TORRSERVER_STREAM || '').toLowerCase() === 'true';
 
 const normalizeHttpUrl = (value = '', label = 'URL') => {
@@ -3544,10 +3547,10 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
       title: playerTitle,
       embedded: true,
       parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
-      insetLeft: 30,
-      insetRight: 30,
-      insetTop: 70,
-      insetBottom: 122,
+      insetLeft: 0,
+      insetRight: 0,
+      insetTop: NATIVE_PLAYER_TOPBAR_HEIGHT,
+      insetBottom: NATIVE_PLAYER_CONTROLS_HEIGHT,
     });
   } catch (error) {
     notifyNativePlayerStopped();
@@ -3582,10 +3585,6 @@ ipcMain.handle('player:toggle-fullscreen', async () => {
   }
   const nextFullscreen = !mainWindow.isFullScreen();
   mainWindow.setFullScreen(nextFullscreen);
-  sendVlcCommand({
-    command: 'set-insets',
-    value: nextFullscreen ? '0 0 0 98' : '30 70 30 122',
-  });
   return { ok: true, fullscreen: nextFullscreen };
 });
 
@@ -4973,10 +4972,10 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
         title,
         embedded: true,
         parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
-        insetLeft: 30,
-        insetRight: 30,
-        insetTop: 70,
-        insetBottom: 122,
+        insetLeft: 0,
+        insetRight: 0,
+        insetTop: NATIVE_PLAYER_TOPBAR_HEIGHT,
+        insetBottom: NATIVE_PLAYER_CONTROLS_HEIGHT,
       });
       activePlaybackKind = 'library-file';
       closeManagedTorrServerWhenPlayerExits = false;

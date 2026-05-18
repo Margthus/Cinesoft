@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -71,6 +71,9 @@ const DEFAULT_NATIVE_PLAYER_STATE = {
     playing: false,
   },
 };
+
+const NATIVE_PLAYER_TOPBAR_HEIGHT = 0;
+const NATIVE_PLAYER_CONTROLS_HEIGHT = 84;
 
 export const showAppToast = (detail = {}) => {
   if (typeof window === 'undefined') return;
@@ -432,7 +435,23 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
   const hasPlayback = Number(playback?.length) > 0 || Number(playback?.time) > 0 || playback?.playing === true;
   const subtitleTracks = Array.isArray(subtitles?.tracks) ? subtitles.tracks : [];
   const activeSubtitleKey = String(subtitles?.activeKey || 'spu:-1');
-  const activeSubtitleId = Number(subtitles?.activeId ?? -1);
+  const isTr = language === 'tr';
+  const subtitleOptions = useMemo(() => {
+    const offTrack = subtitleTracks.find((track) => (track?.key || `spu:${track?.id}`) === 'spu:-1')
+      || { key: 'spu:-1', id: -1, label: isTr ? 'Off' : 'Off', source: 'builtin' };
+    const playableTracks = subtitleTracks.filter((track) => (track?.key || `spu:${track?.id}`) !== 'spu:-1');
+    const options = [offTrack];
+    if (playableTracks.length > 0) {
+      options.push({
+        key: playableTracks[0]?.key || `spu:${playableTracks[0]?.id}`,
+        id: playableTracks[0]?.id,
+        label: isTr ? 'Default' : 'Default',
+        source: 'default',
+      });
+    }
+    options.push(...playableTracks);
+    return options;
+  }, [isTr, subtitleTracks]);
 
   useEffect(() => {
     if (!startedAt || hasPlayback) {
@@ -463,15 +482,33 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
 
   useEffect(() => {
     const rightInset = subtitleMenuOpen
-      ? (isFullscreen ? 276 : 320)
-      : 30;
-    const topInset = isFullscreen ? 0 : 70;
-    const bottomInset = isFullscreen ? 98 : 122;
+      ? (isFullscreen ? 248 : 266)
+      : 0;
+    const leftInset = 0;
+    const topInset = NATIVE_PLAYER_TOPBAR_HEIGHT;
+    const bottomInset = NATIVE_PLAYER_CONTROLS_HEIGHT;
     window.electronAPI?.controlNativePlayer?.({
       command: 'set-insets',
-      value: `30 ${topInset} ${rightInset} ${bottomInset}`,
+      value: `${leftInset} ${topInset} ${rightInset} ${bottomInset}`,
     });
   }, [isFullscreen, subtitleMenuOpen]);
+
+  useEffect(() => {
+    if (!subtitleMenuOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setSubtitleMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [subtitleMenuOpen]);
 
   const commitSeek = async () => {
     setIsSeeking(false);
@@ -509,7 +546,6 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
     setSubtitleMenuOpen(false);
   };
 
-  const isTr = language === 'tr';
   const playbackStatusLabel = !hasPlayback
     ? (isTr ? 'Hazirlaniyor' : 'Preparing')
     : (playback?.playing ? (isTr ? 'Streaming' : 'Streaming') : (isTr ? 'Duraklatildi' : 'Paused'));
@@ -534,46 +570,33 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
   return (
     <main className={`native-player-shell ${isFullscreen ? 'native-player-shell-fullscreen' : ''}`}>
       <div className="native-player-frame">
-        {!isFullscreen && (
-          <header className="native-player-topbar">
-            <div className="native-player-brand">CINE<span>SOFT</span></div>
-            <div className="native-player-title">{title}</div>
-            <div className="native-player-torrent-status" title={hash ? `${hashLabel}: ${hash}` : unavailableHashTitle}>
-              <span className="native-player-status-pill">{playbackStatusLabel}</span>
-              <span>{progressLabel} {progress}</span>
-              <span>{seeders} {seedLabel}</span>
-              <span>{peers} {peerLabel}</span>
-              {quality && <span>{quality}</span>}
-              {provider && <span>{provider}</span>}
-              {hash && <span>{hashLabel} {hashPreview}</span>}
-            </div>
-            <button type="button" className="native-player-close" onClick={onClose} aria-label="Close player">
-              <X size={18} />
-            </button>
-          </header>
-        )}
         <div className={`native-player-viewport ${subtitleMenuOpen ? 'native-player-viewport-with-subtitles' : ''}`}>
           <section className="native-player-stage" aria-label="Native video player" />
-          {subtitleMenuOpen && (
+          {subtitleMenuOpen ? (
             <aside className="native-player-subtitle-panel">
               <div className="native-player-subtitle-panel-head">
                 <span>{isTr ? 'Altyazilar' : 'Subtitles'}</span>
               </div>
               <div className="native-player-subtitle-panel-list">
-                {(subtitleTracks.length ? subtitleTracks : [{ id: -1, label: isTr ? 'Altyazi yok' : 'No subtitles', source: 'builtin' }]).map((track) => (
-                  <button
-                    key={`${track.key || track.id}-${track.label}`}
-                    type="button"
-                    className={`native-player-subtitle-item ${(track.key || `spu:${track.id}`) === activeSubtitleKey ? 'active' : ''}`}
-                    onClick={() => selectSubtitle(track.key || `spu:${track.id}`)}
-                    disabled={subtitleTracks.length === 0}
-                  >
-                    <span>{track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}</span>
-                  </button>
-                ))}
+                {subtitleOptions.map((track, index) => {
+                  const trackKey = track.key || `spu:${track.id}`;
+                  const isDefaultOption = track.source === 'default';
+                  const isSelected = isDefaultOption ? activeSubtitleKey !== 'spu:-1' : trackKey === activeSubtitleKey;
+                  return (
+                    <button
+                      key={`${trackKey}-${track.label}-${index}`}
+                      type="button"
+                      className={`native-player-subtitle-item ${isSelected ? 'active' : ''}`}
+                      onClick={() => selectSubtitle(trackKey)}
+                      title={track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}
+                    >
+                      <span>{track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}</span>
+                    </button>
+                  );
+                })}
               </div>
             </aside>
-          )}
+          ) : null}
         </div>
         {!hasPlayback && (
           <div className="native-player-loading">
@@ -589,6 +612,9 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
         )}
         <footer className="native-player-controls">
           <div className="native-player-controls-row">
+            <button type="button" className="native-player-action native-player-action-close" onClick={onClose} aria-label={isTr ? 'Oynaticiyi kapat' : 'Close player'}>
+              <X size={18} />
+            </button>
             <button type="button" className="native-player-action native-player-action-primary" onClick={togglePlayback} aria-label={playback?.playing ? 'Pause' : 'Play'}>
               {playback?.playing ? <Pause size={20} /> : <Play size={20} />}
             </button>
@@ -628,7 +654,7 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
               />
             </div>
             <div className="native-player-subtitle-wrap">
-              <button type="button" className="native-player-action" onClick={() => setSubtitleMenuOpen((current) => !current)} aria-label="Subtitles">
+              <button type="button" className={`native-player-action ${subtitleMenuOpen ? 'native-player-action-active' : ''}`} onClick={() => setSubtitleMenuOpen((current) => !current)} aria-label="Subtitles" aria-expanded={subtitleMenuOpen}>
                 <Captions size={17} />
               </button>
             </div>
