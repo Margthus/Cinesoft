@@ -145,6 +145,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openLibraryFolder: (payload) => ipcRenderer.invoke('open-library-folder', payload),
   searchLibrarySubtitles: (payload) => ipcRenderer.invoke('library-subtitles-search', payload),
   downloadLibrarySubtitle: (payload) => ipcRenderer.invoke('library-subtitles-download', payload),
+  searchPlayerSubtitles: (payload) => ipcRenderer.invoke('player-subtitles-search', payload),
+  downloadPlayerSubtitle: (payload) => ipcRenderer.invoke('player-subtitles-download', payload),
   getLibraryMetadata: (filePaths) => ipcRenderer.invoke('library-metadata-get', filePaths),
   upsertLibraryMetadata: (payload) => ipcRenderer.invoke('library-metadata-upsert', payload),
   validateTorrentCandidate: (payload) => ipcRenderer.invoke('torrent-validate-candidate', payload),

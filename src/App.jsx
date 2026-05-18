@@ -57,6 +57,15 @@ const DEFAULT_NATIVE_PLAYER_STATE = {
   active: false,
   title: '',
   torrentStatus: null,
+  mediaContext: {
+    fullPath: '',
+    title: '',
+    tmdbType: '',
+    tmdbId: null,
+    imdbId: '',
+    season: 0,
+    episode: 0,
+  },
   fullscreen: false,
   startedAt: 0,
   subtitles: {
@@ -74,6 +83,79 @@ const DEFAULT_NATIVE_PLAYER_STATE = {
 
 const NATIVE_PLAYER_TOPBAR_HEIGHT = 0;
 const NATIVE_PLAYER_CONTROLS_HEIGHT = 84;
+const PLAYER_SUBTITLE_PROVIDER_OPTIONS = [
+  { key: 'opensubtitles-v3', label: 'OpenSubtitles' },
+  { key: 'turkcealtyaziorg-stremio-addon', label: 'turkcealtyazi.org' },
+];
+
+const normalizePlayerSubtitleProvider = (value = '') => (
+  String(value || '').trim().toLowerCase() === 'turkcealtyaziorg-stremio-addon'
+    ? 'turkcealtyaziorg-stremio-addon'
+    : 'opensubtitles-v3'
+);
+
+const normalizePlayerSubtitleLang = (value = '') => String(value || '').trim().toUpperCase();
+
+const formatPlayerSubtitleLang = (value = '', isTr = false) => {
+  const code = normalizePlayerSubtitleLang(value);
+  const labels = {
+    TR: 'Turkish',
+    TUR: 'Turkish',
+    EN: 'English',
+    ENG: 'English',
+    PER: 'Persian',
+    FAS: 'Persian',
+    POB: 'Portuguese (BR)',
+    POR: 'Portuguese',
+    POL: 'Polish',
+    RON: 'Romanian',
+    RUS: 'Russian',
+    SPA: 'Spanish',
+    SWE: 'Swedish',
+    THA: 'Thai',
+    LIT: 'Lithuanian',
+    MAY: 'Malay',
+    NLD: 'Dutch',
+    NOR: 'Norwegian',
+    NEP: 'Nepali',
+    SLV: 'Slovenian',
+    SRP: 'Serbian',
+    ZHT: 'Chinese (Traditional)',
+    VIE: 'Vietnamese',
+    SIN: 'Sinhala',
+    CZE: 'Czech',
+    CES: 'Czech',
+    DAN: 'Danish',
+    FIN: 'Finnish',
+    FRE: 'French',
+    FRA: 'French',
+    GER: 'German',
+    DEU: 'German',
+    GRE: 'Greek',
+    ELL: 'Greek',
+    HUN: 'Hungarian',
+    ITA: 'Italian',
+    JPN: 'Japanese',
+    KOR: 'Korean',
+    ARA: 'Arabic',
+    HEB: 'Hebrew',
+    HIN: 'Hindi',
+    IND: 'Indonesian',
+    UKR: 'Ukrainian',
+    BUL: 'Bulgarian',
+    HRV: 'Croatian',
+    EST: 'Estonian',
+    LAV: 'Latvian',
+    SLO: 'Slovak',
+    SLK: 'Slovak',
+    ALB: 'Albanian',
+  };
+  return labels[code] || code || (isTr ? 'Altyazi' : 'Subtitle');
+};
+
+const getPreferredPlayerSubtitleLang = (appLanguage = '') => (
+  String(appLanguage || '').toLowerCase() === 'tr' ? 'TUR' : 'ENG'
+);
 
 export const showAppToast = (detail = {}) => {
   if (typeof window === 'undefined') return;
@@ -267,6 +349,7 @@ const App = () => {
         active: true,
         title: String(detail.title || 'CineSoft Stream'),
         torrentStatus: detail.torrentStatus || null,
+        mediaContext: detail.mediaContext || DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
         fullscreen: detail.fullscreen === true,
         startedAt: Date.now(),
       });
@@ -278,6 +361,7 @@ const App = () => {
         active: true,
         title: String(payload.title || 'CineSoft Stream'),
         torrentStatus: payload.torrentStatus || null,
+        mediaContext: payload.mediaContext || DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
         fullscreen: payload.fullscreen === true,
         startedAt: Date.now(),
       });
@@ -359,7 +443,7 @@ const App = () => {
     <Router>
       <div className={`app-container ${nativePlayer.active ? 'app-container-player-mode' : ''}`}>
         {nativePlayer.active ? (
-          <NativePlayerShell title={nativePlayer.title} torrentStatus={nativePlayer.torrentStatus} playback={nativePlayer.playback} fullscreen={nativePlayer.fullscreen} startedAt={nativePlayer.startedAt} language={settings.language} onClose={closeNativePlayer} subtitles={nativePlayer.subtitles} />
+          <NativePlayerShell title={nativePlayer.title} torrentStatus={nativePlayer.torrentStatus} mediaContext={nativePlayer.mediaContext} playback={nativePlayer.playback} fullscreen={nativePlayer.fullscreen} startedAt={nativePlayer.startedAt} language={settings.language} onClose={closeNativePlayer} subtitles={nativePlayer.subtitles} />
         ) : (
           <>
             <Sidebar settings={settings} />
@@ -411,7 +495,17 @@ const formatPlaybackTime = (ms) => {
     : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 };
 
-const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, playback = DEFAULT_NATIVE_PLAYER_STATE.playback, fullscreen = false, startedAt = 0, language = 'tr', onClose, subtitles = DEFAULT_NATIVE_PLAYER_STATE.subtitles }) => {
+const NativePlayerShell = ({
+  title = 'CineSoft Stream',
+  torrentStatus = null,
+  mediaContext = DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
+  playback = DEFAULT_NATIVE_PLAYER_STATE.playback,
+  fullscreen = false,
+  startedAt = 0,
+  language = 'tr',
+  onClose,
+  subtitles = DEFAULT_NATIVE_PLAYER_STATE.subtitles,
+}) => {
   const hash = String(torrentStatus?.infoHash || '').trim();
   const hashPreview = hash ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : '-';
   const playbackLength = Math.max(0, Number(playback?.length) || 0);
@@ -432,6 +526,17 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
+  const [downloadSectionOpen, setDownloadSectionOpen] = useState(true);
+  const [localSectionOpen, setLocalSectionOpen] = useState(true);
+  const [downloadSubtitleList, setDownloadSubtitleList] = useState([]);
+  const [downloadSubtitleLoading, setDownloadSubtitleLoading] = useState(false);
+  const [downloadSubtitleSavingId, setDownloadSubtitleSavingId] = useState('');
+  const [downloadSubtitleError, setDownloadSubtitleError] = useState('');
+  const [downloadSubtitleSuccess, setDownloadSubtitleSuccess] = useState('');
+  const [downloadSubtitleLangFilter, setDownloadSubtitleLangFilter] = useState('ALL');
+  const [downloadSubtitleProvider, setDownloadSubtitleProvider] = useState('opensubtitles-v3');
+  const [downloadSubtitleProviderOffline, setDownloadSubtitleProviderOffline] = useState(false);
+  const [downloadSearchRequested, setDownloadSearchRequested] = useState(false);
   const hasPlayback = Number(playback?.length) > 0 || Number(playback?.time) > 0 || playback?.playing === true;
   const subtitleTracks = Array.isArray(subtitles?.tracks) ? subtitles.tracks : [];
   const activeSubtitleKey = String(subtitles?.activeKey || 'spu:-1');
@@ -452,6 +557,20 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
     options.push(...playableTracks);
     return options;
   }, [isTr, subtitleTracks]);
+  const canSearchDownloadSubtitles = Boolean(
+    mediaContext?.fullPath
+    || mediaContext?.tmdbId
+    || mediaContext?.imdbId
+    || mediaContext?.title
+  );
+  const downloadSubtitleLanguages = useMemo(() => {
+    const langs = Array.from(new Set(downloadSubtitleList.map((item) => normalizePlayerSubtitleLang(item?.lang)).filter(Boolean)));
+    return langs.sort((a, b) => a.localeCompare(b));
+  }, [downloadSubtitleList]);
+  const filteredDownloadSubtitleList = useMemo(() => {
+    if (downloadSubtitleLangFilter === 'ALL') return downloadSubtitleList;
+    return downloadSubtitleList.filter((item) => normalizePlayerSubtitleLang(item?.lang) === downloadSubtitleLangFilter);
+  }, [downloadSubtitleLangFilter, downloadSubtitleList]);
 
   useEffect(() => {
     if (!startedAt || hasPlayback) {
@@ -495,6 +614,8 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
 
   useEffect(() => {
     if (!subtitleMenuOpen) {
+      setDownloadSubtitleError('');
+      setDownloadSubtitleSuccess('');
       return undefined;
     }
 
@@ -509,6 +630,102 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [subtitleMenuOpen]);
+
+  useEffect(() => {
+    if (!subtitleMenuOpen) return;
+    setDownloadSectionOpen(true);
+    setLocalSectionOpen(true);
+  }, [subtitleMenuOpen]);
+
+  useEffect(() => {
+    if (!subtitleMenuOpen) return;
+    setDownloadSubtitleList([]);
+    setDownloadSubtitleError('');
+    setDownloadSubtitleSuccess('');
+    setDownloadSubtitleSavingId('');
+    setDownloadSubtitleProviderOffline(false);
+    setDownloadSubtitleLangFilter('ALL');
+    setDownloadSubtitleProvider('opensubtitles-v3');
+    setDownloadSearchRequested(false);
+  }, [
+    subtitleMenuOpen,
+    mediaContext?.fullPath,
+    mediaContext?.imdbId,
+    mediaContext?.season,
+    mediaContext?.episode,
+    mediaContext?.title,
+    mediaContext?.tmdbId,
+    mediaContext?.tmdbType,
+  ]);
+
+  useEffect(() => {
+    if (!subtitleMenuOpen || !downloadSectionOpen || !downloadSearchRequested || !canSearchDownloadSubtitles || !window.electronAPI?.searchPlayerSubtitles) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      setDownloadSubtitleLoading(true);
+      setDownloadSubtitleError('');
+      setDownloadSubtitleSuccess('');
+      setDownloadSubtitleProviderOffline(false);
+      try {
+        const result = await window.electronAPI.searchPlayerSubtitles({
+          fullPath: mediaContext?.fullPath || '',
+          title: mediaContext?.title || title,
+          tmdbType: mediaContext?.tmdbType || 'movie',
+          tmdbId: mediaContext?.tmdbId || null,
+          imdbId: mediaContext?.imdbId || '',
+          season: Number(mediaContext?.season || 0) || 0,
+          episode: Number(mediaContext?.episode || 0) || 0,
+          subtitleProvider: normalizePlayerSubtitleProvider(downloadSubtitleProvider),
+        });
+        if (cancelled) return;
+        if (!result?.ok) {
+          throw new Error(result?.error || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+        }
+        const nextList = Array.isArray(result.subtitles) ? result.subtitles : [];
+        setDownloadSubtitleList(nextList);
+        setDownloadSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
+        const preferred = getPreferredPlayerSubtitleLang(language);
+        const hasPreferred = nextList.some((item) => normalizePlayerSubtitleLang(item?.lang) === preferred);
+        setDownloadSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
+        if (!nextList.length) {
+          setDownloadSubtitleError(isTr ? 'Altyazi bulunamadi' : 'No subtitles found');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDownloadSubtitleList([]);
+          setDownloadSubtitleError(err?.message || (isTr ? 'Altyazi aranirken hata olustu' : 'Subtitle search failed'));
+        }
+      } finally {
+        if (!cancelled) {
+          setDownloadSubtitleLoading(false);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canSearchDownloadSubtitles,
+    downloadSearchRequested,
+    downloadSectionOpen,
+    downloadSubtitleProvider,
+    isTr,
+    language,
+    mediaContext?.episode,
+    mediaContext?.fullPath,
+    mediaContext?.imdbId,
+    mediaContext?.season,
+    mediaContext?.title,
+    mediaContext?.tmdbId,
+    mediaContext?.tmdbType,
+    subtitleMenuOpen,
+    title,
+  ]);
 
   const commitSeek = async () => {
     setIsSeeking(false);
@@ -546,6 +763,43 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
     setSubtitleMenuOpen(false);
   };
 
+  const handleDownloadSubtitle = async (subtitle) => {
+    if (!subtitle?.url || !window.electronAPI?.downloadPlayerSubtitle) return;
+    const savingKey = subtitle.id || subtitle.url;
+    setDownloadSubtitleSavingId(savingKey);
+    setDownloadSubtitleError('');
+    setDownloadSubtitleSuccess('');
+    try {
+      const result = await window.electronAPI.downloadPlayerSubtitle({
+        fullPath: mediaContext?.fullPath || '',
+        title: mediaContext?.title || title,
+        outputBaseName: mediaContext?.title || title,
+        subtitleUrl: subtitle.url,
+        subtitleProvider: subtitle.provider || downloadSubtitleProvider,
+      });
+      if (!result?.ok || !result?.path) {
+        throw new Error(result?.error || (isTr ? 'Altyazi indirilemedi' : 'Subtitle download failed'));
+      }
+      await window.electronAPI?.controlNativePlayer?.({
+        command: 'set-subtitle',
+        value: `file:${result.path}`,
+      });
+      setDownloadSubtitleSuccess(isTr ? 'Altyazi indirildi ve secildi' : 'Subtitle downloaded and selected');
+    } catch (err) {
+      setDownloadSubtitleError(err?.message || (isTr ? 'Altyazi indirilemedi' : 'Subtitle download failed'));
+    } finally {
+      setDownloadSubtitleSavingId('');
+    }
+  };
+
+  const searchDownloadSubtitles = async () => {
+    setDownloadSubtitleList([]);
+    setDownloadSubtitleError('');
+    setDownloadSubtitleSuccess('');
+    setDownloadSubtitleProviderOffline(false);
+    setDownloadSearchRequested(true);
+  };
+
   const playbackStatusLabel = !hasPlayback
     ? (isTr ? 'Hazirlaniyor' : 'Preparing')
     : (playback?.playing ? (isTr ? 'Streaming' : 'Streaming') : (isTr ? 'Duraklatildi' : 'Paused'));
@@ -577,23 +831,149 @@ const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, pl
               <div className="native-player-subtitle-panel-head">
                 <span>{isTr ? 'Altyazilar' : 'Subtitles'}</span>
               </div>
-              <div className="native-player-subtitle-panel-list">
-                {subtitleOptions.map((track, index) => {
-                  const trackKey = track.key || `spu:${track.id}`;
-                  const isDefaultOption = track.source === 'default';
-                  const isSelected = isDefaultOption ? activeSubtitleKey !== 'spu:-1' : trackKey === activeSubtitleKey;
-                  return (
-                    <button
-                      key={`${trackKey}-${track.label}-${index}`}
-                      type="button"
-                      className={`native-player-subtitle-item ${isSelected ? 'active' : ''}`}
-                      onClick={() => selectSubtitle(trackKey)}
-                      title={track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}
-                    >
-                      <span>{track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}</span>
-                    </button>
-                  );
-                })}
+              <div className="native-player-subtitle-panel-scroll">
+                <section className="native-player-subtitle-section">
+                  <button
+                    type="button"
+                    className={`native-player-subtitle-section-toggle ${downloadSectionOpen ? 'open' : ''}`}
+                    onClick={() => setDownloadSectionOpen((current) => !current)}
+                    aria-expanded={downloadSectionOpen}
+                  >
+                    <span>{isTr ? 'Altyazi indir' : 'Download subtitle'}</span>
+                    {downloadSectionOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  {downloadSectionOpen ? (
+                    <div className="native-player-subtitle-section-body">
+                      {canSearchDownloadSubtitles ? (
+                        <>
+                          <div className="native-player-subtitle-toolbar">
+                            <label htmlFor="player-subtitle-provider-filter">{isTr ? 'Saglayici' : 'Provider'}</label>
+                            <select
+                              id="player-subtitle-provider-filter"
+                              className="native-player-subtitle-select"
+                              value={downloadSubtitleProvider}
+                              onChange={(event) => {
+                                setDownloadSubtitleProvider(normalizePlayerSubtitleProvider(event.target.value));
+                                setDownloadSearchRequested(false);
+                                setDownloadSubtitleList([]);
+                                setDownloadSubtitleError('');
+                                setDownloadSubtitleSuccess('');
+                              }}
+                            >
+                              {PLAYER_SUBTITLE_PROVIDER_OPTIONS.map((providerOption) => (
+                                <option key={providerOption.key} value={providerOption.key}>{providerOption.label}</option>
+                              ))}
+                            </select>
+                            {downloadSubtitleProvider === 'turkcealtyaziorg-stremio-addon' && downloadSubtitleProviderOffline ? (
+                              <span className="native-player-subtitle-provider-offline">Offline</span>
+                            ) : null}
+                            <label htmlFor="player-subtitle-lang-filter">{isTr ? 'Dil' : 'Language'}</label>
+                            <select
+                              id="player-subtitle-lang-filter"
+                              className="native-player-subtitle-select"
+                              value={downloadSubtitleLangFilter}
+                              onChange={(event) => setDownloadSubtitleLangFilter(event.target.value)}
+                            >
+                              <option value="ALL">{isTr ? 'Tum diller' : 'All languages'}</option>
+                              {downloadSubtitleLanguages.map((langCode) => (
+                                <option key={langCode} value={langCode}>
+                                  {formatPlayerSubtitleLang(langCode, isTr)} ({langCode})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="native-player-subtitle-search-btn"
+                              onClick={searchDownloadSubtitles}
+                              disabled={downloadSubtitleLoading}
+                            >
+                              {downloadSubtitleLoading
+                                ? (isTr ? 'Araniyor...' : 'Searching...')
+                                : (isTr ? 'Altyazi ara' : 'Search subtitles')}
+                            </button>
+                          </div>
+                          {downloadSubtitleLoading ? (
+                            <p className="native-player-subtitle-helper">{isTr ? 'Altyazilar yukleniyor...' : 'Loading subtitles...'}</p>
+                          ) : null}
+                          {!downloadSubtitleLoading && downloadSubtitleError ? (
+                            <p className="native-player-subtitle-feedback native-player-subtitle-feedback-error">{downloadSubtitleError}</p>
+                          ) : null}
+                          {!downloadSubtitleLoading && downloadSubtitleSuccess ? (
+                            <p className="native-player-subtitle-feedback native-player-subtitle-feedback-success">{downloadSubtitleSuccess}</p>
+                          ) : null}
+                          {!downloadSubtitleLoading && downloadSearchRequested && !downloadSubtitleError && !filteredDownloadSubtitleList.length ? (
+                            <p className="native-player-subtitle-helper">{isTr ? 'Indirilebilir altyazi bulunamadi.' : 'No downloadable subtitles found.'}</p>
+                          ) : null}
+                          {!downloadSubtitleLoading && !downloadSearchRequested ? (
+                            <p className="native-player-subtitle-helper">
+                              {isTr ? 'Saglayici ve dili secip "Altyazi ara" butonuna basin.' : 'Choose provider and language, then click "Search subtitles".'}
+                            </p>
+                          ) : null}
+                          {filteredDownloadSubtitleList.length ? (
+                            <div className="native-player-download-subtitle-list">
+                              {filteredDownloadSubtitleList.map((subtitle, index) => (
+                                <div className="native-player-download-subtitle-row" key={`${subtitle.id || subtitle.url || 'sub'}-${index}`}>
+                                  <div className="native-player-download-subtitle-meta">
+                                    <strong>{formatPlayerSubtitleLang(subtitle.lang, isTr)} ({normalizePlayerSubtitleLang(subtitle.lang) || 'SUB'})</strong>
+                                    <span>{subtitle.release || subtitle.providerLabel || subtitle.provider || 'Subtitle'}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="native-player-download-subtitle-btn"
+                                    disabled={downloadSubtitleSavingId === (subtitle.id || subtitle.url)}
+                                    onClick={() => handleDownloadSubtitle(subtitle)}
+                                  >
+                                    <Download size={13} />
+                                    {downloadSubtitleSavingId === (subtitle.id || subtitle.url)
+                                      ? (isTr ? 'Indiriliyor' : 'Downloading')
+                                      : (isTr ? 'Indir' : 'Download')}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <p className="native-player-subtitle-helper">
+                          {isTr ? 'Bu oynatmada altyazi aramasi icin yeterli medya bilgisi yok.' : 'Not enough media information to search subtitles for this playback.'}
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+                <section className="native-player-subtitle-section">
+                  <button
+                    type="button"
+                    className={`native-player-subtitle-section-toggle ${localSectionOpen ? 'open' : ''}`}
+                    onClick={() => setLocalSectionOpen((current) => !current)}
+                    aria-expanded={localSectionOpen}
+                  >
+                    <span>{isTr ? 'Local altyazi' : 'Local subtitles'}</span>
+                    {localSectionOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  {localSectionOpen ? (
+                    <div className="native-player-subtitle-section-body">
+                      <div className="native-player-subtitle-panel-list">
+                        {subtitleOptions.map((track, index) => {
+                          const trackKey = track.key || `spu:${track.id}`;
+                          const isDefaultOption = track.source === 'default';
+                          const isSelected = isDefaultOption ? activeSubtitleKey !== 'spu:-1' : trackKey === activeSubtitleKey;
+                          return (
+                            <button
+                              key={`${trackKey}-${track.label}-${index}`}
+                              type="button"
+                              className={`native-player-subtitle-item ${isSelected ? 'active' : ''}`}
+                              onClick={() => selectSubtitle(trackKey)}
+                              title={track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}
+                            >
+                              <span>{track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
               </div>
             </aside>
           ) : null}

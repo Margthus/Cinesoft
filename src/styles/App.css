@@ -288,6 +288,7 @@
     0 14px 32px rgba(0, 0, 0, 0.34),
     0 0 0 1px rgba(255, 255, 255, 0.02) inset;
   overflow: hidden;
+  max-height: calc(100vh - 132px);
 }
 
 .native-player-subtitle-panel-head {
@@ -298,10 +299,207 @@
   letter-spacing: 0.03em;
 }
 
+.native-player-subtitle-panel-scroll {
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 0.55rem 0.55rem;
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  scrollbar-gutter: stable;
+}
+
+.native-player-subtitle-section {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.native-player-subtitle-section-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 0;
+  padding: 0.82rem 0.82rem 0.76rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.native-player-subtitle-section-toggle.open {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.native-player-subtitle-section-body {
+  min-height: 0;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.native-player-subtitle-toolbar {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.native-player-subtitle-toolbar label {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.native-player-subtitle-select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  padding: 0.58rem 0.72rem;
+  font-size: 0.76rem;
+  appearance: none;
+}
+
+.native-player-subtitle-select option {
+  color: #0b1014;
+  background: #f3f6f8;
+}
+
+.native-player-subtitle-provider-offline {
+  color: rgba(255, 174, 66, 0.96);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.native-player-subtitle-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: #ecfffb;
+  padding: 0.62rem 0.8rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.native-player-subtitle-search-btn:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
+
+.native-player-subtitle-helper,
+.native-player-subtitle-feedback {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.native-player-subtitle-helper {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.native-player-subtitle-feedback-error {
+  color: #ff8f8f;
+}
+
+.native-player-subtitle-feedback-success {
+  color: #68f7d7;
+}
+
+.native-player-download-subtitle-list {
+  min-height: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.native-player-subtitle-panel-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.native-player-subtitle-panel-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.native-player-subtitle-panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--accent-rgb), 0.3);
+  border-radius: 999px;
+  border: 2px solid rgba(8, 12, 16, 0.92);
+}
+
+.native-player-subtitle-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--accent-rgb), 0.48);
+}
+
+.native-player-download-subtitle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.55rem;
+  padding: 0.72rem 0.76rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.native-player-download-subtitle-meta {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.native-player-download-subtitle-meta strong,
+.native-player-download-subtitle-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.native-player-download-subtitle-meta strong {
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.76rem;
+}
+
+.native-player-download-subtitle-meta span {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+}
+
+.native-player-download-subtitle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.32rem;
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: #dffff6;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.56rem 0.68rem;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.native-player-download-subtitle-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .native-player-subtitle-panel-list {
   min-height: 0;
-  overflow-y: auto;
-  padding: 0 0.55rem 0.55rem;
   display: grid;
   grid-auto-rows: min-content;
   align-content: start;

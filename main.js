@@ -3532,6 +3532,15 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
     title: playerTitle,
     streamUrl: result.streamUrl,
     torrentStatus: result.torrentStatus || null,
+    mediaContext: {
+      fullPath: '',
+      title: playerTitle,
+      tmdbType: String(payload?.mediaInfo?.type || payload?.item?.media_type || '').trim() || (payload?.item?.title ? 'movie' : 'tv'),
+      tmdbId: Number(payload?.mediaInfo?.tmdbId || payload?.item?.id || 0) || null,
+      imdbId: String(payload?.mediaInfo?.imdbId || '').trim(),
+      season: Math.max(0, Number(payload?.mediaInfo?.season || 0) || 0),
+      episode: Math.max(0, Number(payload?.mediaInfo?.episode || 0) || 0),
+    },
   });
   if (DEBUG_TORRSERVER_STREAM) {
     console.log('[TorrServerPlayer:LaunchVlc]', {
@@ -4680,6 +4689,22 @@ const setCachedSubtitleSearch = (cacheKey, payload) => {
   });
 };
 
+const getLibraryMetadataRecord = (filePath = '') => {
+  try {
+    if (!metadataDb || !filePath) return null;
+    const stmt = metadataDb.prepare('SELECT file_path as filePath, file_hash as fileHash, title, year, poster_url as posterUrl, tmdb_id as tmdbId, media_type as mediaType, updated_at as updatedAt FROM media_metadata_cache WHERE file_path = ?');
+    return stmt.get(String(filePath)) || null;
+  } catch {
+    return null;
+  }
+};
+
+const sanitizeSubtitleOutputBaseName = (value = '') => String(value || '')
+  .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 120);
+
 const guessSubtitleLabel = (subtitle = {}, url = '') => {
   const direct = String(
     subtitle?.label
@@ -4734,117 +4759,167 @@ const isPrivateOrLocalHost = (hostname = '') => {
   return false;
 };
 
-ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
-  try {
-    const filePath = String(payload.fullPath || '').trim();
+const searchSubtitleEntries = async (payload = {}, { requireExistingFile = true } = {}) => {
+  const filePath = String(payload.fullPath || '').trim();
+  if (requireExistingFile) {
     if (!filePath || !fs.existsSync(filePath)) {
       return { ok: false, error: 'Video file not found' };
     }
-    const season = Math.max(0, Number(payload.season) || 0);
-    const episode = Math.max(0, Number(payload.episode) || 0);
-    const tmdbType = String(payload.tmdbType || '').trim();
-    const imdbId = await resolveImdbIdForSubtitle({
-      imdbId: payload.imdbId,
-      tmdbType,
-      tmdbId: payload.tmdbId,
-    });
-    if (!imdbId) {
-      return { ok: false, error: 'IMDB id not available for this item' };
-    }
+  }
+  const season = Math.max(0, Number(payload.season) || 0);
+  const episode = Math.max(0, Number(payload.episode) || 0);
+  const tmdbType = String(payload.tmdbType || '').trim();
+  const imdbId = await resolveImdbIdForSubtitle({
+    imdbId: payload.imdbId,
+    tmdbType,
+    tmdbId: payload.tmdbId,
+  });
+  if (!imdbId) {
+    return { ok: false, error: 'IMDB id not available for this item' };
+  }
 
-    const type = normalizeSubtitleType(tmdbType);
-    const subtitleProvider = normalizeSubtitleProvider(payload.subtitleProvider);
-    const targets = type === 'movie'
-      ? [`${imdbId}`]
-      : [`${imdbId}:${season}:${episode}`];
-    const cacheKey = getSubtitleCacheKey({ type, target: targets.join('|'), provider: subtitleProvider });
-    const cached = getCachedSubtitleSearch(cacheKey);
-    if (cached) {
-      return {
-        ...cached,
-        debug: {
-          ...(cached.debug || {}),
-          cache: 'hit',
-        },
-      };
-    }
-    let data = null;
-    let resolvedBase = '';
-    let resolvedProvider = '';
-    let resolvedTarget = '';
-    const tried = [];
-    const errors = [];
-    for (const target of targets) {
-      const requestCandidates = buildSubtitleRequestCandidates({ type, target, provider: subtitleProvider });
-      for (const candidate of requestCandidates) {
-        const url = `${candidate.base}${candidate.route}`;
-        tried.push(url);
-        try {
-          data = await fetchJsonWithTimeout(url, 20000);
-          if (data) {
-            resolvedBase = candidate.base;
-            resolvedProvider = candidate.provider;
-            resolvedTarget = target;
-            break;
-          }
-        } catch (err) {
-          const errDetails = extractRequestErrorDetails(err);
-          errors.push({
-            provider: candidate.provider,
-            url,
-            ...errDetails,
-          });
+  const type = normalizeSubtitleType(tmdbType);
+  const subtitleProvider = normalizeSubtitleProvider(payload.subtitleProvider);
+  const targets = type === 'movie'
+    ? [`${imdbId}`]
+    : [`${imdbId}:${season}:${episode}`];
+  const cacheKey = getSubtitleCacheKey({ type, target: targets.join('|'), provider: subtitleProvider });
+  const cached = getCachedSubtitleSearch(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      debug: {
+        ...(cached.debug || {}),
+        cache: 'hit',
+      },
+    };
+  }
+  let data = null;
+  let resolvedBase = '';
+  let resolvedProvider = '';
+  let resolvedTarget = '';
+  const tried = [];
+  const errors = [];
+  for (const target of targets) {
+    const requestCandidates = buildSubtitleRequestCandidates({ type, target, provider: subtitleProvider });
+    for (const candidate of requestCandidates) {
+      const url = `${candidate.base}${candidate.route}`;
+      tried.push(url);
+      try {
+        data = await fetchJsonWithTimeout(url, 20000);
+        if (data) {
+          resolvedBase = candidate.base;
+          resolvedProvider = candidate.provider;
+          resolvedTarget = target;
+          break;
         }
+      } catch (err) {
+        const errDetails = extractRequestErrorDetails(err);
+        errors.push({
+          provider: candidate.provider,
+          url,
+          ...errDetails,
+        });
       }
-      if (data) break;
     }
-    if (!data) {
-      logSafeEvent('subtitles', 'search_failed_all_sources', 'Subtitle search failed on all addon endpoints', {
-        imdbId,
-        tmdbType,
-        season,
-        episode,
-        tried,
-        errors,
-      });
-      const responsePayload = {
-        ok: true,
-        subtitles: [],
-        imdbId,
-        debug: {
-          source: subtitleProvider,
-          tried,
-          errors,
-          selectedProvider: subtitleProvider,
-          providerOffline: subtitleProvider === 'turkcealtyaziorg-stremio-addon' && tried.length > 0 && errors.length >= tried.length,
-          message: 'No subtitle payload received from addon endpoints',
-        },
-      };
-      setCachedSubtitleSearch(cacheKey, responsePayload);
-      return responsePayload;
-    }
-    const rawSubs = Array.isArray(data?.subtitles)
-      ? data.subtitles
-      : (Array.isArray(data?.all) ? data.all : (Array.isArray(data) ? data : []));
-    const subtitles = sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider);
+    if (data) break;
+  }
+  if (!data) {
     const responsePayload = {
       ok: true,
-      subtitles,
+      subtitles: [],
       imdbId,
       debug: {
-        source: resolvedProvider || 'unknown',
+        source: subtitleProvider,
         tried,
         errors,
         selectedProvider: subtitleProvider,
-        providerOffline: false,
-        resolvedTarget,
-        resolvedProvider,
-        resolvedBase,
-        rawCount: rawSubs.length,
+        providerOffline: subtitleProvider === 'turkcealtyaziorg-stremio-addon' && tried.length > 0 && errors.length >= tried.length,
+        message: 'No subtitle payload received from addon endpoints',
       },
     };
     setCachedSubtitleSearch(cacheKey, responsePayload);
     return responsePayload;
+  }
+  const rawSubs = Array.isArray(data?.subtitles)
+    ? data.subtitles
+    : (Array.isArray(data?.all) ? data.all : (Array.isArray(data) ? data : []));
+  const subtitles = sanitizeSubtitleList(rawSubs, resolvedBase, resolvedProvider);
+  const responsePayload = {
+    ok: true,
+    subtitles,
+    imdbId,
+    debug: {
+      source: resolvedProvider || 'unknown',
+      tried,
+      errors,
+      selectedProvider: subtitleProvider,
+      providerOffline: false,
+      resolvedTarget,
+      resolvedProvider,
+      resolvedBase,
+      rawCount: rawSubs.length,
+    },
+  };
+  setCachedSubtitleSearch(cacheKey, responsePayload);
+  return responsePayload;
+};
+
+const downloadSubtitleAsset = async (payload = {}, { requireExistingFile = true, allowTempFallback = false } = {}) => {
+  const filePath = String(payload.fullPath || '').trim();
+  const subtitleUrl = String(payload.subtitleUrl || '').trim();
+  const subtitleProvider = String(payload.subtitleProvider || '').trim();
+  const outputBaseName = sanitizeSubtitleOutputBaseName(payload.outputBaseName || payload.title || 'subtitle');
+  if (requireExistingFile) {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Video file not found' };
+  }
+  if (!subtitleUrl) return { ok: false, error: 'Subtitle URL missing' };
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(subtitleUrl);
+  } catch {
+    return { ok: false, error: 'Invalid subtitle URL' };
+  }
+  if (!/^https?:$/i.test(parsedUrl.protocol)) {
+    return { ok: false, error: 'Unsupported subtitle URL protocol' };
+  }
+  if (isPrivateOrLocalHost(parsedUrl.hostname)) {
+    return { ok: false, error: 'Subtitle host is not allowed' };
+  }
+  if (subtitleProvider === 'turkcealtyaziorg-stremio-addon') {
+    const allowedBases = getSubtitleAddonBaseUrls();
+    if (!allowedBases.some((base) => subtitleUrl.startsWith(base))) {
+      return { ok: false, error: 'Subtitle source not allowed' };
+    }
+  }
+
+  const { text, contentType } = await fetchTextWithTimeout(subtitleUrl, 25000);
+  if (!text || !text.trim()) return { ok: false, error: 'Subtitle content is empty' };
+  const extByUrl = path.extname(new URL(subtitleUrl).pathname || '').toLowerCase();
+  const extByType = /\b(vtt)\b/i.test(contentType) ? '.vtt' : '.srt';
+  const subtitleExt = extByUrl && extByUrl.length <= 5 ? extByUrl : extByType;
+
+  let outputDir = '';
+  let videoBase = outputBaseName || 'subtitle';
+  if (filePath && fs.existsSync(filePath)) {
+    outputDir = path.dirname(filePath);
+    videoBase = outputBaseName || path.parse(filePath).name;
+  } else if (allowTempFallback) {
+    outputDir = path.join(app.getPath('temp'), 'cinesoft-player-subtitles');
+    fs.mkdirSync(outputDir, { recursive: true });
+    videoBase = outputBaseName || `subtitle-${Date.now()}`;
+  } else {
+    return { ok: false, error: 'Video file not found' };
+  }
+
+  const subtitlePath = path.join(outputDir, `${videoBase}${subtitleExt}`);
+  fs.writeFileSync(subtitlePath, text, 'utf8');
+  return { ok: true, path: subtitlePath };
+};
+
+ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
+  try {
+    return await searchSubtitleEntries(payload, { requireExistingFile: true });
   } catch (err) {
     logSafeEvent('subtitles', 'search_failed', 'Library subtitle search failed', { error: err.message });
     return { ok: false, error: err.message };
@@ -4853,43 +4928,27 @@ ipcMain.handle('library-subtitles-search', async (event, payload = {}) => {
 
 ipcMain.handle('library-subtitles-download', async (event, payload = {}) => {
   try {
-    const filePath = String(payload.fullPath || '').trim();
-    const subtitleUrl = String(payload.subtitleUrl || '').trim();
-    const subtitleProvider = String(payload.subtitleProvider || '').trim();
-    const outputBaseName = String(payload.outputBaseName || '').trim();
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Video file not found' };
-    if (!subtitleUrl) return { ok: false, error: 'Subtitle URL missing' };
-    let parsedUrl;
-    try {
-      parsedUrl = new URL(subtitleUrl);
-    } catch {
-      return { ok: false, error: 'Invalid subtitle URL' };
-    }
-    if (!/^https?:$/i.test(parsedUrl.protocol)) {
-      return { ok: false, error: 'Unsupported subtitle URL protocol' };
-    }
-    if (isPrivateOrLocalHost(parsedUrl.hostname)) {
-      return { ok: false, error: 'Subtitle host is not allowed' };
-    }
-    if (subtitleProvider === 'turkcealtyaziorg-stremio-addon') {
-      const allowedBases = getSubtitleAddonBaseUrls();
-      if (!allowedBases.some((base) => subtitleUrl.startsWith(base))) {
-        return { ok: false, error: 'Subtitle source not allowed' };
-      }
-    }
-
-    const { text, contentType } = await fetchTextWithTimeout(subtitleUrl, 25000);
-    if (!text || !text.trim()) return { ok: false, error: 'Subtitle content is empty' };
-    const videoDir = path.dirname(filePath);
-    const videoBase = outputBaseName || path.parse(filePath).name;
-    const extByUrl = path.extname(new URL(subtitleUrl).pathname || '').toLowerCase();
-    const extByType = /\b(vtt)\b/i.test(contentType) ? '.vtt' : '.srt';
-    const subtitleExt = extByUrl && extByUrl.length <= 5 ? extByUrl : extByType;
-    const subtitlePath = path.join(videoDir, `${videoBase}${subtitleExt}`);
-    fs.writeFileSync(subtitlePath, text, 'utf8');
-    return { ok: true, path: subtitlePath };
+    return await downloadSubtitleAsset(payload, { requireExistingFile: true, allowTempFallback: false });
   } catch (err) {
     logSafeEvent('subtitles', 'download_failed', 'Library subtitle download failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('player-subtitles-search', async (_event, payload = {}) => {
+  try {
+    return await searchSubtitleEntries(payload, { requireExistingFile: false });
+  } catch (err) {
+    logSafeEvent('subtitles', 'player_search_failed', 'Player subtitle search failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('player-subtitles-download', async (_event, payload = {}) => {
+  try {
+    return await downloadSubtitleAsset(payload, { requireExistingFile: false, allowTempFallback: true });
+  } catch (err) {
+    logSafeEvent('subtitles', 'player_download_failed', 'Player subtitle download failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });
@@ -4961,10 +5020,20 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     const fileUrl = pathToFileURL(filePath).href;
     const title = path.basename(filePath);
     const parentHwnd = readNativeWindowHandle(mainWindow.getNativeWindowHandle());
+    const metadata = getLibraryMetadataRecord(filePath);
     notifyNativePlayerStarted({
       title,
       fullscreen: false,
       torrentStatus: null,
+      mediaContext: {
+        fullPath: filePath,
+        title: String(metadata?.title || path.parse(filePath).name || title),
+        tmdbType: String(metadata?.mediaType || '').trim(),
+        tmdbId: Number(metadata?.tmdbId || 0) || null,
+        imdbId: '',
+        season: 0,
+        episode: 0,
+      },
     });
     try {
       const player = await playWithVlc({

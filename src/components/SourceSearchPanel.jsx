@@ -510,6 +510,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       mediaInfo: {
         type,
         tmdbId: item?.id,
+        season: isEpisodic ? season : null,
+        episode: isEpisodic ? Number(selectedEpisode?.episode_number || episode || 0) || null : null,
       },
       source: streamSource,
       magnet: streamSource.magnet,
@@ -587,6 +589,15 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
             peers: streamPayload.peers,
             progress: null,
             quality: streamPayload.quality,
+          },
+          mediaContext: {
+            fullPath: '',
+            title: streamPayload.title,
+            tmdbType: streamPayload?.mediaInfo?.type || '',
+            tmdbId: Number(streamPayload?.mediaInfo?.tmdbId || 0) || null,
+            imdbId: '',
+            season: Number(streamPayload?.mediaInfo?.season || 0) || 0,
+            episode: Number(streamPayload?.mediaInfo?.episode || 0) || 0,
           },
         },
       }));
