@@ -8,6 +8,7 @@ Vibe Coding
 CineSoft is a desktop media hub that combines movie/TV/anime discovery, torrent source search, download management, library tracking, and subtitle download in one interface.
 
 ### What’s New (Latest Updates)
+- Added embedded streaming playback powered by TorrServer and a native LibVLC-based CineSoft player.
 - A fully refreshed side menu with cleaner navigation and a more modern visual language.
 - A redesigned settings experience with clearer grouping, improved readability, and smoother control flow.
 - Expanded Radarr integration for a stronger movie automation workflow.
@@ -21,6 +22,10 @@ CineSoft is a desktop media hub that combines movie/TV/anime discovery, torrent 
 ### Features
 - Discover movies, TV shows, and anime in one place
 - TMDB-powered metadata, posters, and detail pages
+- Embedded torrent streaming with TorrServer
+- Native in-app VLC player powered by LibVLCSharp
+- Stream sources without adding them to the download queue
+- Separate streaming and download workflows
 - Advanced source search with Prowlarr integration
 - Alternative source search with Torrentio support
 - Sort sources by seeders, size, and name
@@ -88,6 +93,7 @@ npm start
 - Python 3.11+ (for local torrent service and Bazarr source mode)
 - TMDB API key (required for metadata/posters/details)
 - Optional: Prowlarr/Bazarr installations for external/custom setups
+- TorrServer executable configured in Settings (required for streaming)
 
 ### TMDB API Key (Required)
 Get your own API key from TMDB:
@@ -114,6 +120,7 @@ npm run build
 CineSoft; film, dizi ve anime keşfi, torrent kaynak arama, indirme yönetimi, kütüphane takibi ve altyazı indirmeyi tek arayüzde birleştiren masaüstü medya uygulamasıdır.
 
 ### Neler Yeni (Son Güncellemeler)
+- TorrServer ve LibVLC tabanlı yerel CineSoft player ile uygulama içi gömülü streaming oynatma desteği eklendi.
 - Yan menü tamamen yenilendi; gezinme yapısı daha sade, daha okunabilir ve daha modern hale getirildi.
 - Ayarlar sayfası baştan tasarlandı; bölümler daha anlaşılır, kullanım akışı daha net bir yapıya kavuştu.
 - Radarr entegrasyonu film otomasyonu için daha kapsamlı ve daha stabil bir seviyeye taşındı.
@@ -127,6 +134,10 @@ CineSoft; film, dizi ve anime keşfi, torrent kaynak arama, indirme yönetimi, k
 ### Özellikler
 - Film, dizi ve anime içeriklerini tek yerde keşfetme
 - TMDB tabanlı metadata, afiş ve detay sayfaları
+- TorrServer ile gömülü torrent streaming
+- LibVLCSharp tabanlı yerel CineSoft player
+- Stream oturumlarını indirme listesine eklemeden oynatma
+- Streaming ve indirme akışlarının birbirinden ayrı tutulması
 - Prowlarr entegrasyonu ile gelişmiş kaynak arama
 - Torrentio desteği ile alternatif kaynak arama
 - Kaynakları seeder, boyut ve isme göre sıralama
@@ -207,7 +218,3 @@ Sonrasında uygulama içindeki Ayarlar sayfasından ekleyin.
 npm run build
 ```
 
-### Gelecek Planları
-- Kısmi streaming altyapısı
-- Manga görüntüleme ve okuma
-- Comics görüntüleme ve okuma
