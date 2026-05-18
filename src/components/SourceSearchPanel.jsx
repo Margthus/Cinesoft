@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ShieldAlert, Download, Loader2, X } from 'lucide-react';
+import { Search, ShieldAlert, Download, Loader2, Play, X } from 'lucide-react';
 import {
   DEFAULT_PROWLARR_CONFIG,
   searchStreamSourcesForEpisode,
@@ -241,8 +241,10 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       size: 'En buyuk boyut',
       name: 'Isme gore',
       indexers: 'Dizinler',
-      download: 'İndir',
-      starting: 'Başlatılıyor...',
+      download: 'Indir',
+      starting: 'Baslatiliyor...',
+      stream: 'Stream',
+      openingStream: 'Stream aciliyor...',
     },
     en: {
       sources: 'Sources',
@@ -257,6 +259,8 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       indexers: 'Indexers',
       download: 'Download',
       starting: 'Starting...',
+      stream: 'Stream',
+      openingStream: 'Opening stream...',
     },
   }[settings.language || 'tr'];
 
@@ -459,12 +463,182 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
     }
   };
 
+  const handleTorrServerStream = async (source) => {
+    const torrServerDebugEnabled = window.electronAPI?.torrserverDebugEnabled === true;
+    if (settings?.torrserver?.enabled !== true) {
+      notify('TorrServer stream engine is disabled', 'error', 6000);
+      return;
+    }
+    if (!window.electronAPI?.startTorrServerStream) return;
+    const linkPreview = String(source?.link || '').slice(0, 160);
+    const urlPreview = String(source?.url || '').slice(0, 160);
+    if (torrServerDebugEnabled) {
+      window.electronAPI?.logEvent?.({
+        source: 'torrserver-ui',
+        code: 'raw_source_debug',
+        message: '[TorrServerUI:RawSourceDebug]',
+        details: {
+          keys: Object.keys(source || {}),
+          provider: String(source?.provider || ''),
+          hasMagnet: Boolean(source?.magnet),
+          hasMagnetUrl: Boolean(source?.magnetUrl),
+          hasMagnetLink: Boolean(source?.magnetLink),
+          hasLink: Boolean(source?.link),
+          linkPreview,
+          hasTorrentUrl: Boolean(source?.torrentUrl),
+          hasDownloadUrl: Boolean(source?.downloadUrl),
+          hasUrl: Boolean(source?.url),
+          urlPreview,
+          sourcePreview: JSON.stringify(source || {}).slice(0, 2000),
+        },
+      });
+    }
+    const streamSource = {
+      title: source?.title || item?.title || 'CineSoft Stream',
+      provider: source?.provider || '',
+      magnet: source?.magnet || source?.magnetUrl || source?.magnetLink || (String(source?.link || '').startsWith('magnet:') ? source?.link : ''),
+      torrentUrl: source?.torrentUrl || source?.downloadUrl || source?.url || '',
+      infoHash: source?.infoHash || source?.hash || '',
+      seeders: Number(source?.seeders || 0) || 0,
+      peers: Number(source?.peers || 0) || 0,
+      quality: source?.quality || '',
+      rawSource: source,
+    };
+    const streamPayload = {
+      title: streamSource.title,
+      provider: streamSource.provider,
+      mediaInfo: {
+        type,
+        tmdbId: item?.id,
+      },
+      source: streamSource,
+      magnet: streamSource.magnet,
+      torrentUrl: streamSource.torrentUrl,
+      infoHash: streamSource.infoHash,
+      seeders: streamSource.seeders,
+      peers: streamSource.peers,
+      quality: streamSource.quality,
+      rawSource: source,
+      item,
+      selectedSource: source,
+    };
+    if (torrServerDebugEnabled) {
+      window.electronAPI?.logEvent?.({
+        source: 'torrserver-ui',
+        code: 'stream_click',
+        message: '[TorrServerUI:StreamClick]',
+        details: {
+          sourceId: source?.id || '',
+          title: source?.title || '',
+          hasMagnet: Boolean(source?.magnet),
+          hasTorrentUrl: Boolean(source?.torrentUrl),
+          hasLink: Boolean(source?.link),
+        },
+      });
+      window.electronAPI?.logEvent?.({
+        source: 'torrserver-ui',
+        code: 'stream_payload_keys',
+        message: '[TorrServerUI:StreamPayloadKeys]',
+        details: {
+          sourceKeys: Object.keys(source || {}),
+        },
+      });
+      window.electronAPI?.logEvent?.({
+        source: 'torrserver-ui',
+        code: 'stream_payload',
+        message: '[TorrServerUI:NormalizedStreamPayload]',
+        details: {
+          topLevelKeys: Object.keys(streamPayload || {}),
+          sourceKeys: Object.keys(streamPayload?.source || {}),
+          hasMagnet: Boolean(streamPayload?.magnet),
+          magnetPreview: String(streamPayload?.magnet || '').slice(0, 72),
+          hasTorrentUrl: Boolean(streamPayload?.torrentUrl),
+          torrentUrlPreview: String(streamPayload?.torrentUrl || '').slice(0, 72),
+          provider: String(streamPayload?.provider || ''),
+        },
+      });
+    }
+    setActionLoading((prev) => ({ ...prev, [`stream:${source.id}`]: true }));
+    try {
+      const result = await window.electronAPI.startTorrServerStream(streamPayload);
+      if (torrServerDebugEnabled) {
+        window.electronAPI?.logEvent?.({
+          source: 'torrserver-ui',
+          code: 'start_stream_result',
+          message: '[TorrServerUI:StartStreamResult]',
+          details: {
+            streamUrl: result?.streamUrl || '',
+            hasPlayer: Boolean(result?.player),
+          },
+        });
+      }
+      notify(
+        settings.language === 'en' ? 'Stream started in VLC Player.' : 'VLC Player ile stream baslatildi.',
+        'success',
+      );
+      window.dispatchEvent(new CustomEvent('cinesoft:native-player-started', {
+        detail: {
+          title: streamPayload.title,
+          streamUrl: result?.streamUrl || '',
+          torrentStatus: result?.torrentStatus || {
+            provider: streamPayload.provider,
+            infoHash: streamPayload.infoHash,
+            seeders: streamPayload.seeders,
+            peers: streamPayload.peers,
+            progress: null,
+            quality: streamPayload.quality,
+          },
+        },
+      }));
+    } catch (err) {
+      const errorMessage = String(err?.message || '');
+      if (errorMessage.includes('TorrServer exe path is not configured')) {
+        notify('TorrServer exe path is not configured', 'error', 6000);
+      } else if (errorMessage.includes('TorrServer not running')) {
+        notify('TorrServer not running', 'error', 6000);
+      } else if (errorMessage.includes('VLC host executable not found')) {
+        notify('VLC Player host executable not found', 'error', 7000);
+      } else if (errorMessage.includes('VLC Player URL is required') || errorMessage.includes('Failed to launch VLC Player')) {
+        notify(`VLC Player launch failed: ${errorMessage}`, 'error', 7000);
+      } else {
+        notify(errorMessage || 'Stream start failed', 'error', 6000);
+      }
+    } finally {
+      setActionLoading((prev) => {
+        const next = { ...prev };
+        delete next[`stream:${source.id}`];
+        return next;
+      });
+    }
+  };
+
+  const anyCandidateStartsWithMagnet = (source = {}) => {
+    const candidates = [
+      source?.magnet,
+      source?.magnetUrl,
+      source?.magnetLink,
+      source?.torrentUrl,
+      source?.downloadUrl,
+      source?.url,
+      source?.link,
+      source?.raw?.magnet,
+      source?.raw?.magnetUrl,
+      source?.raw?.magnetLink,
+      source?.raw?.torrentUrl,
+      source?.raw?.downloadUrl,
+      source?.raw?.url,
+      source?.raw?.link,
+    ];
+    return candidates.some((value) => String(value || '').trim().toLowerCase().startsWith('magnet:'));
+  };
+
   const handleTorrentDownload = async (source) => {
     if (!window.electronAPI?.torrentPrepare || !window.electronAPI?.torrentGetFiles || !window.electronAPI?.torrentSelectFiles) return;
 
     setActionLoading(prev => ({ ...prev, [source.id]: true }));
 
     try {
+
       let pendingTorrentId = '';
       const releaseDate = item.release_date || item.first_air_date || '';
       const releaseYear = releaseDate ? new Date(releaseDate).getFullYear() : 0;
@@ -1050,7 +1224,11 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         <div className="source-results">
           {filteredAndSortedResults.map((source) => {
             const isLoadingAction = actionLoading[source.id];
+            const isStreamingAction = actionLoading[`stream:${source.id}`];
             const hasTorrentData = source.magnet || source.infoHash || source.torrentUrl || source.downloadUrl;
+            const streamEnabled = settings?.torrserver?.enabled === true;
+            const hasMagnetForStream = anyCandidateStartsWithMagnet(source);
+            const streamReason = hasMagnetForStream ? '' : 'This source has no magnet link for streaming.';
 
             return (
               <div className="source-row" key={source.id}>
@@ -1066,6 +1244,32 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
                 </div>
                 {hasTorrentData && (
                   <div className="source-actions">
+                    {streamEnabled && (
+                      <button
+                        className="source-action-btn"
+                        onClick={() => handleTorrServerStream(source)}
+                        disabled={!!isStreamingAction || !hasMagnetForStream}
+                        title={!hasMagnetForStream ? streamReason : t.stream}
+                      >
+                        {isStreamingAction ? (
+                          <Loader2 size={16} className="spin-animation" />
+                        ) : (
+                          <Play size={16} />
+                        )}
+                        <span>{isStreamingAction ? t.openingStream : t.stream}</span>
+                      </button>
+                    )}
+                    {!streamEnabled && (
+                      <button
+                        className="source-action-btn"
+                        onClick={() => handleTorrServerStream(source)}
+                        disabled
+                        title="TorrServer stream engine is disabled"
+                      >
+                        <Play size={16} />
+                        <span>{t.stream}</span>
+                      </button>
+                    )}
                     <button
                       className="source-action-btn download-btn"
                       onClick={() => handleTorrentDownload(source)}
@@ -1328,4 +1532,5 @@ const searchEpisodeSources = async (prowlarrConfig, payload) => {
 };
 
 export default SourceSearchPanel;
+
 

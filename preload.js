@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const DEBUG_TORRSERVER_STREAM = String(process.env.DEBUG_TORRSERVER_STREAM || '').toLowerCase() === 'true';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAuthState: () => ipcRenderer.invoke('get-auth-state'),
@@ -54,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopManagedEngines: () => ipcRenderer.invoke('engines:stop-managed'),
   getManagedSonarrStatus: () => ipcRenderer.invoke('get-managed-sonarr-status'),
   engineInstallLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+  engineStartInstallLatest: (appName) => ipcRenderer.invoke('engine:start-install-latest', appName),
   engineGetStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
   engineFindExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   sonarrTestConnection: (settings) => ipcRenderer.invoke('sonarr:testConnection', settings),
@@ -94,6 +96,50 @@ contextBridge.exposeInMainWorld('electronAPI', {
   torrentGetSettings: () => ipcRenderer.invoke('torrent-get-settings'),
   torrentSaveSettings: (settings) => ipcRenderer.invoke('torrent-save-settings', settings),
   openTorrentVideo: (payload) => ipcRenderer.invoke('open-torrent-video', payload),
+  selectTorrServerExecutable: () => ipcRenderer.invoke('select-torrserver-executable'),
+  getTorrServerSettings: () => ipcRenderer.invoke('torrserver:get-settings'),
+  saveTorrServerSettings: (settings) => ipcRenderer.invoke('torrserver:save-settings', settings),
+  getTorrServerStatus: () => ipcRenderer.invoke('torrserver:status'),
+  startTorrServer: (settings) => ipcRenderer.invoke('torrserver:start', settings),
+  stopTorrServer: () => ipcRenderer.invoke('torrserver:stop'),
+  testTorrServer: (settings) => ipcRenderer.invoke('torrserver:test', settings),
+  startTorrServerStream: async (payload) => {
+    const result = await ipcRenderer.invoke('torrserver:start-stream', payload);
+    if (DEBUG_TORRSERVER_STREAM) {
+      try {
+        console.log('[TorrServerUI:StartStreamResult]', {
+          ok: Boolean(result),
+          streamUrl: result?.streamUrl || '',
+          player: result?.player || null,
+          error: result?.error || '',
+        });
+      } catch {}
+    }
+    return result;
+  },
+  torrserverDebugEnabled: DEBUG_TORRSERVER_STREAM,
+  openTorrServerWeb: (settings) => ipcRenderer.invoke('torrserver:open-web', settings),
+  stopNativePlayer: () => ipcRenderer.invoke('player:stop'),
+  controlNativePlayer: (payload) => ipcRenderer.invoke('player:command', payload),
+  toggleNativePlayerFullscreen: () => ipcRenderer.invoke('player:toggle-fullscreen'),
+  onNativePlayerStarted: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('native-player:started', handler);
+    return () => ipcRenderer.removeListener('native-player:started', handler);
+  },
+  onNativePlayerStopped: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = () => callback();
+    ipcRenderer.on('native-player:stopped', handler);
+    return () => ipcRenderer.removeListener('native-player:stopped', handler);
+  },
+  onNativePlayerState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('native-player:state', handler);
+    return () => ipcRenderer.removeListener('native-player:state', handler);
+  },
   scanLibrary: () => ipcRenderer.invoke('library-scan'),
   openLibraryVideo: (payload) => ipcRenderer.invoke('open-library-video', payload),
   openLibraryFolder: (payload) => ipcRenderer.invoke('open-library-folder', payload),
@@ -115,6 +161,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 contextBridge.exposeInMainWorld('cinesoft', {
   engine: {
     installLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+    startInstallLatest: (appName) => ipcRenderer.invoke('engine:start-install-latest', appName),
     getStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
     findExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   },

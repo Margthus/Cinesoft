@@ -84,3 +84,7 @@ scratch_test.js
 
 dist-release/
 dist-portable-test/
+tools/**/bin/
+tools/**/obj/
+*.pdb
+resources/vlc-host/**/*.pdb

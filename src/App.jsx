@@ -13,6 +13,12 @@ import {
   ChevronUp,
   ChevronDown,
   Cog,
+  X,
+  Play,
+  Pause,
+  Volume2,
+  Maximize2,
+  Captions,
 } from 'lucide-react';
 import HomeView from './components/HomeView';
 import MoviesView from './components/MoviesView';
@@ -47,6 +53,24 @@ const DEFAULT_PAGE_ROUTE_MAP = {
 };
 const APP_TOAST_EVENT = 'cinesoft:toast';
 let appToastId = 0;
+const DEFAULT_NATIVE_PLAYER_STATE = {
+  active: false,
+  title: '',
+  torrentStatus: null,
+  fullscreen: false,
+  startedAt: 0,
+  subtitles: {
+    activeKey: 'spu:-1',
+    activeId: -1,
+    tracks: [],
+  },
+  playback: {
+    time: 0,
+    length: 0,
+    volume: 80,
+    playing: false,
+  },
+};
 
 export const showAppToast = (detail = {}) => {
   if (typeof window === 'undefined') return;
@@ -75,6 +99,16 @@ const App = () => {
       password: 'adminadmin',
     },
     torrentio: normalizeTorrentioConfig({}),
+    torrserver: {
+      enabled: false,
+      exePath: '',
+      port: 8090,
+      autoStartOnStream: true,
+      stopWhenPlaybackEnds: true,
+      dataDir: '',
+      cacheDir: '',
+      cacheSize: null,
+    },
     radarrEnabled: false,
     radarrManaged: false,
     radarrBaseUrl: 'http://127.0.0.1:7878',
@@ -105,6 +139,7 @@ const App = () => {
   const [animeState, setAnimeState] = useState({ anime: [], page: 1, category: 'popular', scrollY: 0, hasMore: true });
   const [showWelcome, setShowWelcome] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [nativePlayer, setNativePlayer] = useState(DEFAULT_NATIVE_PLAYER_STATE);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -133,6 +168,18 @@ const App = () => {
               password: 'adminadmin',
             },
             torrentio: normalizeTorrentioConfig(savedSettings.torrentio || {}),
+            torrserver: {
+              enabled: savedSettings?.torrserver?.enabled === true,
+              exePath: String(savedSettings?.torrserver?.exePath || ''),
+              port: Number(savedSettings?.torrserver?.port || 8090),
+              autoStartOnStream: savedSettings?.torrserver?.autoStartOnStream !== false,
+              stopWhenPlaybackEnds: savedSettings?.torrserver?.stopWhenPlaybackEnds !== false,
+              dataDir: String(savedSettings?.torrserver?.dataDir || ''),
+              cacheDir: String(savedSettings?.torrserver?.cacheDir || ''),
+              cacheSize: Number.isFinite(Number(savedSettings?.torrserver?.cacheSize))
+                ? Number(savedSettings?.torrserver?.cacheSize)
+                : null,
+            },
             radarrEnabled: savedSettings.radarrEnabled === true,
             radarrManaged: savedSettings.radarrManaged === true,
             radarrBaseUrl: savedSettings.radarrBaseUrl || 'http://127.0.0.1:7878',
@@ -209,6 +256,66 @@ const App = () => {
     return () => window.removeEventListener(APP_TOAST_EVENT, onToast);
   }, [settings.notificationsEnabled]);
 
+  useEffect(() => {
+    const onPlayerStarted = (event) => {
+      const detail = event?.detail || {};
+      setNativePlayer({
+        ...DEFAULT_NATIVE_PLAYER_STATE,
+        active: true,
+        title: String(detail.title || 'CineSoft Stream'),
+        torrentStatus: detail.torrentStatus || null,
+        fullscreen: detail.fullscreen === true,
+        startedAt: Date.now(),
+      });
+    };
+    window.addEventListener('cinesoft:native-player-started', onPlayerStarted);
+    const unsubscribeStarted = window.electronAPI?.onNativePlayerStarted?.((payload = {}) => {
+      setNativePlayer({
+        ...DEFAULT_NATIVE_PLAYER_STATE,
+        active: true,
+        title: String(payload.title || 'CineSoft Stream'),
+        torrentStatus: payload.torrentStatus || null,
+        fullscreen: payload.fullscreen === true,
+        startedAt: Date.now(),
+      });
+    });
+    const unsubscribeState = window.electronAPI?.onNativePlayerState?.((payload = {}) => {
+      setNativePlayer((prev) => ({
+        ...prev,
+        subtitles: payload.subtitleState
+          ? {
+            activeKey: String(payload.subtitleState?.activeKey || 'spu:-1'),
+            activeId: Number(payload.subtitleState?.activeId ?? -1),
+            tracks: Array.isArray(payload.subtitleState?.tracks) ? payload.subtitleState.tracks : [],
+          }
+          : prev.subtitles,
+        playback: {
+          time: payload.time === undefined ? prev.playback.time : Math.max(0, Number(payload.time) || 0),
+          length: payload.length === undefined ? prev.playback.length : Math.max(0, Number(payload.length) || 0),
+          volume: payload.volume === undefined ? prev.playback.volume : Math.max(0, Math.min(100, Number(payload.volume) || 0)),
+          playing: payload.playing === undefined ? prev.playback.playing : payload.playing === true,
+        },
+      }));
+    });
+    const unsubscribeStopped = window.electronAPI?.onNativePlayerStopped?.(() => {
+      setNativePlayer(DEFAULT_NATIVE_PLAYER_STATE);
+    });
+    return () => {
+      window.removeEventListener('cinesoft:native-player-started', onPlayerStarted);
+      if (typeof unsubscribeStarted === 'function') unsubscribeStarted();
+      if (typeof unsubscribeState === 'function') unsubscribeState();
+      if (typeof unsubscribeStopped === 'function') unsubscribeStopped();
+    };
+  }, []);
+
+  const closeNativePlayer = async () => {
+    try {
+      await window.electronAPI?.stopNativePlayer?.();
+    } finally {
+      setNativePlayer(DEFAULT_NATIVE_PLAYER_STATE);
+    }
+  };
+
   const toggleMyList = (item) => {
     setMyList((prev) => {
       const exists = prev.find((i) => i.id === item.id);
@@ -247,29 +354,35 @@ const App = () => {
 
   return (
     <Router>
-      <div className="app-container">
-        <Sidebar settings={settings} />
-        <main className="main-content">
-          <Routes>
-            <Route
-              path="/"
-              element={defaultRoute === '/'
-                ? <HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />
-                : <Navigate to={defaultRoute} replace />}
-            />
-            <Route path="/movies" element={<MoviesView settings={settings} myList={myList} onToggleMyList={toggleMyList} movieState={movieState} setMovieState={setMovieState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
-            <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
-            <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
-            <Route path="/downloads" element={<DownloadsView settings={settings} />} />
-            <Route path="/radarr" element={<RadarrView settings={settings} />} />
-            <Route path="/sonarr" element={<SonarrView settings={settings} />} />
-            <Route path="/library" element={<LibraryView settings={settings} />} />
-            <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
-            <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
-            <Route path="/detail/:type/:id" element={<DetailView settings={settings} myList={myList} onToggleMyList={toggleMyList} setSearchState={setSearchState} />} />
-            <Route path="/settings" element={<SettingsView settings={settings} setSettings={setSettings} />} />
-          </Routes>
-        </main>
+      <div className={`app-container ${nativePlayer.active ? 'app-container-player-mode' : ''}`}>
+        {nativePlayer.active ? (
+          <NativePlayerShell title={nativePlayer.title} torrentStatus={nativePlayer.torrentStatus} playback={nativePlayer.playback} fullscreen={nativePlayer.fullscreen} startedAt={nativePlayer.startedAt} language={settings.language} onClose={closeNativePlayer} subtitles={nativePlayer.subtitles} />
+        ) : (
+          <>
+            <Sidebar settings={settings} />
+            <main className="main-content">
+              <Routes>
+                <Route
+                  path="/"
+                  element={defaultRoute === '/'
+                    ? <HomeView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />
+                    : <Navigate to={defaultRoute} replace />}
+                />
+                <Route path="/movies" element={<MoviesView settings={settings} myList={myList} onToggleMyList={toggleMyList} movieState={movieState} setMovieState={setMovieState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+                <Route path="/tv" element={<TVShowsView settings={settings} myList={myList} onToggleMyList={toggleMyList} tvState={tvState} setTvState={setTvState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+                <Route path="/anime" element={<AnimeView settings={settings} myList={myList} onToggleMyList={toggleMyList} animeState={animeState} setAnimeState={setAnimeState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+                <Route path="/downloads" element={<DownloadsView settings={settings} />} />
+                <Route path="/radarr" element={<RadarrView settings={settings} />} />
+                <Route path="/sonarr" element={<SonarrView settings={settings} />} />
+                <Route path="/library" element={<LibraryView settings={settings} />} />
+                <Route path="/mylist" element={<MyListView settings={settings} myList={myList} onToggleMyList={toggleMyList} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+                <Route path="/search" element={<SearchView settings={settings} myList={myList} onToggleMyList={toggleMyList} searchState={searchState} setSearchState={setSearchState} watchStatusMap={watchStatusMap} onSetWatchStatus={setWatchStatus} />} />
+                <Route path="/detail/:type/:id" element={<DetailView settings={settings} myList={myList} onToggleMyList={toggleMyList} setSearchState={setSearchState} />} />
+                <Route path="/settings" element={<SettingsView settings={settings} setSettings={setSettings} />} />
+              </Routes>
+            </main>
+          </>
+        )}
         {showWelcome && <WelcomeOverlay language={settings.language} onClose={dismissWelcome} />}
         <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
           {toasts.map((toast) => (
@@ -280,6 +393,252 @@ const App = () => {
         </div>
       </div>
     </Router>
+  );
+};
+
+const formatPlaybackTime = (ms) => {
+  const totalMs = Math.max(0, Number(ms) || 0);
+  if (!totalMs) return '00:00';
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const NativePlayerShell = ({ title = 'CineSoft Stream', torrentStatus = null, playback = DEFAULT_NATIVE_PLAYER_STATE.playback, fullscreen = false, startedAt = 0, language = 'tr', onClose, subtitles = DEFAULT_NATIVE_PLAYER_STATE.subtitles }) => {
+  const hash = String(torrentStatus?.infoHash || '').trim();
+  const hashPreview = hash ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : '-';
+  const playbackLength = Math.max(0, Number(playback?.length) || 0);
+  const playbackTime = Math.max(0, Number(playback?.time) || 0);
+  const playbackProgressValue = playbackLength > 0
+    ? Math.max(0, Math.min(100, Math.round((playbackTime / Math.max(1, playbackLength)) * 100)))
+    : null;
+  const torrentProgressValue = Number.isFinite(Number(torrentStatus?.progress)) ? Math.max(0, Math.min(100, Math.round(Number(torrentStatus.progress)))) : null;
+  const resolvedProgressValue = playbackProgressValue ?? torrentProgressValue;
+  const progress = resolvedProgressValue !== null ? `${resolvedProgressValue}%` : '--%';
+  const seeders = Number(torrentStatus?.seeders || 0) || 0;
+  const peers = Number(torrentStatus?.peers || 0) || 0;
+  const provider = String(torrentStatus?.provider || '').trim();
+  const quality = String(torrentStatus?.quality || '').trim();
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekValue, setSeekValue] = useState(0);
+  const [volumeValue, setVolumeValue] = useState(Math.max(0, Math.min(100, Number(playback?.volume) || 80)));
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
+  const hasPlayback = Number(playback?.length) > 0 || Number(playback?.time) > 0 || playback?.playing === true;
+  const subtitleTracks = Array.isArray(subtitles?.tracks) ? subtitles.tracks : [];
+  const activeSubtitleKey = String(subtitles?.activeKey || 'spu:-1');
+  const activeSubtitleId = Number(subtitles?.activeId ?? -1);
+
+  useEffect(() => {
+    if (!startedAt || hasPlayback) {
+      setLoadingSeconds(0);
+      return undefined;
+    }
+    const update = () => setLoadingSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    update();
+    const timer = window.setInterval(update, 500);
+    return () => window.clearInterval(timer);
+  }, [hasPlayback, startedAt]);
+
+  useEffect(() => {
+    if (!isSeeking) {
+      const length = Math.max(0, Number(playback?.length) || 0);
+      const time = Math.max(0, Number(playback?.time) || 0);
+      setSeekValue(length > 0 ? Math.round(Math.min(1000, (time / Math.max(1, length)) * 1000)) : 0);
+    }
+  }, [isSeeking, playback?.length, playback?.time]);
+
+  useEffect(() => {
+    setVolumeValue(Math.max(0, Math.min(100, Number(playback?.volume) || 0)));
+  }, [playback?.volume]);
+
+  useEffect(() => {
+    setIsFullscreen(fullscreen === true);
+  }, [fullscreen]);
+
+  useEffect(() => {
+    const rightInset = subtitleMenuOpen
+      ? (isFullscreen ? 276 : 320)
+      : 30;
+    const topInset = isFullscreen ? 0 : 70;
+    const bottomInset = isFullscreen ? 98 : 122;
+    window.electronAPI?.controlNativePlayer?.({
+      command: 'set-insets',
+      value: `30 ${topInset} ${rightInset} ${bottomInset}`,
+    });
+  }, [isFullscreen, subtitleMenuOpen]);
+
+  const commitSeek = async () => {
+    setIsSeeking(false);
+    await window.electronAPI?.controlNativePlayer?.({
+      command: 'seek-percent',
+      value: seekValue,
+    });
+  };
+
+  const togglePlayback = async () => {
+    await window.electronAPI?.controlNativePlayer?.({ command: 'toggle-play' });
+  };
+
+  const changeVolume = async (nextVolume) => {
+    const value = Math.max(0, Math.min(100, Number(nextVolume) || 0));
+    setVolumeValue(value);
+    await window.electronAPI?.controlNativePlayer?.({
+      command: 'set-volume',
+      value,
+    });
+  };
+
+  const toggleFullscreen = async () => {
+    const result = await window.electronAPI?.toggleNativePlayerFullscreen?.();
+    if (result && typeof result.fullscreen === 'boolean') {
+      setIsFullscreen(result.fullscreen);
+    }
+  };
+
+  const selectSubtitle = async (subtitleKey) => {
+    await window.electronAPI?.controlNativePlayer?.({
+      command: 'set-subtitle',
+      value: subtitleKey,
+    });
+    setSubtitleMenuOpen(false);
+  };
+
+  const isTr = language === 'tr';
+  const playbackStatusLabel = !hasPlayback
+    ? (isTr ? 'Hazirlaniyor' : 'Preparing')
+    : (playback?.playing ? (isTr ? 'Streaming' : 'Streaming') : (isTr ? 'Duraklatildi' : 'Paused'));
+  const progressLabel = isTr ? 'Ilerleme' : 'Progress';
+  const seedLabel = isTr ? 'seed' : (seeders === 1 ? 'seed' : 'seeds');
+  const peerLabel = isTr ? 'peer' : (peers === 1 ? 'peer' : 'peers');
+  const hashLabel = 'Hash';
+  const unavailableHashTitle = isTr ? 'Hash bilgisi yok' : 'Hash unavailable';
+  const loadingKicker = isTr ? 'Yayin Hazirlaniyor' : 'Preparing Stream';
+  const loadingMessage = loadingSeconds >= 8
+    ? (isTr
+      ? 'Akis hazirlaniyor. Ilk baglanti ve buffer islemleri suruyor.'
+      : 'The stream is being prepared. Initial connection and buffering are still in progress.')
+    : loadingSeconds >= 3
+      ? (isTr
+        ? 'Kaynak baglantisi kuruluyor, oynatma hazirlaniyor.'
+        : 'Connecting to the source and preparing playback.')
+      : (isTr
+        ? 'Stream baslatiliyor...'
+        : 'Starting stream...');
+
+  return (
+    <main className={`native-player-shell ${isFullscreen ? 'native-player-shell-fullscreen' : ''}`}>
+      <div className="native-player-frame">
+        {!isFullscreen && (
+          <header className="native-player-topbar">
+            <div className="native-player-brand">CINE<span>SOFT</span></div>
+            <div className="native-player-title">{title}</div>
+            <div className="native-player-torrent-status" title={hash ? `${hashLabel}: ${hash}` : unavailableHashTitle}>
+              <span className="native-player-status-pill">{playbackStatusLabel}</span>
+              <span>{progressLabel} {progress}</span>
+              <span>{seeders} {seedLabel}</span>
+              <span>{peers} {peerLabel}</span>
+              {quality && <span>{quality}</span>}
+              {provider && <span>{provider}</span>}
+              {hash && <span>{hashLabel} {hashPreview}</span>}
+            </div>
+            <button type="button" className="native-player-close" onClick={onClose} aria-label="Close player">
+              <X size={18} />
+            </button>
+          </header>
+        )}
+        <div className={`native-player-viewport ${subtitleMenuOpen ? 'native-player-viewport-with-subtitles' : ''}`}>
+          <section className="native-player-stage" aria-label="Native video player" />
+          {subtitleMenuOpen && (
+            <aside className="native-player-subtitle-panel">
+              <div className="native-player-subtitle-panel-head">
+                <span>{isTr ? 'Altyazilar' : 'Subtitles'}</span>
+              </div>
+              <div className="native-player-subtitle-panel-list">
+                {(subtitleTracks.length ? subtitleTracks : [{ id: -1, label: isTr ? 'Altyazi yok' : 'No subtitles', source: 'builtin' }]).map((track) => (
+                  <button
+                    key={`${track.key || track.id}-${track.label}`}
+                    type="button"
+                    className={`native-player-subtitle-item ${(track.key || `spu:${track.id}`) === activeSubtitleKey ? 'active' : ''}`}
+                    onClick={() => selectSubtitle(track.key || `spu:${track.id}`)}
+                    disabled={subtitleTracks.length === 0}
+                  >
+                    <span>{track.label || (isTr ? 'Bilinmeyen altyazi' : 'Unknown subtitle')}</span>
+                  </button>
+                ))}
+              </div>
+            </aside>
+          )}
+        </div>
+        {!hasPlayback && (
+          <div className="native-player-loading">
+            <div className="native-player-loading-card">
+              <div className="native-player-loading-kicker">{loadingKicker}</div>
+              <div className="native-player-loading-title">{title}</div>
+              <div className="native-player-loading-text">{loadingMessage}</div>
+              <div className="native-player-loading-bar">
+                <div className="native-player-loading-bar-fill" />
+              </div>
+            </div>
+          </div>
+        )}
+        <footer className="native-player-controls">
+          <div className="native-player-controls-row">
+            <button type="button" className="native-player-action native-player-action-primary" onClick={togglePlayback} aria-label={playback?.playing ? 'Pause' : 'Play'}>
+              {playback?.playing ? <Pause size={20} /> : <Play size={20} />}
+            </button>
+            <div className="native-player-time">{formatPlaybackTime(playback?.time)}</div>
+            <div className="native-player-seek-wrap">
+              <div className="native-player-progress-line">
+                <div className="native-player-progress-fill" style={{ width: `${seekValue / 10}%` }} />
+              </div>
+              <input
+                className="native-player-seek"
+                type="range"
+                min="0"
+                max="1000"
+                step="1"
+                value={seekValue}
+                onMouseDown={() => setIsSeeking(true)}
+                onTouchStart={() => setIsSeeking(true)}
+                onChange={(event) => setSeekValue(Number(event.target.value))}
+                onMouseUp={commitSeek}
+                onTouchEnd={commitSeek}
+                aria-label="Seek"
+              />
+            </div>
+            <div className="native-player-time native-player-time-end">{formatPlaybackTime(playback?.length)}</div>
+            <div className="native-player-toolbar-divider" />
+            <div className="native-player-volume-wrap">
+              <Volume2 size={18} />
+              <input
+                className="native-player-volume"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={volumeValue}
+                onChange={(event) => changeVolume(event.target.value)}
+                aria-label="Volume"
+              />
+            </div>
+            <div className="native-player-subtitle-wrap">
+              <button type="button" className="native-player-action" onClick={() => setSubtitleMenuOpen((current) => !current)} aria-label="Subtitles">
+                <Captions size={17} />
+              </button>
+            </div>
+            <button type="button" className="native-player-action" onClick={toggleFullscreen} aria-label="Toggle fullscreen">
+              <Maximize2 size={17} />
+            </button>
+          </div>
+        </footer>
+      </div>
+    </main>
   );
 };
 
