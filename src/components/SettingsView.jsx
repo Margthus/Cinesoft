@@ -61,6 +61,13 @@ const DEFAULT_TORRSERVER_SETTINGS = {
   cacheDir: '',
   cacheSize: null,
 };
+const TORRSERVER_CACHE_SIZE_OPTIONS = [
+  { value: '64', label: '64 MB' },
+  { value: '128', label: '128 MB' },
+  { value: '256', label: '256 MB' },
+  { value: '512', label: '512 MB' },
+  { value: '1024', label: '1024 MB' },
+];
 
 const SettingsView = ({ settings, setSettings }) => {
   const [formData, setFormData] = useState({
@@ -350,6 +357,7 @@ const SettingsView = ({ settings, setSettings }) => {
     ...(formData.torrserver || {}),
     ...override,
     port: Number(override?.port ?? formData?.torrserver?.port ?? 8090) || 8090,
+    cacheSize: Math.max(64, Math.min(1024, Number(override?.cacheSize ?? formData?.torrserver?.cacheSize ?? 64) || 64)),
   });
 
   const updateTorrServer = (changes = {}) => {
@@ -1552,6 +1560,20 @@ const SettingsView = ({ settings, setSettings }) => {
           <label className="stacked-field">
             <span>{t.torrserverCacheDir}</span>
             <input className="settings-input" value={torrCfg.cacheDir || ''} onChange={(event) => updateTorrServer({ cacheDir: event.target.value })} />
+          </label>
+          <label className="stacked-field">
+            <span>{t.torrserverCacheSize}</span>
+            <select
+              className="settings-input"
+              value={String(Math.max(64, Math.min(1024, Number(torrCfg.cacheSize || 64) || 64)))}
+              onChange={(event) => updateTorrServer({
+                cacheSize: Math.max(64, Math.min(1024, Number(event.target.value) || 64)),
+              })}
+            >
+              {TORRSERVER_CACHE_SIZE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </label>
           </div>
           <div className="settings-row-list torrserver-toggle-list">
@@ -3518,6 +3540,7 @@ const getCopy = (language) => ({
     torrserverPort: 'TorrServer Port',
     torrserverDataDir: 'TorrServer data dir',
     torrserverCacheDir: 'TorrServer cache dir',
+    torrserverCacheSize: 'TorrServer cache boyutu',
     torrserverAutoStart: 'Streamte otomatik baslat',
     torrserverStopOnPlaybackEnd: 'Playback bitince (CineSoft baslattiysa) kapat',
     browse: 'Browse',
@@ -3850,6 +3873,7 @@ const getCopy = (language) => ({
     torrserverPort: 'TorrServer Port',
     torrserverDataDir: 'TorrServer data dir',
     torrserverCacheDir: 'TorrServer cache dir',
+    torrserverCacheSize: 'TorrServer cache size',
     torrserverAutoStart: 'Auto-start on stream',
     torrserverStopOnPlaybackEnd: 'Stop when playback ends (only if CineSoft started it)',
     browse: 'Browse',

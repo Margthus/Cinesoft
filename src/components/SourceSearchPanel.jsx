@@ -571,17 +571,23 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
           details: {
             streamUrl: result?.streamUrl || '',
             hasPlayer: Boolean(result?.player),
+            backend: result?.backend || '',
           },
         });
       }
       notify(
-        settings.language === 'en' ? 'Stream started in VLC Player.' : 'VLC Player ile stream baslatildi.',
+        result?.backend === 'html5'
+          ? (settings.language === 'en' ? 'Stream started in HTML5 Player.' : 'HTML5 Player ile stream baslatildi.')
+          : (settings.language === 'en' ? 'Stream started in VLC Player.' : 'VLC Player ile stream baslatildi.'),
         'success',
       );
       window.dispatchEvent(new CustomEvent('cinesoft:native-player-started', {
         detail: {
           title: streamPayload.title,
           streamUrl: result?.streamUrl || '',
+          backend: result?.backend || 'vlc',
+          backendReason: result?.backendReason || '',
+          backendExt: result?.backendExt || '',
           torrentStatus: result?.torrentStatus || {
             provider: streamPayload.provider,
             infoHash: streamPayload.infoHash,

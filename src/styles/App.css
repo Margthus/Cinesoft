@@ -58,6 +58,38 @@
   overflow: hidden;
 }
 
+.native-player-stage-html5 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(var(--accent-rgb), 0.1), transparent 34%),
+    #000;
+}
+
+.native-player-html5-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+}
+
+.native-player-html5-fallback-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 12, 16, 0.9);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  z-index: 4;
+}
+
 .native-player-viewport {
   min-height: 0;
   min-width: 0;
@@ -504,6 +536,30 @@
   grid-auto-rows: min-content;
   align-content: start;
   gap: 0.45rem;
+  max-height: min(44vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.2rem;
+  scrollbar-gutter: stable;
+}
+
+.native-player-subtitle-panel-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.native-player-subtitle-panel-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.native-player-subtitle-panel-list::-webkit-scrollbar-thumb {
+  background: rgba(var(--accent-rgb), 0.34);
+  border-radius: 999px;
+  border: 2px solid rgba(8, 12, 16, 0.92);
+}
+
+.native-player-subtitle-panel-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--accent-rgb), 0.5);
 }
 
 .native-player-subtitle-item {

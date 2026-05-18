@@ -6,7 +6,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const axios = require('axios');
-const { pathToFileURL } = require('url');
+const { pathToFileURL, URL } = require('url');
 const radarrService = require('./src/main/services/radarrService');
 const sonarrService = require('./src/main/services/sonarrService');
 const { createEngineInstallerService } = require('./src/main/services/engineInstallerService');
@@ -1393,6 +1393,45 @@ const getTorrServerConfig = () => {
     port: Number(saved?.port || TORRSERVER_DEFAULT_PORT),
   }, app.getPath('userData'));
 };
+const buildTorrServerRuntimePatch = (settings = {}) => {
+  const normalized = normalizeTorrServerSettings(settings, app.getPath('userData'));
+  return {
+    CacheSize: Math.max(64, Math.min(1024, Number(normalized.cacheSize || 64))) * 1024 * 1024,
+    UseDisk: Boolean(String(normalized.cacheDir || '').trim()),
+    TorrentsSavePath: String(normalized.cacheDir || '').trim(),
+  };
+};
+const applyTorrServerRuntimeSettings = async (settings = {}) => {
+  const normalized = normalizeTorrServerSettings(settings, app.getPath('userData'));
+  const status = await getTorrServerStatus(normalized);
+  if (!status.running) {
+    return { ok: false, skipped: 'not-running' };
+  }
+  const current = await axios.post(`${status.baseUrl}/settings`, { action: 'get' }, {
+    timeout: 4000,
+    headers: { 'Content-Type': 'application/json' },
+    validateStatus: () => true,
+  });
+  if (current.status < 200 || current.status >= 300 || !current.data || typeof current.data !== 'object') {
+    throw new Error('Could not read TorrServer runtime settings');
+  }
+  const nextSets = {
+    ...current.data,
+    ...buildTorrServerRuntimePatch(normalized),
+  };
+  const response = await axios.post(`${status.baseUrl}/settings`, {
+    action: 'set',
+    sets: nextSets,
+  }, {
+    timeout: 4000,
+    headers: { 'Content-Type': 'application/json' },
+    validateStatus: () => true,
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Could not apply TorrServer runtime settings (${response.status})`);
+  }
+  return { ok: true, applied: buildTorrServerRuntimePatch(normalized) };
+};
 let prowlarrProcess = null;
 let radarrProcess = null;
 let sonarrProcess = null;
@@ -1415,6 +1454,47 @@ const readNativeWindowHandle = (buffer) => {
   }
   return 0;
 };
+const HTML5_STREAM_EXTENSIONS = new Set(['.mp4', '.m4v', '.webm']);
+const VLC_STREAM_EXTENSIONS = new Set(['.mkv', '.avi', '.mov', '.ts']);
+const maskPlayerStreamUrl = (value = '') => String(value || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***');
+const getPathExtension = (value = '') => {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  try {
+    if (/^https?:\/\//i.test(input)) {
+      const parsed = new URL(input);
+      return path.extname(decodeURIComponent(parsed.pathname || '')).toLowerCase();
+    }
+  } catch {}
+  return path.extname(input).toLowerCase();
+};
+const chooseStreamPlayerBackend = ({ streamUrl = '', fileName = '', title = '', contentType = '' } = {}) => {
+  const candidates = [fileName, streamUrl, title];
+  const ext = candidates.map((value) => getPathExtension(value)).find(Boolean) || '';
+  const normalizedType = String(contentType || '').trim().toLowerCase();
+  let backend = 'vlc';
+  let reason = 'unsupported-extension';
+  if (HTML5_STREAM_EXTENSIONS.has(ext)) {
+    backend = 'html5';
+    reason = 'supported-extension';
+  } else if (!ext && /video\/(mp4|webm)\b/.test(normalizedType)) {
+    backend = 'html5';
+    reason = 'supported-content-type';
+  } else if (!ext && /\b(mp4|m4v|webm)\b/.test(String(title || '').toLowerCase())) {
+    backend = 'html5';
+    reason = 'supported-title';
+  } else if (VLC_STREAM_EXTENSIONS.has(ext)) {
+    backend = 'vlc';
+    reason = 'unsupported-extension';
+  } else if (ext) {
+    backend = 'vlc';
+    reason = 'unsupported-extension';
+  } else if (normalizedType) {
+    backend = 'vlc';
+    reason = 'unsupported-content-type';
+  }
+  return { backend, reason, ext };
+};
 const notifyNativePlayerStopped = () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
@@ -1432,6 +1512,46 @@ const notifyNativePlayerState = (payload = {}) => {
   try {
     mainWindow.webContents.send('native-player:state', payload);
   } catch {}
+};
+const notifyHtml5StreamStart = (payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('native-player/open-html5-stream', payload);
+  } catch {}
+};
+const buildStreamMediaContext = (payload = {}, playerTitle = 'CineSoft Stream') => ({
+  fullPath: '',
+  title: playerTitle,
+  tmdbType: String(payload?.mediaInfo?.type || payload?.item?.media_type || '').trim() || (payload?.item?.title ? 'movie' : 'tv'),
+  tmdbId: Number(payload?.mediaInfo?.tmdbId || payload?.item?.id || 0) || null,
+  imdbId: String(payload?.mediaInfo?.imdbId || '').trim(),
+  season: Math.max(0, Number(payload?.mediaInfo?.season || 0) || 0),
+  episode: Math.max(0, Number(payload?.mediaInfo?.episode || 0) || 0),
+});
+const launchEmbeddedVlcStream = async ({
+  streamUrl = '',
+  playerTitle = 'CineSoft Stream',
+  torrentStatus = null,
+  mediaContext = buildStreamMediaContext(),
+  parentHwnd = 0,
+} = {}) => {
+  notifyNativePlayerStarted({
+    title: playerTitle,
+    streamUrl,
+    backend: 'vlc',
+    torrentStatus,
+    mediaContext,
+  });
+  return playWithVlc({
+    url: streamUrl,
+    title: playerTitle,
+    embedded: true,
+    parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
+    insetLeft: 0,
+    insetRight: 0,
+    insetTop: NATIVE_PLAYER_TOPBAR_HEIGHT,
+    insetBottom: NATIVE_PLAYER_CONTROLS_HEIGHT,
+  });
 };
 setVlcExitHandler(async () => {
   notifyNativePlayerStopped();
@@ -3454,7 +3574,13 @@ ipcMain.handle('torrserver:get-settings', async () => {
 ipcMain.handle('torrserver:save-settings', async (event, settings = {}) => {
   const normalized = normalizeTorrServerSettings(settings, app.getPath('userData'));
   store.set('torrserver', normalized);
-  return { ok: true, settings: normalized };
+  let runtime = { ok: false, skipped: 'not-running' };
+  try {
+    runtime = await applyTorrServerRuntimeSettings(normalized);
+  } catch (error) {
+    runtime = { ok: false, error: error.message };
+  }
+  return { ok: true, settings: normalized, runtime };
 });
 
 ipcMain.handle('torrserver:status', async () => {
@@ -3465,7 +3591,13 @@ ipcMain.handle('torrserver:start', async (event, settings = {}) => {
   const merged = normalizeTorrServerSettings({ ...getTorrServerConfig(), ...(settings || {}) }, app.getPath('userData'));
   const result = await startTorrServer(merged);
   store.set('torrserver', merged);
-  return result;
+  let runtime = { ok: false, skipped: 'not-running' };
+  try {
+    runtime = await applyTorrServerRuntimeSettings(merged);
+  } catch (error) {
+    runtime = { ok: false, error: error.message };
+  }
+  return { ...result, runtime };
 });
 
 ipcMain.handle('torrserver:stop', async () => {
@@ -3521,6 +3653,19 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
   const torrServerSettings = getTorrServerConfig();
   const result = await startTorrServerStream(payload || {}, torrServerSettings);
   const playerTitle = payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream';
+  const mediaContext = buildStreamMediaContext(payload, playerTitle);
+  const backendSelection = chooseStreamPlayerBackend({
+    streamUrl: result?.streamUrl,
+    fileName: result?.fileName || result?.filename || payload?.result?.fileName || payload?.source?.fileName || '',
+    title: payload?.source?.title || payload?.selectedSource?.title || payload?.title || '',
+    contentType: result?.contentType || '',
+  });
+  console.log('[StreamPlayer:BackendSelect]', {
+    backend: backendSelection.backend,
+    reason: backendSelection.reason,
+    ext: backendSelection.ext || '',
+    streamUrl: maskPlayerStreamUrl(result?.streamUrl || ''),
+  });
   if (!mainWindow || mainWindow.isDestroyed()) {
     throw new Error('Main window is not available for native player');
   }
@@ -3528,49 +3673,95 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
   if (DEBUG_TORRSERVER_STREAM) {
     console.log('[VlcPlayerWindow:Handle]', { parentHwnd, title: playerTitle, window: 'main' });
   }
-  notifyNativePlayerStarted({
-    title: playerTitle,
-    streamUrl: result.streamUrl,
-    torrentStatus: result.torrentStatus || null,
-    mediaContext: {
-      fullPath: '',
+  activePlaybackKind = 'torrserver-stream';
+  closeManagedTorrServerWhenPlayerExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
+  if (backendSelection.backend === 'html5') {
+    const html5Payload = {
       title: playerTitle,
-      tmdbType: String(payload?.mediaInfo?.type || payload?.item?.media_type || '').trim() || (payload?.item?.title ? 'movie' : 'tv'),
-      tmdbId: Number(payload?.mediaInfo?.tmdbId || payload?.item?.id || 0) || null,
-      imdbId: String(payload?.mediaInfo?.imdbId || '').trim(),
-      season: Math.max(0, Number(payload?.mediaInfo?.season || 0) || 0),
-      episode: Math.max(0, Number(payload?.mediaInfo?.episode || 0) || 0),
-    },
-  });
+      streamUrl: result.streamUrl,
+      backend: 'html5',
+      backendReason: backendSelection.reason,
+      backendExt: backendSelection.ext || '',
+      torrentStatus: result.torrentStatus || null,
+      mediaContext,
+      contentType: String(result?.contentType || ''),
+    };
+    notifyNativePlayerStarted(html5Payload);
+    notifyHtml5StreamStart(html5Payload);
+    console.log('[Html5Player:Start]', {
+      title: playerTitle,
+      streamUrl: maskPlayerStreamUrl(result?.streamUrl || ''),
+      ext: backendSelection.ext || '',
+      reason: backendSelection.reason,
+    });
+    return {
+      ...result,
+      backend: 'html5',
+      backendReason: backendSelection.reason,
+      backendExt: backendSelection.ext || '',
+      player: null,
+    };
+  }
   if (DEBUG_TORRSERVER_STREAM) {
     console.log('[TorrServerPlayer:LaunchVlc]', {
-      url: String(result?.streamUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
+      url: maskPlayerStreamUrl(result?.streamUrl || ''),
       title: playerTitle,
       parentHwnd,
     });
   }
   let player;
   try {
-    player = await playWithVlc({
-      url: result.streamUrl,
-      title: playerTitle,
-      embedded: true,
-      parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
-      insetLeft: 0,
-      insetRight: 0,
-      insetTop: NATIVE_PLAYER_TOPBAR_HEIGHT,
-      insetBottom: NATIVE_PLAYER_CONTROLS_HEIGHT,
+    player = await launchEmbeddedVlcStream({
+      streamUrl: result.streamUrl,
+      playerTitle,
+      torrentStatus: result.torrentStatus || null,
+      mediaContext,
+      parentHwnd,
     });
   } catch (error) {
     notifyNativePlayerStopped();
     throw error;
   }
-  activePlaybackKind = 'torrserver-stream';
-  closeManagedTorrServerWhenPlayerExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
   return {
     ...result,
+    backend: 'vlc',
+    backendReason: backendSelection.reason,
+    backendExt: backendSelection.ext || '',
     player,
   };
+});
+
+ipcMain.handle('torrserver:fallback-to-vlc-stream', async (_event, payload = {}) => {
+  const streamUrl = String(payload?.streamUrl || '').trim();
+  const playerTitle = String(payload?.title || 'CineSoft Stream').trim() || 'CineSoft Stream';
+  if (!streamUrl) {
+    return { ok: false, error: 'Stream URL is required for VLC fallback' };
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { ok: false, error: 'Main window is not available for native player' };
+  }
+  const parentHwnd = readNativeWindowHandle(mainWindow.getNativeWindowHandle());
+  const mediaContext = payload?.mediaContext && typeof payload.mediaContext === 'object'
+    ? payload.mediaContext
+    : buildStreamMediaContext({}, playerTitle);
+  try {
+    console.log('[StreamPlayer:FallbackToVlc]', {
+      title: playerTitle,
+      streamUrl: maskPlayerStreamUrl(streamUrl),
+    });
+    const player = await launchEmbeddedVlcStream({
+      streamUrl,
+      playerTitle,
+      torrentStatus: payload?.torrentStatus || null,
+      mediaContext,
+      parentHwnd,
+    });
+    activePlaybackKind = 'torrserver-stream';
+    return { ok: true, player: 'vlc', backend: 'vlc', ...player };
+  } catch (error) {
+    notifyNativePlayerStopped();
+    return { ok: false, error: error.message };
+  }
 });
 
 ipcMain.handle('player:stop', async () => {
@@ -4743,6 +4934,20 @@ const sanitizeSubtitleList = (subtitles = [], baseUrl = '', provider = '') => {
     .filter(Boolean);
 };
 
+const normalizeHtml5SubtitleContent = (subtitleText = '', extension = '') => {
+  const ext = String(extension || '').trim().toLowerCase();
+  const raw = String(subtitleText || '').replace(/^\uFEFF/, '');
+  if (ext === '.vtt') {
+    return raw.startsWith('WEBVTT') ? raw : `WEBVTT\n\n${raw}`;
+  }
+  if (ext !== '.srt') {
+    throw new Error('HTML5 subtitle player supports only VTT or SRT downloads');
+  }
+  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const converted = normalized.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+  return `WEBVTT\n\n${converted}`;
+};
+
 const isPrivateOrLocalHost = (hostname = '') => {
   const host = String(hostname || '').trim().toLowerCase();
   if (!host) return true;
@@ -4953,6 +5158,28 @@ ipcMain.handle('player-subtitles-download', async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle('player-subtitles-html5-track', async (_event, payload = {}) => {
+  try {
+    const subtitlePath = String(payload.path || '').trim();
+    if (!subtitlePath || !fs.existsSync(subtitlePath)) {
+      return { ok: false, error: 'Subtitle file not found' };
+    }
+    const extension = path.extname(subtitlePath).toLowerCase();
+    const text = fs.readFileSync(subtitlePath, 'utf8');
+    return {
+      ok: true,
+      text: normalizeHtml5SubtitleContent(text, extension),
+      kind: 'subtitles',
+      extension,
+      language: String(payload.language || '').trim(),
+      label: String(payload.label || path.basename(subtitlePath)).trim() || path.basename(subtitlePath),
+      mimeType: 'text/vtt',
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('logs-get', async () => ({ ok: true, logs: appLogs }));
 ipcMain.handle('logs-clear', async () => {
   appLogs.length = 0;
@@ -5023,6 +5250,7 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     const metadata = getLibraryMetadataRecord(filePath);
     notifyNativePlayerStarted({
       title,
+      backend: 'vlc',
       fullscreen: false,
       torrentStatus: null,
       mediaContext: {

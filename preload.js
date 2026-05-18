@@ -140,6 +140,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('native-player:state', handler);
     return () => ipcRenderer.removeListener('native-player:state', handler);
   },
+  onHtml5StreamStart: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('native-player/open-html5-stream', handler);
+    return () => ipcRenderer.removeListener('native-player/open-html5-stream', handler);
+  },
+  fallbackToVlcStream: (payload) => ipcRenderer.invoke('torrserver:fallback-to-vlc-stream', payload),
   scanLibrary: () => ipcRenderer.invoke('library-scan'),
   openLibraryVideo: (payload) => ipcRenderer.invoke('open-library-video', payload),
   openLibraryFolder: (payload) => ipcRenderer.invoke('open-library-folder', payload),
@@ -147,6 +154,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadLibrarySubtitle: (payload) => ipcRenderer.invoke('library-subtitles-download', payload),
   searchPlayerSubtitles: (payload) => ipcRenderer.invoke('player-subtitles-search', payload),
   downloadPlayerSubtitle: (payload) => ipcRenderer.invoke('player-subtitles-download', payload),
+  getHtml5SubtitleTrack: (payload) => ipcRenderer.invoke('player-subtitles-html5-track', payload),
   getLibraryMetadata: (filePaths) => ipcRenderer.invoke('library-metadata-get', filePaths),
   upsertLibraryMetadata: (payload) => ipcRenderer.invoke('library-metadata-upsert', payload),
   validateTorrentCandidate: (payload) => ipcRenderer.invoke('torrent-validate-candidate', payload),

@@ -576,6 +576,10 @@ const startTorrServerStream = async (payload = {}, settings = {}) => {
     streamUrl: maskSensitiveUrl(finalStreamUrl),
     baseUrl: maskSensitiveUrl(status.baseUrl),
   });
+  let resolvedFileName = '';
+  try {
+    resolvedFileName = decodeURIComponent(path.basename(new URL(finalStreamUrl).pathname || '') || '');
+  } catch {}
   const infoHash = String(
     payload?.infoHash
     || payload?.source?.infoHash
@@ -596,6 +600,8 @@ const startTorrServerStream = async (payload = {}, settings = {}) => {
   return {
     engine: 'torrserver',
     streamUrl: finalStreamUrl,
+    fileName: resolvedFileName,
+    contentType: String(m3uResolve?.contentType || ''),
     playlistUrl: '',
     m3uUrl,
     directStreamUrl: '',

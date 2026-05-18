@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -55,7 +55,11 @@ const APP_TOAST_EVENT = 'cinesoft:toast';
 let appToastId = 0;
 const DEFAULT_NATIVE_PLAYER_STATE = {
   active: false,
+  backend: 'vlc',
+  backendReason: '',
+  backendExt: '',
   title: '',
+  streamUrl: '',
   torrentStatus: null,
   mediaContext: {
     fullPath: '',
@@ -83,18 +87,22 @@ const DEFAULT_NATIVE_PLAYER_STATE = {
 
 const NATIVE_PLAYER_TOPBAR_HEIGHT = 0;
 const NATIVE_PLAYER_CONTROLS_HEIGHT = 84;
-const PLAYER_SUBTITLE_PROVIDER_OPTIONS = [
-  { key: 'opensubtitles-v3', label: 'OpenSubtitles' },
-  { key: 'turkcealtyaziorg-stremio-addon', label: 'turkcealtyazi.org' },
-];
-
-const normalizePlayerSubtitleProvider = (value = '') => (
-  String(value || '').trim().toLowerCase() === 'turkcealtyaziorg-stremio-addon'
-    ? 'turkcealtyaziorg-stremio-addon'
-    : 'opensubtitles-v3'
-);
+const PLAYER_SUBTITLE_PROVIDER = 'opensubtitles-v3';
 
 const normalizePlayerSubtitleLang = (value = '') => String(value || '').trim().toUpperCase();
+const buildNativePlayerState = (payload = {}) => ({
+  ...DEFAULT_NATIVE_PLAYER_STATE,
+  active: true,
+  backend: String(payload.backend || 'vlc').trim().toLowerCase() === 'html5' ? 'html5' : 'vlc',
+  backendReason: String(payload.backendReason || '').trim(),
+  backendExt: String(payload.backendExt || '').trim(),
+  title: String(payload.title || 'CineSoft Stream'),
+  streamUrl: String(payload.streamUrl || ''),
+  torrentStatus: payload.torrentStatus || null,
+  mediaContext: payload.mediaContext || DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
+  fullscreen: payload.fullscreen === true,
+  startedAt: Date.now(),
+});
 
 const formatPlayerSubtitleLang = (value = '', isTr = false) => {
   const code = normalizePlayerSubtitleLang(value);
@@ -344,27 +352,14 @@ const App = () => {
   useEffect(() => {
     const onPlayerStarted = (event) => {
       const detail = event?.detail || {};
-      setNativePlayer({
-        ...DEFAULT_NATIVE_PLAYER_STATE,
-        active: true,
-        title: String(detail.title || 'CineSoft Stream'),
-        torrentStatus: detail.torrentStatus || null,
-        mediaContext: detail.mediaContext || DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
-        fullscreen: detail.fullscreen === true,
-        startedAt: Date.now(),
-      });
+      setNativePlayer(buildNativePlayerState(detail));
     };
     window.addEventListener('cinesoft:native-player-started', onPlayerStarted);
     const unsubscribeStarted = window.electronAPI?.onNativePlayerStarted?.((payload = {}) => {
-      setNativePlayer({
-        ...DEFAULT_NATIVE_PLAYER_STATE,
-        active: true,
-        title: String(payload.title || 'CineSoft Stream'),
-        torrentStatus: payload.torrentStatus || null,
-        mediaContext: payload.mediaContext || DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
-        fullscreen: payload.fullscreen === true,
-        startedAt: Date.now(),
-      });
+      setNativePlayer(buildNativePlayerState(payload));
+    });
+    const unsubscribeHtml5Started = window.electronAPI?.onHtml5StreamStart?.((payload = {}) => {
+      setNativePlayer(buildNativePlayerState(payload));
     });
     const unsubscribeState = window.electronAPI?.onNativePlayerState?.((payload = {}) => {
       setNativePlayer((prev) => ({
@@ -390,6 +385,7 @@ const App = () => {
     return () => {
       window.removeEventListener('cinesoft:native-player-started', onPlayerStarted);
       if (typeof unsubscribeStarted === 'function') unsubscribeStarted();
+      if (typeof unsubscribeHtml5Started === 'function') unsubscribeHtml5Started();
       if (typeof unsubscribeState === 'function') unsubscribeState();
       if (typeof unsubscribeStopped === 'function') unsubscribeStopped();
     };
@@ -443,7 +439,7 @@ const App = () => {
     <Router>
       <div className={`app-container ${nativePlayer.active ? 'app-container-player-mode' : ''}`}>
         {nativePlayer.active ? (
-          <NativePlayerShell title={nativePlayer.title} torrentStatus={nativePlayer.torrentStatus} mediaContext={nativePlayer.mediaContext} playback={nativePlayer.playback} fullscreen={nativePlayer.fullscreen} startedAt={nativePlayer.startedAt} language={settings.language} onClose={closeNativePlayer} subtitles={nativePlayer.subtitles} />
+          <NativePlayerShell backend={nativePlayer.backend} streamUrl={nativePlayer.streamUrl} title={nativePlayer.title} torrentStatus={nativePlayer.torrentStatus} mediaContext={nativePlayer.mediaContext} playback={nativePlayer.playback} fullscreen={nativePlayer.fullscreen} startedAt={nativePlayer.startedAt} language={settings.language} onClose={closeNativePlayer} subtitles={nativePlayer.subtitles} />
         ) : (
           <>
             <Sidebar settings={settings} />
@@ -496,6 +492,8 @@ const formatPlaybackTime = (ms) => {
 };
 
 const NativePlayerShell = ({
+  backend = 'vlc',
+  streamUrl = '',
   title = 'CineSoft Stream',
   torrentStatus = null,
   mediaContext = DEFAULT_NATIVE_PLAYER_STATE.mediaContext,
@@ -506,10 +504,23 @@ const NativePlayerShell = ({
   onClose,
   subtitles = DEFAULT_NATIVE_PLAYER_STATE.subtitles,
 }) => {
+  const videoRef = useRef(null);
+  const html5FallbackRef = useRef(false);
   const hash = String(torrentStatus?.infoHash || '').trim();
   const hashPreview = hash ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : '-';
-  const playbackLength = Math.max(0, Number(playback?.length) || 0);
-  const playbackTime = Math.max(0, Number(playback?.time) || 0);
+  const [html5Playback, setHtml5Playback] = useState({
+    time: 0,
+    length: 0,
+    volume: 80,
+    playing: false,
+  });
+  const [html5Tracks, setHtml5Tracks] = useState([]);
+  const [html5ActiveSubtitleKey, setHtml5ActiveSubtitleKey] = useState('track:off');
+  const [html5FallbackMessage, setHtml5FallbackMessage] = useState('');
+  const [html5DownloadedTracks, setHtml5DownloadedTracks] = useState([]);
+  const effectivePlayback = backend === 'html5' ? html5Playback : playback;
+  const playbackLength = Math.max(0, Number(effectivePlayback?.length) || 0);
+  const playbackTime = Math.max(0, Number(effectivePlayback?.time) || 0);
   const playbackProgressValue = playbackLength > 0
     ? Math.max(0, Math.min(100, Math.round((playbackTime / Math.max(1, playbackLength)) * 100)))
     : null;
@@ -533,15 +544,19 @@ const NativePlayerShell = ({
   const [downloadSubtitleSavingId, setDownloadSubtitleSavingId] = useState('');
   const [downloadSubtitleError, setDownloadSubtitleError] = useState('');
   const [downloadSubtitleSuccess, setDownloadSubtitleSuccess] = useState('');
-  const [downloadSubtitleLangFilter, setDownloadSubtitleLangFilter] = useState('ALL');
-  const [downloadSubtitleProvider, setDownloadSubtitleProvider] = useState('opensubtitles-v3');
-  const [downloadSubtitleProviderOffline, setDownloadSubtitleProviderOffline] = useState(false);
-  const [downloadSearchRequested, setDownloadSearchRequested] = useState(false);
-  const hasPlayback = Number(playback?.length) > 0 || Number(playback?.time) > 0 || playback?.playing === true;
-  const subtitleTracks = Array.isArray(subtitles?.tracks) ? subtitles.tracks : [];
+  const [downloadSubtitleLangFilter, setDownloadSubtitleLangFilter] = useState(getPreferredPlayerSubtitleLang(language));
+  const [downloadSearchNonce, setDownloadSearchNonce] = useState(0);
+  const hasPlayback = Number(effectivePlayback?.length) > 0 || Number(effectivePlayback?.time) > 0 || effectivePlayback?.playing === true;
+  const subtitleTracks = backend === 'html5'
+    ? html5Tracks
+    : (Array.isArray(subtitles?.tracks) ? subtitles.tracks : []);
   const activeSubtitleKey = String(subtitles?.activeKey || 'spu:-1');
   const isTr = language === 'tr';
   const subtitleOptions = useMemo(() => {
+    if (backend === 'html5') {
+      const offTrack = { key: 'track:off', id: -1, label: isTr ? 'Off' : 'Off', source: 'builtin' };
+      return [offTrack, ...subtitleTracks];
+    }
     const offTrack = subtitleTracks.find((track) => (track?.key || `spu:${track?.id}`) === 'spu:-1')
       || { key: 'spu:-1', id: -1, label: isTr ? 'Off' : 'Off', source: 'builtin' };
     const playableTracks = subtitleTracks.filter((track) => (track?.key || `spu:${track?.id}`) !== 'spu:-1');
@@ -556,7 +571,7 @@ const NativePlayerShell = ({
     }
     options.push(...playableTracks);
     return options;
-  }, [isTr, subtitleTracks]);
+  }, [backend, isTr, subtitleTracks]);
   const canSearchDownloadSubtitles = Boolean(
     mediaContext?.fullPath
     || mediaContext?.tmdbId
@@ -564,9 +579,12 @@ const NativePlayerShell = ({
     || mediaContext?.title
   );
   const downloadSubtitleLanguages = useMemo(() => {
-    const langs = Array.from(new Set(downloadSubtitleList.map((item) => normalizePlayerSubtitleLang(item?.lang)).filter(Boolean)));
+    const langs = Array.from(new Set([
+      getPreferredPlayerSubtitleLang(language),
+      ...downloadSubtitleList.map((item) => normalizePlayerSubtitleLang(item?.lang)).filter(Boolean),
+    ]));
     return langs.sort((a, b) => a.localeCompare(b));
-  }, [downloadSubtitleList]);
+  }, [downloadSubtitleList, language]);
   const filteredDownloadSubtitleList = useMemo(() => {
     if (downloadSubtitleLangFilter === 'ALL') return downloadSubtitleList;
     return downloadSubtitleList.filter((item) => normalizePlayerSubtitleLang(item?.lang) === downloadSubtitleLangFilter);
@@ -585,21 +603,22 @@ const NativePlayerShell = ({
 
   useEffect(() => {
     if (!isSeeking) {
-      const length = Math.max(0, Number(playback?.length) || 0);
-      const time = Math.max(0, Number(playback?.time) || 0);
+      const length = Math.max(0, Number(effectivePlayback?.length) || 0);
+      const time = Math.max(0, Number(effectivePlayback?.time) || 0);
       setSeekValue(length > 0 ? Math.round(Math.min(1000, (time / Math.max(1, length)) * 1000)) : 0);
     }
-  }, [isSeeking, playback?.length, playback?.time]);
+  }, [effectivePlayback?.length, effectivePlayback?.time, isSeeking]);
 
   useEffect(() => {
-    setVolumeValue(Math.max(0, Math.min(100, Number(playback?.volume) || 0)));
-  }, [playback?.volume]);
+    setVolumeValue(Math.max(0, Math.min(100, Number(effectivePlayback?.volume) || 0)));
+  }, [effectivePlayback?.volume]);
 
   useEffect(() => {
     setIsFullscreen(fullscreen === true);
   }, [fullscreen]);
 
   useEffect(() => {
+    if (backend !== 'vlc') return undefined;
     const rightInset = subtitleMenuOpen
       ? (isFullscreen ? 248 : 266)
       : 0;
@@ -610,7 +629,8 @@ const NativePlayerShell = ({
       command: 'set-insets',
       value: `${leftInset} ${topInset} ${rightInset} ${bottomInset}`,
     });
-  }, [isFullscreen, subtitleMenuOpen]);
+    return undefined;
+  }, [backend, isFullscreen, subtitleMenuOpen]);
 
   useEffect(() => {
     if (!subtitleMenuOpen) {
@@ -643,11 +663,10 @@ const NativePlayerShell = ({
     setDownloadSubtitleError('');
     setDownloadSubtitleSuccess('');
     setDownloadSubtitleSavingId('');
-    setDownloadSubtitleProviderOffline(false);
-    setDownloadSubtitleLangFilter('ALL');
-    setDownloadSubtitleProvider('opensubtitles-v3');
-    setDownloadSearchRequested(false);
+    setDownloadSubtitleLangFilter(getPreferredPlayerSubtitleLang(language));
+    setDownloadSearchNonce(0);
   }, [
+    language,
     subtitleMenuOpen,
     mediaContext?.fullPath,
     mediaContext?.imdbId,
@@ -659,7 +678,7 @@ const NativePlayerShell = ({
   ]);
 
   useEffect(() => {
-    if (!subtitleMenuOpen || !downloadSectionOpen || !downloadSearchRequested || !canSearchDownloadSubtitles || !window.electronAPI?.searchPlayerSubtitles) {
+    if (!subtitleMenuOpen || !downloadSectionOpen || downloadSearchNonce <= 0 || !canSearchDownloadSubtitles || !window.electronAPI?.searchPlayerSubtitles) {
       return undefined;
     }
 
@@ -668,7 +687,6 @@ const NativePlayerShell = ({
       setDownloadSubtitleLoading(true);
       setDownloadSubtitleError('');
       setDownloadSubtitleSuccess('');
-      setDownloadSubtitleProviderOffline(false);
       try {
         const result = await window.electronAPI.searchPlayerSubtitles({
           fullPath: mediaContext?.fullPath || '',
@@ -678,7 +696,7 @@ const NativePlayerShell = ({
           imdbId: mediaContext?.imdbId || '',
           season: Number(mediaContext?.season || 0) || 0,
           episode: Number(mediaContext?.episode || 0) || 0,
-          subtitleProvider: normalizePlayerSubtitleProvider(downloadSubtitleProvider),
+          subtitleProvider: PLAYER_SUBTITLE_PROVIDER,
         });
         if (cancelled) return;
         if (!result?.ok) {
@@ -686,7 +704,6 @@ const NativePlayerShell = ({
         }
         const nextList = Array.isArray(result.subtitles) ? result.subtitles : [];
         setDownloadSubtitleList(nextList);
-        setDownloadSubtitleProviderOffline(Boolean(result?.debug?.providerOffline));
         const preferred = getPreferredPlayerSubtitleLang(language);
         const hasPreferred = nextList.some((item) => normalizePlayerSubtitleLang(item?.lang) === preferred);
         setDownloadSubtitleLangFilter(hasPreferred ? preferred : 'ALL');
@@ -711,9 +728,8 @@ const NativePlayerShell = ({
     };
   }, [
     canSearchDownloadSubtitles,
-    downloadSearchRequested,
+    downloadSearchNonce,
     downloadSectionOpen,
-    downloadSubtitleProvider,
     isTr,
     language,
     mediaContext?.episode,
@@ -727,8 +743,89 @@ const NativePlayerShell = ({
     title,
   ]);
 
+  const refreshHtml5SubtitleTracks = () => {
+    const video = videoRef.current;
+    if (!video?.textTracks) {
+      setHtml5Tracks([]);
+      setHtml5ActiveSubtitleKey('track:off');
+      return;
+    }
+    const tracks = Array.from(video.textTracks).map((track, index) => ({
+      key: `track:${index}`,
+      id: index,
+      label: track.label || track.language || `${isTr ? 'Altyazi' : 'Subtitle'} ${index + 1}`,
+      language: track.language || '',
+      source: html5DownloadedTracks.some((item) => item.id === `track-node:${index}`) ? 'downloaded' : 'embedded',
+    }));
+    const activeTrack = Array.from(video.textTracks).findIndex((track) => track.mode === 'showing');
+    setHtml5Tracks(tracks);
+    setHtml5ActiveSubtitleKey(activeTrack >= 0 ? `track:${activeTrack}` : 'track:off');
+  };
+
+  const fallbackHtml5ToVlc = async (reason = 'html5-error') => {
+    if (backend !== 'html5' || html5FallbackRef.current) return;
+    html5FallbackRef.current = true;
+    const message = isTr ? 'VLC playera geciliyor...' : 'Switching to VLC player...';
+    setHtml5FallbackMessage(message);
+    try {
+      console.error('[Html5Player:Error]', { reason, streamUrl, title });
+    } catch {}
+    const video = videoRef.current;
+    if (video) {
+      try { video.pause(); } catch {}
+    }
+    await window.electronAPI?.fallbackToVlcStream?.({
+      streamUrl,
+      title,
+      torrentStatus,
+      mediaContext,
+      reason,
+    });
+  };
+
+  useEffect(() => {
+    if (backend !== 'html5') return undefined;
+    html5FallbackRef.current = false;
+    setHtml5FallbackMessage('');
+    setHtml5Playback({
+      time: 0,
+      length: 0,
+      volume: 80,
+      playing: false,
+    });
+    setHtml5DownloadedTracks((prev) => {
+      prev.forEach((item) => {
+        if (item?.src) URL.revokeObjectURL(item.src);
+      });
+      return [];
+    });
+    setHtml5Tracks([]);
+    setHtml5ActiveSubtitleKey('track:off');
+    return undefined;
+  }, [backend, streamUrl]);
+
+  useEffect(() => {
+    if (backend !== 'html5') return undefined;
+    const timer = window.setTimeout(() => {
+      refreshHtml5SubtitleTracks();
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [backend, html5DownloadedTracks, isTr]);
+
   const commitSeek = async () => {
     setIsSeeking(false);
+    if (backend === 'html5') {
+      const video = videoRef.current;
+      if (!video) return;
+      const durationSeconds = Number(video.duration || 0);
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return;
+      try {
+        video.currentTime = (seekValue / 1000) * durationSeconds;
+      } catch {
+        await fallbackHtml5ToVlc('seek-failed');
+      }
+      return;
+    }
     await window.electronAPI?.controlNativePlayer?.({
       command: 'seek-percent',
       value: seekValue,
@@ -736,12 +833,32 @@ const NativePlayerShell = ({
   };
 
   const togglePlayback = async () => {
+    if (backend === 'html5') {
+      const video = videoRef.current;
+      if (!video) return;
+      try {
+        if (video.paused) await video.play();
+        else video.pause();
+      } catch {
+        await fallbackHtml5ToVlc('playback-toggle-failed');
+      }
+      return;
+    }
     await window.electronAPI?.controlNativePlayer?.({ command: 'toggle-play' });
   };
 
   const changeVolume = async (nextVolume) => {
     const value = Math.max(0, Math.min(100, Number(nextVolume) || 0));
     setVolumeValue(value);
+    if (backend === 'html5') {
+      const video = videoRef.current;
+      if (video) {
+        video.volume = value / 100;
+        video.muted = value === 0;
+      }
+      setHtml5Playback((prev) => ({ ...prev, volume: value }));
+      return;
+    }
     await window.electronAPI?.controlNativePlayer?.({
       command: 'set-volume',
       value,
@@ -756,6 +873,16 @@ const NativePlayerShell = ({
   };
 
   const selectSubtitle = async (subtitleKey) => {
+    if (backend === 'html5') {
+      const video = videoRef.current;
+      if (!video?.textTracks) return;
+      Array.from(video.textTracks).forEach((track, index) => {
+        track.mode = subtitleKey === `track:${index}` ? 'showing' : 'disabled';
+      });
+      setHtml5ActiveSubtitleKey(subtitleKey === 'track:off' ? 'track:off' : subtitleKey);
+      setSubtitleMenuOpen(false);
+      return;
+    }
     await window.electronAPI?.controlNativePlayer?.({
       command: 'set-subtitle',
       value: subtitleKey,
@@ -775,10 +902,48 @@ const NativePlayerShell = ({
         title: mediaContext?.title || title,
         outputBaseName: mediaContext?.title || title,
         subtitleUrl: subtitle.url,
-        subtitleProvider: subtitle.provider || downloadSubtitleProvider,
+        subtitleProvider: subtitle.provider || PLAYER_SUBTITLE_PROVIDER,
       });
       if (!result?.ok || !result?.path) {
         throw new Error(result?.error || (isTr ? 'Altyazi indirilemedi' : 'Subtitle download failed'));
+      }
+      if (backend === 'html5') {
+        const html5Track = await window.electronAPI?.getHtml5SubtitleTrack?.({
+          path: result.path,
+          language: subtitle.lang || '',
+          label: subtitle.release || subtitle.label || subtitle.providerLabel || subtitle.provider || 'Subtitle',
+        });
+        if (!html5Track?.ok || !html5Track?.text) {
+          throw new Error(html5Track?.error || (isTr ? 'HTML5 altyazi hazirlanamadi' : 'HTML5 subtitle could not be prepared'));
+        }
+        const blob = new Blob([html5Track.text], { type: html5Track.mimeType || 'text/vtt' });
+        const src = URL.createObjectURL(blob);
+        const expectedIndex = Math.max(0, Number(videoRef.current?.textTracks?.length || 0));
+        setHtml5DownloadedTracks((prev) => {
+          prev.forEach((item) => {
+            if (item?.src) URL.revokeObjectURL(item.src);
+          });
+          return [{
+            id: `track-node:${expectedIndex}`,
+            src,
+            kind: html5Track.kind || 'subtitles',
+            srcLang: normalizePlayerSubtitleLang(html5Track.language || subtitle.lang || '').toLowerCase() || 'en',
+            label: html5Track.label || subtitle.release || subtitle.label || 'Subtitle',
+            default: true,
+          }];
+        });
+        window.setTimeout(() => {
+          const video = videoRef.current;
+          if (!video?.textTracks) return;
+          const trackIndex = Math.max(0, video.textTracks.length - 1);
+          Array.from(video.textTracks).forEach((track, index) => {
+            track.mode = index === trackIndex ? 'showing' : 'disabled';
+          });
+          setHtml5ActiveSubtitleKey(`track:${trackIndex}`);
+          refreshHtml5SubtitleTracks();
+        }, 120);
+        setDownloadSubtitleSuccess(isTr ? 'Altyazi indirildi ve HTML5 playera eklendi' : 'Subtitle downloaded and added to the HTML5 player');
+        return;
       }
       await window.electronAPI?.controlNativePlayer?.({
         command: 'set-subtitle',
@@ -793,16 +958,17 @@ const NativePlayerShell = ({
   };
 
   const searchDownloadSubtitles = async () => {
+    if (downloadSubtitleLoading) return;
     setDownloadSubtitleList([]);
     setDownloadSubtitleError('');
     setDownloadSubtitleSuccess('');
-    setDownloadSubtitleProviderOffline(false);
-    setDownloadSearchRequested(true);
+    setDownloadSubtitleLangFilter(getPreferredPlayerSubtitleLang(language));
+    setDownloadSearchNonce((current) => current + 1);
   };
 
   const playbackStatusLabel = !hasPlayback
     ? (isTr ? 'Hazirlaniyor' : 'Preparing')
-    : (playback?.playing ? (isTr ? 'Streaming' : 'Streaming') : (isTr ? 'Duraklatildi' : 'Paused'));
+    : (effectivePlayback?.playing ? (isTr ? 'Streaming' : 'Streaming') : (isTr ? 'Duraklatildi' : 'Paused'));
   const progressLabel = isTr ? 'Ilerleme' : 'Progress';
   const seedLabel = isTr ? 'seed' : (seeders === 1 ? 'seed' : 'seeds');
   const peerLabel = isTr ? 'peer' : (peers === 1 ? 'peer' : 'peers');
@@ -825,11 +991,78 @@ const NativePlayerShell = ({
     <main className={`native-player-shell ${isFullscreen ? 'native-player-shell-fullscreen' : ''}`}>
       <div className="native-player-frame">
         <div className={`native-player-viewport ${subtitleMenuOpen ? 'native-player-viewport-with-subtitles' : ''}`}>
-          <section className="native-player-stage" aria-label="Native video player" />
+          <section className={`native-player-stage ${backend === 'html5' ? 'native-player-stage-html5' : ''}`} aria-label="Native video player">
+            {backend === 'html5' ? (
+              <>
+                <video
+                  ref={videoRef}
+                  className="native-player-html5-video"
+                  src={streamUrl}
+                  controls={false}
+                  autoPlay
+                  playsInline
+                  preload="auto"
+                  onLoadedMetadata={() => {
+                    const video = videoRef.current;
+                    setHtml5Playback({
+                      time: Math.max(0, Number(video?.currentTime || 0) * 1000),
+                      length: Math.max(0, Number(video?.duration || 0) * 1000),
+                      volume: Math.round(Math.max(0, Math.min(1, Number(video?.volume ?? 0.8))) * 100),
+                      playing: video ? !video.paused && !video.ended : false,
+                    });
+                    refreshHtml5SubtitleTracks();
+                  }}
+                  onLoadedData={refreshHtml5SubtitleTracks}
+                  onDurationChange={() => {
+                    const video = videoRef.current;
+                    setHtml5Playback((prev) => ({
+                      ...prev,
+                      length: Math.max(0, Number(video?.duration || 0) * 1000),
+                    }));
+                  }}
+                  onTimeUpdate={() => {
+                    const video = videoRef.current;
+                    setHtml5Playback((prev) => ({
+                      ...prev,
+                      time: Math.max(0, Number(video?.currentTime || 0) * 1000),
+                    }));
+                  }}
+                  onPlay={() => setHtml5Playback((prev) => ({ ...prev, playing: true }))}
+                  onPause={() => setHtml5Playback((prev) => ({ ...prev, playing: false }))}
+                  onVolumeChange={() => {
+                    const video = videoRef.current;
+                    setHtml5Playback((prev) => ({
+                      ...prev,
+                      volume: Math.round(Math.max(0, Math.min(1, Number(video?.muted ? 0 : (video?.volume ?? 0.8)))) * 100),
+                    }));
+                  }}
+                  onCanPlay={refreshHtml5SubtitleTracks}
+                  onError={() => fallbackHtml5ToVlc('media-error')}
+                  onStalled={() => {
+                    if (!hasPlayback) fallbackHtml5ToVlc('stalled');
+                  }}
+                >
+                  {html5DownloadedTracks.map((track) => (
+                    <track
+                      key={track.id}
+                      kind={track.kind || 'subtitles'}
+                      src={track.src}
+                      srcLang={track.srcLang}
+                      label={track.label}
+                      default={track.default === true}
+                    />
+                  ))}
+                </video>
+                {html5FallbackMessage ? (
+                  <div className="native-player-html5-fallback-banner">{html5FallbackMessage}</div>
+                ) : null}
+              </>
+            ) : null}
+          </section>
           {subtitleMenuOpen ? (
             <aside className="native-player-subtitle-panel">
               <div className="native-player-subtitle-panel-head">
-                <span>{isTr ? 'Altyazilar' : 'Subtitles'}</span>
+                <span>{backend === 'html5' ? (isTr ? 'Gomulu Altyazilar' : 'Embedded Subtitles') : (isTr ? 'Altyazilar' : 'Subtitles')}</span>
               </div>
               <div className="native-player-subtitle-panel-scroll">
                 <section className="native-player-subtitle-section">
@@ -847,26 +1080,6 @@ const NativePlayerShell = ({
                       {canSearchDownloadSubtitles ? (
                         <>
                           <div className="native-player-subtitle-toolbar">
-                            <label htmlFor="player-subtitle-provider-filter">{isTr ? 'Saglayici' : 'Provider'}</label>
-                            <select
-                              id="player-subtitle-provider-filter"
-                              className="native-player-subtitle-select"
-                              value={downloadSubtitleProvider}
-                              onChange={(event) => {
-                                setDownloadSubtitleProvider(normalizePlayerSubtitleProvider(event.target.value));
-                                setDownloadSearchRequested(false);
-                                setDownloadSubtitleList([]);
-                                setDownloadSubtitleError('');
-                                setDownloadSubtitleSuccess('');
-                              }}
-                            >
-                              {PLAYER_SUBTITLE_PROVIDER_OPTIONS.map((providerOption) => (
-                                <option key={providerOption.key} value={providerOption.key}>{providerOption.label}</option>
-                              ))}
-                            </select>
-                            {downloadSubtitleProvider === 'turkcealtyaziorg-stremio-addon' && downloadSubtitleProviderOffline ? (
-                              <span className="native-player-subtitle-provider-offline">Offline</span>
-                            ) : null}
                             <label htmlFor="player-subtitle-lang-filter">{isTr ? 'Dil' : 'Language'}</label>
                             <select
                               id="player-subtitle-lang-filter"
@@ -901,12 +1114,12 @@ const NativePlayerShell = ({
                           {!downloadSubtitleLoading && downloadSubtitleSuccess ? (
                             <p className="native-player-subtitle-feedback native-player-subtitle-feedback-success">{downloadSubtitleSuccess}</p>
                           ) : null}
-                          {!downloadSubtitleLoading && downloadSearchRequested && !downloadSubtitleError && !filteredDownloadSubtitleList.length ? (
+                          {!downloadSubtitleLoading && downloadSearchNonce > 0 && !downloadSubtitleError && !filteredDownloadSubtitleList.length ? (
                             <p className="native-player-subtitle-helper">{isTr ? 'Indirilebilir altyazi bulunamadi.' : 'No downloadable subtitles found.'}</p>
                           ) : null}
-                          {!downloadSubtitleLoading && !downloadSearchRequested ? (
+                          {!downloadSubtitleLoading && downloadSearchNonce <= 0 ? (
                             <p className="native-player-subtitle-helper">
-                              {isTr ? 'Saglayici ve dili secip "Altyazi ara" butonuna basin.' : 'Choose provider and language, then click "Search subtitles".'}
+                              {isTr ? 'Dil secip "Altyazi ara" butonuna basin.' : 'Choose a language, then click "Search subtitles".'}
                             </p>
                           ) : null}
                           {filteredDownloadSubtitleList.length ? (
@@ -948,16 +1161,23 @@ const NativePlayerShell = ({
                     onClick={() => setLocalSectionOpen((current) => !current)}
                     aria-expanded={localSectionOpen}
                   >
-                    <span>{isTr ? 'Local altyazi' : 'Local subtitles'}</span>
+                    <span>{backend === 'html5' ? (isTr ? 'Gomulu altyazi' : 'Embedded subtitles') : (isTr ? 'Local altyazi' : 'Local subtitles')}</span>
                     {localSectionOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
                   {localSectionOpen ? (
                     <div className="native-player-subtitle-section-body">
                       <div className="native-player-subtitle-panel-list">
+                        {backend === 'html5' && subtitleOptions.length <= 1 ? (
+                          <p className="native-player-subtitle-helper">
+                            {isTr ? 'Bu stream icin gomulu altyazi bulunamadi.' : 'No embedded subtitles were found for this stream.'}
+                          </p>
+                        ) : null}
                         {subtitleOptions.map((track, index) => {
                           const trackKey = track.key || `spu:${track.id}`;
                           const isDefaultOption = track.source === 'default';
-                          const isSelected = isDefaultOption ? activeSubtitleKey !== 'spu:-1' : trackKey === activeSubtitleKey;
+                          const isSelected = backend === 'html5'
+                            ? trackKey === html5ActiveSubtitleKey
+                            : (isDefaultOption ? activeSubtitleKey !== 'spu:-1' : trackKey === activeSubtitleKey);
                           return (
                             <button
                               key={`${trackKey}-${track.label}-${index}`}
@@ -983,7 +1203,7 @@ const NativePlayerShell = ({
             <div className="native-player-loading-card">
               <div className="native-player-loading-kicker">{loadingKicker}</div>
               <div className="native-player-loading-title">{title}</div>
-              <div className="native-player-loading-text">{loadingMessage}</div>
+              <div className="native-player-loading-text">{html5FallbackMessage || loadingMessage}</div>
               <div className="native-player-loading-bar">
                 <div className="native-player-loading-bar-fill" />
               </div>
@@ -995,10 +1215,10 @@ const NativePlayerShell = ({
             <button type="button" className="native-player-action native-player-action-close" onClick={onClose} aria-label={isTr ? 'Oynaticiyi kapat' : 'Close player'}>
               <X size={18} />
             </button>
-            <button type="button" className="native-player-action native-player-action-primary" onClick={togglePlayback} aria-label={playback?.playing ? 'Pause' : 'Play'}>
-              {playback?.playing ? <Pause size={20} /> : <Play size={20} />}
+            <button type="button" className="native-player-action native-player-action-primary" onClick={togglePlayback} aria-label={effectivePlayback?.playing ? 'Pause' : 'Play'}>
+              {effectivePlayback?.playing ? <Pause size={20} /> : <Play size={20} />}
             </button>
-            <div className="native-player-time">{formatPlaybackTime(playback?.time)}</div>
+            <div className="native-player-time">{formatPlaybackTime(effectivePlayback?.time)}</div>
             <div className="native-player-seek-wrap">
               <div className="native-player-progress-line">
                 <div className="native-player-progress-fill" style={{ width: `${seekValue / 10}%` }} />
@@ -1018,7 +1238,7 @@ const NativePlayerShell = ({
                 aria-label="Seek"
               />
             </div>
-            <div className="native-player-time native-player-time-end">{formatPlaybackTime(playback?.length)}</div>
+            <div className="native-player-time native-player-time-end">{formatPlaybackTime(effectivePlayback?.length)}</div>
             <div className="native-player-toolbar-divider" />
             <div className="native-player-volume-wrap">
               <Volume2 size={18} />
