@@ -8,9 +8,12 @@
     "electron": "electron .",
     "start": "concurrently --kill-others --success first \"npm run dev\" \"wait-on http://localhost:5173 && npm run electron\"",
     "test": "node --test \"src/**/*.test.mjs\"",
+    "clean:vlc-host": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path 'resources/vlc-host') { Remove-Item -LiteralPath 'resources/vlc-host' -Recurse -Force }\"",
+    "build:vlc-host": "npm run clean:vlc-host && dotnet publish tools/vlc-host/Cinesoft.VlcHost.csproj -c Release -r win-x64 --self-contained false -o resources/vlc-host",
+    "build:all": "npm run build:vlc-host && npm run build",
     "build": "vite build",
-    "build:portable": "vite build && electron-builder --win portable",
-    "build:installer": "vite build && electron-builder --win nsis"
+    "build:portable": "npm run build:all && electron-builder --win portable",
+    "build:installer": "npm run build:all && electron-builder --win nsis"
   },
   "keywords": [
     "electron",
@@ -64,7 +67,7 @@
         "to": "build/icon.ico"
       },
       {
-        "from": "tools/vlc-host/bin/Release/net8.0-windows",
+        "from": "resources/vlc-host",
         "to": "vlc-host",
         "filter": [
           "**/*"

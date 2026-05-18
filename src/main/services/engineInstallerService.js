@@ -12,18 +12,28 @@ const ENGINE_META = {
     repo: 'Prowlarr/Prowlarr',
     exeName: 'Prowlarr.exe',
     folderName: 'prowlarr',
+    assetKind: 'zip',
   },
   Radarr: {
     appName: 'Radarr',
     repo: 'Radarr/Radarr',
     exeName: 'Radarr.exe',
     folderName: 'radarr',
+    assetKind: 'zip',
   },
   Sonarr: {
     appName: 'Sonarr',
     repo: 'Sonarr/Sonarr',
     exeName: 'Sonarr.exe',
     folderName: 'sonarr',
+    assetKind: 'zip',
+  },
+  TorrServer: {
+    appName: 'TorrServer',
+    repo: 'YouROK/TorrServer',
+    exeName: 'TorrServer-windows-amd64.exe',
+    folderName: 'torrserver',
+    assetKind: 'exe',
   },
 };
 
@@ -45,6 +55,7 @@ const normalizeEngineName = (value = '') => {
   if (normalized === 'prowlarr') return 'Prowlarr';
   if (normalized === 'radarr') return 'Radarr';
   if (normalized === 'sonarr') return 'Sonarr';
+  if (normalized === 'torrserver') return 'TorrServer';
   return '';
 };
 
@@ -103,15 +114,20 @@ const recursiveFindFile = async (rootDir, fileName) => {
   return '';
 };
 
-const pickWindowsZipAsset = (assets = []) => {
+const pickWindowsAsset = (meta = {}, assets = []) => {
   const rows = Array.isArray(assets) ? assets : [];
-  const zipAssets = rows.filter((asset) => String(asset?.name || '').toLowerCase().endsWith('.zip'));
-  const primary = zipAssets.find((asset) => {
+  const wantsExe = String(meta?.assetKind || 'zip').toLowerCase() === 'exe';
+  const candidateAssets = rows.filter((asset) => {
+    const name = String(asset?.name || '').toLowerCase();
+    if (wantsExe) return name.endsWith('.exe');
+    return name.endsWith('.zip');
+  });
+  const primary = candidateAssets.find((asset) => {
     const name = String(asset?.name || '').toLowerCase();
     return /(win|windows)/i.test(name) && /(x64|amd64|win64)/i.test(name);
   });
   if (primary) return primary;
-  return zipAssets.find((asset) => /(x64|amd64)/i.test(String(asset?.name || '').toLowerCase())) || null;
+  return candidateAssets.find((asset) => /(x64|amd64)/i.test(String(asset?.name || '').toLowerCase())) || null;
 };
 
 const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}) => {
@@ -196,14 +212,12 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
     };
   };
 
-  const installLatestEngine = async (appName) => {
-    const canonical = normalizeEngineName(appName);
-    if (!canonical || !ENGINE_META[canonical]) {
-      return { ok: false, error: 'Unsupported engine name.' };
-    }
-
+  const launchInstall = (canonical) => {
     const state = getState(canonical);
-    if (state?.startPromise) {
+    if (!state) {
+      return Promise.resolve({ ok: false, error: 'Unsupported engine name.' });
+    }
+    if (state.startPromise) {
       return state.startPromise;
     }
 
@@ -213,18 +227,20 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
       const engineRoot = getEngineRootDir();
       const targetDir = getEngineInstallDir(canonical);
       const downloadDir = getEngineDownloadDir(canonical);
-      const zipPath = path.join(downloadDir, `${canonical}.zip`);
+      const downloadFilePath = path.join(downloadDir, `${canonical}.${meta.assetKind === 'exe' ? 'exe' : 'zip'}`);
       const extractDir = path.join(downloadDir, 'extract');
 
       try {
         console.log('[EngineInstaller] userData', userDataDir);
         console.log('[EngineInstaller] engineRoot', engineRoot);
         console.log('[EngineInstaller] engine install dir', targetDir);
-        console.log('[EngineInstaller] download target', zipPath);
+        console.log('[EngineInstaller] download target', downloadFilePath);
         console.log('[EngineInstaller] extract target', extractDir);
         await ensureDir(engineRoot);
         await ensureDir(downloadDir);
-        await ensureDir(extractDir);
+        if (meta.assetKind !== 'exe') {
+          await ensureDir(extractDir);
+        }
 
         setStage(canonical, INSTALL_STAGES.LOOKING_RELEASE, 'latest release araniyor');
         const releaseUrl = `https://api.github.com/repos/${meta.repo}/releases/latest`;
@@ -242,9 +258,9 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
         }
 
         const release = releaseResponse?.data || {};
-        const asset = pickWindowsZipAsset(release.assets || []);
+        const asset = pickWindowsAsset(meta, release.assets || []);
         if (!asset?.browser_download_url) {
-          throw new Error('Windows x64 ZIP asset bulunamadi.');
+          throw new Error(`Windows x64 ${meta.assetKind === 'exe' ? 'EXE' : 'ZIP'} asset bulunamadi.`);
         }
 
         setStage(canonical, INSTALL_STAGES.ASSET_SELECTED, `asset secildi: ${String(asset.name || '')}`);
@@ -261,40 +277,57 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
             },
           });
         } catch (error) {
-          throw new Error(`ZIP indirilemedi: ${error?.message || 'unknown error'}`);
+          throw new Error(`Asset indirilemedi: ${error?.message || 'unknown error'}`);
         }
-        await pipeline(downloadResponse.data, fs.createWriteStream(zipPath));
-
-        setStage(canonical, INSTALL_STAGES.EXTRACTING, 'extract ediliyor');
-        try {
-          await fsp.rm(extractDir, { recursive: true, force: true });
-          await ensureDir(extractDir);
-          await extract(zipPath, { dir: extractDir });
-        } catch (error) {
-          throw new Error(`ZIP cikarilamadi: ${error?.message || 'unknown error'}`);
-        }
-
-        setStage(canonical, INSTALL_STAGES.VALIDATING_EXE, 'exe dogrulaniyor');
-        const extractedExe = await recursiveFindFile(extractDir, meta.exeName);
-        if (!extractedExe) {
-          throw new Error(`Indirme tamamlandi ama ${meta.exeName} bulunamadi.`);
-        }
-        const sourceEngineDir = path.dirname(extractedExe);
+        await pipeline(downloadResponse.data, fs.createWriteStream(downloadFilePath));
+        await yieldToEventLoop();
 
         if (typeof stopEngineByName === 'function') {
           try {
             await Promise.resolve(stopEngineByName(canonical));
           } catch {}
         }
+        await yieldToEventLoop();
 
-        setStage(canonical, INSTALL_STAGES.CLEANING_OLD, 'eski klasor temizleniyor');
-        await fsp.rm(targetDir, { recursive: true, force: true });
+        let sourceEngineDir = '';
+        if (meta.assetKind === 'exe') {
+          await ensureDir(targetDir);
+          setStage(canonical, INSTALL_STAGES.CLEANING_OLD, 'eski klasor temizleniyor');
+          await fsp.rm(targetDir, { recursive: true, force: true });
+          await ensureDir(targetDir);
+          setStage(canonical, INSTALL_STAGES.INSTALLING, 'engine dizinine kuruluyor');
+          const finalExePath = path.join(targetDir, meta.exeName);
+          await fsp.copyFile(downloadFilePath, finalExePath);
+          sourceEngineDir = targetDir;
+        } else {
+          setStage(canonical, INSTALL_STAGES.EXTRACTING, 'extract ediliyor');
+          try {
+            await fsp.rm(extractDir, { recursive: true, force: true });
+            await ensureDir(extractDir);
+            await extract(downloadFilePath, { dir: extractDir });
+          } catch (error) {
+            throw new Error(`ZIP cikarilamadi: ${error?.message || 'unknown error'}`);
+          }
 
-        setStage(canonical, INSTALL_STAGES.INSTALLING, 'engine dizinine kuruluyor');
-        try {
-          await fsp.rename(sourceEngineDir, targetDir);
-        } catch (error) {
-          await fsp.cp(sourceEngineDir, targetDir, { recursive: true, force: true });
+          setStage(canonical, INSTALL_STAGES.VALIDATING_EXE, 'exe dogrulaniyor');
+          const extractedExe = await recursiveFindFile(extractDir, meta.exeName);
+          if (!extractedExe) {
+            throw new Error(`Indirme tamamlandi ama ${meta.exeName} bulunamadi.`);
+          }
+          sourceEngineDir = path.dirname(extractedExe);
+        }
+        await yieldToEventLoop();
+
+        if (meta.assetKind !== 'exe') {
+          setStage(canonical, INSTALL_STAGES.CLEANING_OLD, 'eski klasor temizleniyor');
+          await fsp.rm(targetDir, { recursive: true, force: true });
+
+          setStage(canonical, INSTALL_STAGES.INSTALLING, 'engine dizinine kuruluyor');
+          try {
+            await fsp.rename(sourceEngineDir, targetDir);
+          } catch (error) {
+            await fsp.cp(sourceEngineDir, targetDir, { recursive: true, force: true });
+          }
         }
 
         setStage(canonical, INSTALL_STAGES.VALIDATING_EXE, 'exe dogrulaniyor');
@@ -324,7 +357,7 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
       } finally {
         try {
           await fsp.rm(extractDir, { recursive: true, force: true });
-          await fsp.rm(zipPath, { force: true });
+          await fsp.rm(downloadFilePath, { force: true });
         } catch {}
       }
     };
@@ -341,8 +374,28 @@ const createEngineInstallerService = ({ stopEngineByName, getUserDataPath } = {}
     return state.startPromise;
   };
 
+  const installLatestEngine = async (appName) => {
+    const canonical = normalizeEngineName(appName);
+    if (!canonical || !ENGINE_META[canonical]) {
+      return { ok: false, error: 'Unsupported engine name.' };
+    }
+    return launchInstall(canonical);
+  };
+
+  const startInstallLatestEngine = async (appName) => {
+    const canonical = normalizeEngineName(appName);
+    if (!canonical || !ENGINE_META[canonical]) {
+      return { ok: false, error: 'Unsupported engine name.' };
+    }
+    const state = getState(canonical);
+    const alreadyRunning = Boolean(state?.startPromise);
+    launchInstall(canonical);
+    return { ok: true, appName: canonical, started: !alreadyRunning };
+  };
+
   return {
     installLatestEngine,
+    startInstallLatestEngine,
     getEngineStatus,
     findEngineExe,
     normalizeEngineName,

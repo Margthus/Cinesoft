@@ -102,6 +102,7 @@ const SettingsView = ({ settings, setSettings }) => {
     Prowlarr: { stage: 'idle', message: '', error: '', busy: false },
     Radarr: { stage: 'idle', message: '', error: '', busy: false },
     Sonarr: { stage: 'idle', message: '', error: '', busy: false },
+    TorrServer: { stage: 'idle', message: '', error: '', busy: false },
   });
   const [installConfirmDialog, setInstallConfirmDialog] = useState(null);
   const [radarrProwlarrSyncStatus, setRadarrProwlarrSyncStatus] = useState({
@@ -532,6 +533,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const getEngineApi = () => window.cinesoft?.engine || {
     installLatest: (appName) => window.electronAPI?.engineInstallLatest?.(appName),
+    startInstallLatest: (appName) => window.electronAPI?.engineStartInstallLatest?.(appName),
     getStatus: (appName) => window.electronAPI?.engineGetStatus?.(appName),
     findExe: (appName) => window.electronAPI?.engineFindExe?.(appName),
   };
@@ -553,11 +555,19 @@ const SettingsView = ({ settings, setSettings }) => {
         folderName: 'Radarr',
       };
     }
-    return {
+    if (appName === 'Sonarr') {
+      return {
       repo: 'Sonarr/Sonarr',
       releaseUrl: 'https://github.com/Sonarr/Sonarr/releases/latest',
       exeName: 'Sonarr.exe',
       folderName: 'Sonarr',
+      };
+    }
+    return {
+      repo: 'YouROK/TorrServer',
+      releaseUrl: 'https://github.com/YouROK/TorrServer/releases/latest',
+      exeName: 'TorrServer-windows-amd64.exe',
+      folderName: 'TorrServer',
     };
   };
 
@@ -603,15 +613,36 @@ const SettingsView = ({ settings, setSettings }) => {
 
     const api = getEngineApi();
     setInstallStateFor(appName, { stage: 'downloading', message: '', error: '', busy: true });
+    const applyInstalledExecutable = (status = {}) => {
+      const exePath = String(status?.exePath || '').trim();
+      if (!exePath) return;
+      if (appName === 'Prowlarr') {
+        updateProwlarr({ executablePath: exePath });
+      } else if (appName === 'Radarr') {
+        updateRoot({ radarrExecutablePath: exePath });
+      } else if (appName === 'Sonarr') {
+        updateRoot({ sonarrExecutablePath: exePath });
+      } else if (appName === 'TorrServer') {
+        updateTorrServer({ exePath });
+      }
+    };
     const timer = setInterval(async () => {
       try {
         const status = await api.getStatus(appName);
-        if (status?.ok) applyInstallStatus(appName, status);
+        if (status?.ok) {
+          applyInstallStatus(appName, status);
+          if (status.stage === 'completed') {
+            applyInstalledExecutable(status);
+            clearInterval(timer);
+          } else if (status.stage === 'error') {
+            clearInterval(timer);
+          }
+        }
       } catch {}
     }, 600);
 
     try {
-      const result = await api.installLatest(appName);
+      const result = await (api.startInstallLatest?.(appName) || api.installLatest(appName));
       if (!result?.ok) {
         setInstallStateFor(appName, {
           stage: 'error',
@@ -619,22 +650,9 @@ const SettingsView = ({ settings, setSettings }) => {
           message: '',
           busy: false,
         });
+        clearInterval(timer);
         return;
       }
-
-      if (appName === 'Prowlarr') {
-        updateProwlarr({ executablePath: result.exePath || '' });
-      } else if (appName === 'Radarr') {
-        updateRoot({ radarrExecutablePath: result.exePath || '' });
-      } else if (appName === 'Sonarr') {
-        updateRoot({ sonarrExecutablePath: result.exePath || '' });
-      }
-      setInstallStateFor(appName, {
-        stage: 'completed',
-        message: String(result?.assetName || ''),
-        error: '',
-        busy: false,
-      });
     } catch (error) {
       setInstallStateFor(appName, {
         stage: 'error',
@@ -642,7 +660,6 @@ const SettingsView = ({ settings, setSettings }) => {
         error: String(error?.message || 'Installation failed'),
         busy: false,
       });
-    } finally {
       clearInterval(timer);
     }
   };
@@ -1237,6 +1254,7 @@ const SettingsView = ({ settings, setSettings }) => {
       label: t.navGeneral,
       items: [
         { id: 'general', label: t.generalSettings, icon: Globe },
+        { id: 'player', label: t.playerSettings, icon: Play },
       ],
     },
     {
@@ -1423,6 +1441,41 @@ const SettingsView = ({ settings, setSettings }) => {
     </section>
   );
 
+  const renderPlayerSection = () => (
+    <section className="settings-section-shell">
+      <header className="settings-panel-header">
+        <div className="settings-panel-title">
+          <Play size={18} />
+          <div>
+            <h2>{t.playerSettings}</h2>
+            <p>{t.playerSettingsHint}</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="settings-row-list">
+        <div className="settings-row-card">
+          <div className="settings-row-copy">
+            <strong>{t.libraryPlayerMode}</strong>
+            <span>{t.libraryPlayerModeHint}</span>
+          </div>
+          <div className="settings-row-control">
+            <div className="settings-icon-select-wrap">
+              <CustomSelect
+                value={formData.libraryPlayerMode || 'vlc'}
+                onSelect={(value) => updateRoot({ libraryPlayerMode: value })}
+                options={[
+                  { value: 'vlc', label: t.libraryPlayerModeVlc },
+                  { value: 'system', label: t.libraryPlayerModeSystem },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
   const renderTorrServerSection = () => {
     const torrCfg = getTorrServerSettings();
     return (
@@ -1434,6 +1487,19 @@ const SettingsView = ({ settings, setSettings }) => {
               <h2>{t.torrserver}</h2>
               <p>{t.torrserverHint}</p>
             </div>
+          </div>
+          <div className="settings-card-actions settings-card-actions--wrap">
+            <button
+              type="button"
+              className="settings-collapse-btn"
+              onClick={() => handleInstallEngine('TorrServer')}
+              disabled={engineInstallState.TorrServer?.busy === true}
+            >
+              <span>{renderEngineInstallerButtonLabel(engineInstallState.TorrServer, t)}</span>
+            </button>
+            <button type="button" className="settings-collapse-btn" onClick={handleOpenTorrServerWeb}>
+              <span>{t.openWebUI}</span>
+            </button>
           </div>
         </header>
 
@@ -1454,8 +1520,9 @@ const SettingsView = ({ settings, setSettings }) => {
           </div>
         </div>
 
-        <div className="settings-form-card">
-          <label className="stacked-field">
+        <div className="settings-form-card torrserver-form-card">
+          <div className="torrserver-form-grid">
+          <label className="stacked-field torrserver-field-span-full">
             <span>{t.torrserverExePath}</span>
             <div className="input-action-row">
               <input
@@ -1469,7 +1536,7 @@ const SettingsView = ({ settings, setSettings }) => {
               </button>
             </div>
           </label>
-          <label className="stacked-field">
+          <label className="stacked-field torrserver-field-port">
             <span>{t.torrserverPort}</span>
             <input
               className="settings-input"
@@ -1486,25 +1553,28 @@ const SettingsView = ({ settings, setSettings }) => {
             <span>{t.torrserverCacheDir}</span>
             <input className="settings-input" value={torrCfg.cacheDir || ''} onChange={(event) => updateTorrServer({ cacheDir: event.target.value })} />
           </label>
-          <div className="settings-row-card">
+          </div>
+          <div className="settings-row-list torrserver-toggle-list">
+          <div className="settings-row-card torrserver-toggle-card">
             <div className="settings-row-copy">
               <strong>{t.torrserverAutoStart}</strong>
             </div>
             <Toggle checked={torrCfg.autoStartOnStream !== false} onChange={(checked) => updateTorrServer({ autoStartOnStream: checked })} />
           </div>
-          <div className="settings-row-card">
+          <div className="settings-row-card torrserver-toggle-card">
             <div className="settings-row-copy">
               <strong>{t.torrserverStopOnPlaybackEnd}</strong>
             </div>
             <Toggle checked={torrCfg.stopWhenPlaybackEnds !== false} onChange={(checked) => updateTorrServer({ stopWhenPlaybackEnds: checked })} />
           </div>
-          <div className="action-row">
+          </div>
+          <div className="action-row torrserver-action-row">
             <button className="action-btn subtle" onClick={handleTestTorrServer} disabled={torrServerStatus === 'testing'}>{t.test}</button>
             <button className="action-btn start" onClick={handleStartTorrServer} disabled={torrServerStatus === 'starting'}>{t.start}</button>
             <button className="action-btn stop" onClick={handleStopTorrServer} disabled={torrServerStatus === 'stopping'}>{t.stop}</button>
-            <button className="action-btn subtle" onClick={handleOpenTorrServerWeb}>{t.openWebUI}</button>
             <button className="action-btn save" onClick={handleSaveTorrServer}>{t.save}</button>
           </div>
+          <div className="status-line">{renderEngineInstallerStatus(engineInstallState.TorrServer, t)}</div>
           {torrServerStatus ? <div className="status-line">{torrServerStatus.startsWith('error:') ? torrServerStatus.slice(6) : torrServerStatus}</div> : null}
         </div>
       </section>
@@ -2971,6 +3041,7 @@ const SettingsView = ({ settings, setSettings }) => {
 
   const renderActiveSection = () => {
     if (activeSection === 'general') return renderGeneralSection();
+    if (activeSection === 'player') return renderPlayerSection();
     if (activeSection === 'guide') return renderGuideSection();
     if (activeSection === 'tmdb') return renderTmdbSection();
     if (activeSection === 'torrserver') return renderTorrServerSection();
@@ -3344,6 +3415,12 @@ const getCopy = (language) => ({
     guideEngineChoice3: 'Ikisini ayni anda kullanabilirsin: Embedded (CineSoft) + qBittorrent (Radarr).',
     generalSettings: 'Genel Ayarlar',
     generalSettingsHint: 'Uygulamanin temel ayarlarini yapilandirin.',
+    playerSettings: 'Player',
+    playerSettingsHint: 'Library icindeki hazir videolarin hangi oynatici ile acilacagini sec.',
+    libraryPlayerMode: 'Library video oynaticisi',
+    libraryPlayerModeHint: 'Kutuphane icindeki indirilen videolari CineSoft player veya Windows varsayilan oynatici ile ac.',
+    libraryPlayerModeVlc: 'CineSoft VLC Player',
+    libraryPlayerModeSystem: 'Windows Varsayilan Oynatici',
     guide: 'Rehber',
     guideHint: 'CineSoft entegrasyonlari icin kurulum ve kullanim rehberi.',
     guideProwlarrTitle: 'Prowlarr Guide',
@@ -3431,8 +3508,8 @@ const getCopy = (language) => ({
     tmdbKeyLabel: 'API anahtari',
     tmdbKeyDesc: 'TMDB uzerinden veri cekmek icin kullanilir.',
     prowlarr: 'Prowlarr',
-    torrserver: 'TorrServer',
-    torrserverHint: 'Yalnizca stream engine kontrolu. Download manager degildir.',
+    torrserver: 'TorrServer (Streaming)',
+    torrserverHint: 'CineSoft icinde streaming kullanmak icin TorrServer kurulumunu, baglantisini ve calisma ayarlarini yonet.',
     torrserverEnabled: 'TorrServer stream engine',
     torrserverEnabledHint: 'Stream butonu icin TorrServer kullan.',
     playerBackend: 'Player backend',
@@ -3670,6 +3747,12 @@ const getCopy = (language) => ({
     guideEngineChoice3: 'You can use both together: Embedded (CineSoft) + qBittorrent (Radarr).',
     generalSettings: 'General Settings',
     generalSettingsHint: 'Configure the app basics.',
+    playerSettings: 'Player',
+    playerSettingsHint: 'Choose which player opens downloaded videos from Library.',
+    libraryPlayerMode: 'Library video player',
+    libraryPlayerModeHint: 'Open downloaded library videos with the built-in CineSoft VLC player or the default Windows player.',
+    libraryPlayerModeVlc: 'CineSoft VLC Player',
+    libraryPlayerModeSystem: 'Windows Default Player',
     guide: 'Guide',
     guideHint: 'Setup and usage guide for CineSoft integrations.',
     guideProwlarrTitle: 'Prowlarr Guide',
@@ -3757,8 +3840,8 @@ const getCopy = (language) => ({
     tmdbKeyLabel: 'API key',
     tmdbKeyDesc: 'Used for fetching TMDB data.',
     prowlarr: 'Prowlarr',
-    torrserver: 'TorrServer',
-    torrserverHint: 'Streaming engine control only. Not a download manager.',
+    torrserver: 'TorrServer (Streaming)',
+    torrserverHint: 'Configure TorrServer installation, connection, and runtime settings required for streaming in CineSoft.',
     torrserverEnabled: 'TorrServer stream engine',
     torrserverEnabledHint: 'Use TorrServer for the Stream button.',
     playerBackend: 'Player backend',

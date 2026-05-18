@@ -19,7 +19,7 @@ const {
   testTorrServerConnection,
   startTorrServerStream,
 } = require('./src/main/services/torrServerService');
-const { playWithVlc, stopVlcPlayback, setVlcExitHandler } = require('./src/main/services/vlcPlayerService');
+const { playWithVlc, stopVlcPlayback, sendVlcCommand, setVlcExitHandler, setVlcStateHandler } = require('./src/main/services/vlcPlayerService');
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = require('node:sqlite'));
@@ -1398,7 +1398,40 @@ const managedProcesses = new Map();
 const startingEngines = new Set();
 let activePlaybackKind = '';
 let closeManagedTorrServerWhenPlayerExits = false;
+const readNativeWindowHandle = (buffer) => {
+  if (!Buffer.isBuffer(buffer)) return 0;
+  if (buffer.length >= 8) {
+    try {
+      return Number(buffer.readBigUInt64LE(0));
+    } catch {}
+  }
+  if (buffer.length >= 4) {
+    try {
+      return buffer.readUInt32LE(0);
+    } catch {}
+  }
+  return 0;
+};
+const notifyNativePlayerStopped = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('native-player:stopped');
+  } catch {}
+};
+const notifyNativePlayerStarted = (payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('native-player:started', payload);
+  } catch {}
+};
+const notifyNativePlayerState = (payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('native-player:state', payload);
+  } catch {}
+};
 setVlcExitHandler(async () => {
+  notifyNativePlayerStopped();
   if (activePlaybackKind !== 'torrserver-stream') return;
   activePlaybackKind = '';
   if (!closeManagedTorrServerWhenPlayerExits) return;
@@ -1406,6 +1439,9 @@ setVlcExitHandler(async () => {
   try {
     await stopTorrServer(getTorrServerConfig(), { onlyIfManaged: true });
   } catch {}
+});
+setVlcStateHandler((payload = {}) => {
+  notifyNativePlayerState(payload);
 });
 const getStoredAuthUser = () => store.get('authUser') || null;
 const getStoredAuthSession = () => store.get('authSession') || { authenticated: false, rememberMe: false, username: '' };
@@ -1416,6 +1452,9 @@ if (!store.has('language')) {
 }
 if (!store.has('defaultPage')) {
   store.set('defaultPage', 'home');
+}
+if (!store.has('libraryPlayerMode')) {
+  store.set('libraryPlayerMode', 'vlc');
 }
 if (!store.has('notificationsEnabled')) {
   store.set('notificationsEnabled', true);
@@ -2704,6 +2743,7 @@ const engineInstaller = createEngineInstallerService({
     if (key === 'prowlarr') return stopManagedProwlarr();
     if (key === 'radarr') return stopManagedRadarr();
     if (key === 'sonarr') return stopManagedSonarr();
+    if (key === 'torrserver') return stopTorrServer(getTorrServerConfig());
     return false;
   },
 });
@@ -2767,6 +2807,7 @@ ipcMain.handle('get-settings', () => {
     apiKey: store.get('apiKey'),
     language: store.get('language'),
     defaultPage: store.get('defaultPage') || 'home',
+    libraryPlayerMode: String(store.get('libraryPlayerMode') || 'vlc'),
     notificationsEnabled: store.get('notificationsEnabled') !== false,
     minimizeToTrayOnClose: store.get('minimizeToTrayOnClose') !== false,
     closeToTray: store.get('closeToTray') !== false,
@@ -2943,6 +2984,7 @@ ipcMain.handle('save-settings', (event, settings) => {
   store.set('sonarrDefaultRootFolder', String(settings.sonarrDefaultRootFolder || '').trim());
   store.set('sonarrDefaultQualityProfileId', settings.sonarrDefaultQualityProfileId ?? '');
   store.set('sonarrSearchAfterAdd', settings.sonarrSearchAfterAdd !== false);
+  store.set('libraryPlayerMode', String(settings.libraryPlayerMode || 'vlc').trim().toLowerCase() === 'system' ? 'system' : 'vlc');
   if (settings?.torrserver && typeof settings.torrserver === 'object') {
     const nextTorrServer = normalizeTorrServerSettings(settings.torrserver, app.getPath('userData'));
     store.set('torrserver', nextTorrServer);
@@ -3363,9 +3405,18 @@ ipcMain.handle('engine:install-latest', async (event, appName) => {
       store.set('radarrExecutablePath', String(result.exePath || ''));
     } else if (normalized === 'Sonarr') {
       store.set('sonarrExecutablePath', String(result.exePath || ''));
+    } else if (normalized === 'TorrServer') {
+      store.set('torrserver', normalizeTorrServerSettings({
+        ...getTorrServerConfig(),
+        exePath: String(result.exePath || ''),
+      }, app.getPath('userData')));
     }
   }
   return result;
+});
+
+ipcMain.handle('engine:start-install-latest', async (event, appName) => {
+  return engineInstaller.startInstallLatestEngine(appName);
 });
 
 ipcMain.handle('engine:get-status', async (event, appName) => {
@@ -3467,16 +3518,41 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
   const torrServerSettings = getTorrServerConfig();
   const result = await startTorrServerStream(payload || {}, torrServerSettings);
   const playerTitle = payload?.title || payload?.source?.title || payload?.result?.title || 'CineSoft Stream';
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('Main window is not available for native player');
+  }
+  const parentHwnd = readNativeWindowHandle(mainWindow.getNativeWindowHandle());
+  if (DEBUG_TORRSERVER_STREAM) {
+    console.log('[VlcPlayerWindow:Handle]', { parentHwnd, title: playerTitle, window: 'main' });
+  }
+  notifyNativePlayerStarted({
+    title: playerTitle,
+    streamUrl: result.streamUrl,
+    torrentStatus: result.torrentStatus || null,
+  });
   if (DEBUG_TORRSERVER_STREAM) {
     console.log('[TorrServerPlayer:LaunchVlc]', {
       url: String(result?.streamUrl || '').replace(/(apikey|api_key|token|key|pass|password)=([^&]+)/gi, '$1=***'),
       title: playerTitle,
+      parentHwnd,
     });
   }
-  const player = await playWithVlc({
-    url: result.streamUrl,
-    title: playerTitle,
-  });
+  let player;
+  try {
+    player = await playWithVlc({
+      url: result.streamUrl,
+      title: playerTitle,
+      embedded: true,
+      parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
+      insetLeft: 30,
+      insetRight: 30,
+      insetTop: 70,
+      insetBottom: 122,
+    });
+  } catch (error) {
+    notifyNativePlayerStopped();
+    throw error;
+  }
   activePlaybackKind = 'torrserver-stream';
   closeManagedTorrServerWhenPlayerExits = torrServerSettings.stopWhenPlaybackEnds === true && result.startedForThisSession === true;
   return {
@@ -3487,6 +3563,7 @@ ipcMain.handle('torrserver:start-stream', async (event, payload = {}) => {
 
 ipcMain.handle('player:stop', async () => {
   const stopped = stopVlcPlayback();
+  notifyNativePlayerStopped();
   if (activePlaybackKind === 'torrserver-stream') {
     activePlaybackKind = '';
     if (closeManagedTorrServerWhenPlayerExits) {
@@ -3495,6 +3572,21 @@ ipcMain.handle('player:stop', async () => {
     }
   }
   return stopped;
+});
+
+ipcMain.handle('player:command', async (_event, payload = {}) => sendVlcCommand(payload));
+
+ipcMain.handle('player:toggle-fullscreen', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { ok: false, fullscreen: false };
+  }
+  const nextFullscreen = !mainWindow.isFullScreen();
+  mainWindow.setFullScreen(nextFullscreen);
+  sendVlcCommand({
+    command: 'set-insets',
+    value: nextFullscreen ? '0 0 0 98' : '30 70 30 122',
+  });
+  return { ok: true, fullscreen: nextFullscreen };
 });
 
 ipcMain.handle('open-prowlarr-download-page', async () => {
@@ -4853,12 +4945,46 @@ ipcMain.handle('open-library-video', async (event, payload = {}) => {
     if (!filePath || !fs.existsSync(filePath)) {
       return { ok: false, error: 'File not found' };
     }
-    const openPathError = await shell.openPath(filePath);
-    if (openPathError) {
-      const fileUrl = pathToFileURL(filePath).href;
-      await shell.openExternal(fileUrl);
+
+    const playerMode = String(store.get('libraryPlayerMode') || 'vlc').trim().toLowerCase();
+    if (playerMode === 'system') {
+      const openPathError = await shell.openPath(filePath);
+      if (openPathError) {
+        const fileUrl = pathToFileURL(filePath).href;
+        await shell.openExternal(fileUrl);
+      }
+      return { ok: true, player: 'system' };
     }
-    return { ok: true };
+
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, error: 'Main window is not available for native player' };
+    }
+    const fileUrl = pathToFileURL(filePath).href;
+    const title = path.basename(filePath);
+    const parentHwnd = readNativeWindowHandle(mainWindow.getNativeWindowHandle());
+    notifyNativePlayerStarted({
+      title,
+      fullscreen: false,
+      torrentStatus: null,
+    });
+    try {
+      const player = await playWithVlc({
+        url: fileUrl,
+        title,
+        embedded: true,
+        parentHwnd: parentHwnd > 0 ? parentHwnd : undefined,
+        insetLeft: 30,
+        insetRight: 30,
+        insetTop: 70,
+        insetBottom: 122,
+      });
+      activePlaybackKind = 'library-file';
+      closeManagedTorrServerWhenPlayerExits = false;
+      return { ok: true, player: 'vlc', ...player };
+    } catch (error) {
+      notifyNativePlayerStopped();
+      return { ok: false, error: error.message };
+    }
   } catch (err) {
     return { ok: false, error: err.message };
   }

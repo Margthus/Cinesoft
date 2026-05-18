@@ -370,6 +370,50 @@
   padding: 1rem;
 }
 
+.torrserver-form-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.torrserver-form-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(280px, 1fr);
+  gap: 0.95rem 1rem;
+  align-items: end;
+}
+
+.torrserver-field-span-full {
+  grid-column: 1 / -1;
+}
+
+.torrserver-field-port {
+  max-width: 180px;
+}
+
+.torrserver-toggle-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.torrserver-toggle-card {
+  min-height: 78px;
+}
+
+.action-row.torrserver-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.action-row.torrserver-action-row .action-btn {
+  min-width: 0;
+}
+
+.action-row.torrserver-action-row .action-btn.save {
+  margin-left: auto;
+}
+
 .settings-site-block {
   margin-top: 0.9rem;
 }
@@ -1116,6 +1160,15 @@ select.settings-input:focus {
   .automation-client-grid {
     grid-template-columns: 1fr;
   }
+
+  .torrserver-form-grid,
+  .torrserver-toggle-list {
+    grid-template-columns: 1fr;
+  }
+
+  .torrserver-field-port {
+    max-width: none;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1155,6 +1208,10 @@ select.settings-input:focus {
   .action-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .action-row.torrserver-action-row .action-btn.save {
+    margin-left: 0;
   }
 
   .input-action-row {

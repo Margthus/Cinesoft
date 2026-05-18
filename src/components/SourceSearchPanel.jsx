@@ -498,6 +498,10 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       provider: source?.provider || '',
       magnet: source?.magnet || source?.magnetUrl || source?.magnetLink || (String(source?.link || '').startsWith('magnet:') ? source?.link : ''),
       torrentUrl: source?.torrentUrl || source?.downloadUrl || source?.url || '',
+      infoHash: source?.infoHash || source?.hash || '',
+      seeders: Number(source?.seeders || 0) || 0,
+      peers: Number(source?.peers || 0) || 0,
+      quality: source?.quality || '',
       rawSource: source,
     };
     const streamPayload = {
@@ -510,6 +514,10 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
       source: streamSource,
       magnet: streamSource.magnet,
       torrentUrl: streamSource.torrentUrl,
+      infoHash: streamSource.infoHash,
+      seeders: streamSource.seeders,
+      peers: streamSource.peers,
+      quality: streamSource.quality,
       rawSource: source,
       item,
       selectedSource: source,
@@ -568,6 +576,20 @@ const SourceSearchPanel = ({ item, type, settings, initialSeason, initialEpisode
         settings.language === 'en' ? 'Stream started in VLC Player.' : 'VLC Player ile stream baslatildi.',
         'success',
       );
+      window.dispatchEvent(new CustomEvent('cinesoft:native-player-started', {
+        detail: {
+          title: streamPayload.title,
+          streamUrl: result?.streamUrl || '',
+          torrentStatus: result?.torrentStatus || {
+            provider: streamPayload.provider,
+            infoHash: streamPayload.infoHash,
+            seeders: streamPayload.seeders,
+            peers: streamPayload.peers,
+            progress: null,
+            quality: streamPayload.quality,
+          },
+        },
+      }));
     } catch (err) {
       const errorMessage = String(err?.message || '');
       if (errorMessage.includes('TorrServer exe path is not configured')) {

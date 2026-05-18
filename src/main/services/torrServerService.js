@@ -72,6 +72,22 @@ const normalizeTorrServerSettings = (settings = {}, userDataPath = '') => {
 
 const isMagnetLink = (value = '') => /^magnet:\?/i.test(String(value || '').trim());
 
+const extractInfoHashFromMagnet = (value = '') => {
+  const text = String(value || '');
+  const match = text.match(/btih:([a-f0-9]{32,40})/i);
+  return match ? match[1].toLowerCase() : '';
+};
+
+const extractInfoHashFromStreamUrl = (value = '') => {
+  try {
+    const parsed = new URL(String(value || ''));
+    const link = parsed.searchParams.get('link') || '';
+    return /^[a-f0-9]{32,40}$/i.test(link) ? link.toLowerCase() : '';
+  } catch {
+    return '';
+  }
+};
+
 const normalizeTorrServerSource = (payload = {}) => {
   const pick = (path, value) => ({ path, value: String(value || '').trim() });
   const allCandidates = [
@@ -560,6 +576,23 @@ const startTorrServerStream = async (payload = {}, settings = {}) => {
     streamUrl: maskSensitiveUrl(finalStreamUrl),
     baseUrl: maskSensitiveUrl(status.baseUrl),
   });
+  const infoHash = String(
+    payload?.infoHash
+    || payload?.source?.infoHash
+    || payload?.rawSource?.infoHash
+    || payload?.selectedSource?.infoHash
+    || extractInfoHashFromMagnet(magnetLink)
+    || extractInfoHashFromStreamUrl(finalStreamUrl)
+    || '',
+  ).trim().toLowerCase();
+  const torrentStatus = {
+    provider: normalizedSource.provider,
+    infoHash,
+    seeders: Number(payload?.seeders || payload?.source?.seeders || payload?.rawSource?.seeders || payload?.selectedSource?.seeders || 0) || 0,
+    peers: Number(payload?.peers || payload?.source?.peers || payload?.rawSource?.peers || payload?.selectedSource?.peers || 0) || 0,
+    progress: null,
+    quality: String(payload?.quality || payload?.source?.quality || payload?.rawSource?.quality || payload?.selectedSource?.quality || '').trim(),
+  };
   return {
     engine: 'torrserver',
     streamUrl: finalStreamUrl,
@@ -569,6 +602,7 @@ const startTorrServerStream = async (payload = {}, settings = {}) => {
     url: finalStreamUrl,
     sourceLink: previewText(maskSensitiveUrl(streamSourceLink), 160),
     baseUrl: status.baseUrl,
+    torrentStatus,
     startedForThisSession,
     startedByCineSoft,
     activePlaybackKind: 'torrserver-stream',

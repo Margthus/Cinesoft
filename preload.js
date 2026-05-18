@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopManagedEngines: () => ipcRenderer.invoke('engines:stop-managed'),
   getManagedSonarrStatus: () => ipcRenderer.invoke('get-managed-sonarr-status'),
   engineInstallLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+  engineStartInstallLatest: (appName) => ipcRenderer.invoke('engine:start-install-latest', appName),
   engineGetStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
   engineFindExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   sonarrTestConnection: (settings) => ipcRenderer.invoke('sonarr:testConnection', settings),
@@ -119,6 +120,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   torrserverDebugEnabled: DEBUG_TORRSERVER_STREAM,
   openTorrServerWeb: (settings) => ipcRenderer.invoke('torrserver:open-web', settings),
   stopNativePlayer: () => ipcRenderer.invoke('player:stop'),
+  controlNativePlayer: (payload) => ipcRenderer.invoke('player:command', payload),
+  toggleNativePlayerFullscreen: () => ipcRenderer.invoke('player:toggle-fullscreen'),
+  onNativePlayerStarted: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('native-player:started', handler);
+    return () => ipcRenderer.removeListener('native-player:started', handler);
+  },
+  onNativePlayerStopped: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = () => callback();
+    ipcRenderer.on('native-player:stopped', handler);
+    return () => ipcRenderer.removeListener('native-player:stopped', handler);
+  },
+  onNativePlayerState: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('native-player:state', handler);
+    return () => ipcRenderer.removeListener('native-player:state', handler);
+  },
   scanLibrary: () => ipcRenderer.invoke('library-scan'),
   openLibraryVideo: (payload) => ipcRenderer.invoke('open-library-video', payload),
   openLibraryFolder: (payload) => ipcRenderer.invoke('open-library-folder', payload),
@@ -140,6 +161,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 contextBridge.exposeInMainWorld('cinesoft', {
   engine: {
     installLatest: (appName) => ipcRenderer.invoke('engine:install-latest', appName),
+    startInstallLatest: (appName) => ipcRenderer.invoke('engine:start-install-latest', appName),
     getStatus: (appName) => ipcRenderer.invoke('engine:get-status', appName),
     findExe: (appName) => ipcRenderer.invoke('engine:find-exe', appName),
   },
